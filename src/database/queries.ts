@@ -1,0 +1,243 @@
+/**
+ * LyricFlow - Database CRUD Operations
+ */
+
+import { closeDatabase, getDatabase, initDatabase } from './db';
+import { Song, LyricLine } from '../types/song';
+
+const LOG_PREFIX = '[QUERIES]';
+
+const log = (msg: string, data?: any) => {
+  console.log(`${LOG_PREFIX} ${msg}`, data ?? '');
+};
+
+const isNativeDbNullPointer = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return /NativeDatabase\.(prepareAsync|execAsync)|NullPointerException/i.test(error.message);
+};
+
+const withDbRetry = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
+  try {
+    const db = await getDatabase();
+    return await operation(db);
+  } catch (error) {
+    log('Operation failed', error);
+    
+    if (!isNativeDbNullPointer(error)) {
+      throw error;
+    }
+
+    log('Detected native NPE, attempting recovery...');
+    await closeDatabase().catch(() => undefined);
+    await initDatabase();
+    const recoveredDb = await getDatabase();
+    log('Retrying operation after recovery...');
+    return operation(recoveredDb);
+  }
+};
+
+let dbOperationQueue: Promise<void> = Promise.resolve();
+
+const withSerializedDbAccess = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const run = dbOperationQueue.then(operation);
+  dbOperationQueue = run.then(() => undefined).catch(() => undefined);
+  return run;
+};
+
+const withDbSafe = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
+  return withSerializedDbAccess(() => withDbRetry(operation));
+};
+
+const esc = (val: string) => val.replace(/'/g, "''");
+
+export const getAllSongs = async (): Promise<Song[]> => {
+  return withDbSafe(async (db) => {
+    const songsRows = await db.getAllAsync<{
+      id: string;
+      title: string;
+      artist: string | null;
+      album: string | null;
+      gradient_id: string;
+      duration: number;
+      date_created: string;
+      date_modified: string;
+      play_count: number;
+      last_played: string | null;
+      scroll_speed: number;
+      cover_image_uri: string | null;
+      lyrics_align: string | null;
+      text_case: string | null;
+      audio_uri: string | null;
+    }>('SELECT * FROM songs ORDER BY date_modified DESC');
+    
+    return songsRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      artist: row.artist ?? undefined,
+      album: row.album ?? undefined,
+      gradientId: row.gradient_id,
+      duration: row.duration,
+      dateCreated: row.date_created,
+      dateModified: row.date_modified,
+      playCount: row.play_count,
+      lastPlayed: row.last_played ?? undefined,
+      lyrics: [],
+      scrollSpeed: row.scroll_speed ?? 50,
+      coverImageUri: row.cover_image_uri ?? undefined,
+      lyricsAlign: (row.lyrics_align as 'left' | 'center' | 'right') ?? 'left',
+      textCase: (row.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'normal',
+      audioUri: row.audio_uri ?? undefined,
+    }));
+  });
+};
+
+export const getSongById = async (id: string): Promise<Song | null> => {
+  return withDbSafe(async (db) => {
+    const songRow = await db.getFirstAsync<{
+      id: string;
+      title: string;
+      artist: string | null;
+      album: string | null;
+      gradient_id: string;
+      duration: number;
+      date_created: string;
+      date_modified: string;
+      play_count: number;
+      last_played: string | null;
+      scroll_speed: number;
+      cover_image_uri: string | null;
+      lyrics_align: string | null;
+      text_case: string | null;
+    }>('SELECT * FROM songs WHERE id = ?', [id]);
+    
+    if (!songRow) return null;
+    
+    const lyricsRows = await db.getAllAsync<{
+      id: number;
+      timestamp: number;
+      text: string;
+      line_order: number;
+    }>('SELECT * FROM lyrics WHERE song_id = ? ORDER BY line_order', [id]);
+    
+    return {
+      id: songRow.id,
+      title: songRow.title,
+      artist: songRow.artist ?? undefined,
+      album: songRow.album ?? undefined,
+      gradientId: songRow.gradient_id,
+      duration: songRow.duration,
+      dateCreated: songRow.date_created,
+      dateModified: songRow.date_modified,
+      playCount: songRow.play_count,
+      lastPlayed: songRow.last_played ?? undefined,
+      scrollSpeed: songRow.scroll_speed ?? 50,
+      coverImageUri: songRow.cover_image_uri ?? undefined,
+      lyricsAlign: (songRow.lyrics_align as 'left' | 'center' | 'right') ?? 'left',
+      textCase: (songRow.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'normal',
+      lyrics: lyricsRows.map((row) => ({
+        id: row.id,
+        timestamp: row.timestamp,
+        text: row.text,
+        lineOrder: row.line_order,
+      })),
+    };
+  });
+};
+
+export const insertSong = async (song: Song): Promise<void> => {
+  log(`insertSong() called for: ${song.title}`);
+  
+  await withDbSafe(async (db) => {
+    log(`Inserting song: ${song.id}`);
+    
+    const sql = `
+      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri)
+      VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'normal'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'});
+    `;
+    
+    await db.execAsync(sql);
+    
+    log(`Inserting ${song.lyrics.length} lyrics...`);
+    
+    for (const lyric of song.lyrics) {
+      await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
+    }
+    
+    log(`insertSong() completed`);
+  });
+};
+
+export const updateSong = async (song: Song): Promise<void> => {
+  log(`updateSong() called for: ${song.title}`);
+  
+  await withDbSafe(async (db) => {
+    log(`Updating song: ${song.id}`);
+    
+    await db.execAsync(`
+      UPDATE songs SET title = '${esc(song.title)}', artist = ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, album = ${song.album ? `'${esc(song.album)}'` : 'NULL'}, gradient_id = '${song.gradientId}', duration = ${song.duration}, date_modified = '${song.dateModified}', scroll_speed = ${song.scrollSpeed ?? 50}, lyrics_align = '${song.lyricsAlign ?? 'left'}', text_case = '${song.textCase ?? 'normal'}', cover_image_uri = ${song.coverImageUri ? `'${esc(song.coverImageUri)}'` : 'NULL'} WHERE id = '${song.id}';
+      DELETE FROM lyrics WHERE song_id = '${song.id}';
+    `);
+    
+    log(`Inserting ${song.lyrics.length} lyrics...`);
+    
+    for (const lyric of song.lyrics) {
+      await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
+    }
+    
+    log(`updateSong() completed`);
+  });
+};
+
+export const deleteSong = async (id: string): Promise<void> => {
+  await withDbSafe(async (db) => {
+    await db.execAsync(`DELETE FROM songs WHERE id = '${id}';`);
+  });
+};
+
+export const updatePlayStats = async (id: string): Promise<void> => {
+  await withDbSafe(async (db) => {
+    await db.execAsync(`UPDATE songs SET play_count = play_count + 1, last_played = '${new Date().toISOString()}' WHERE id = '${id}';`);
+  });
+};
+
+export const searchSongs = async (query: string): Promise<Song[]> => {
+  const db = await getDatabase();
+  const searchTerm = `%${query}%`;
+  
+  const songIds = await db.getAllAsync<{ id: string }>(
+    `SELECT DISTINCT s.id FROM songs s
+     LEFT JOIN lyrics l ON s.id = l.song_id
+     WHERE s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ? OR l.text LIKE ?
+     ORDER BY s.date_modified DESC`,
+    [searchTerm, searchTerm, searchTerm, searchTerm]
+  );
+  
+  const songs: Song[] = [];
+  for (const { id } of songIds) {
+    const song = await getSongById(id);
+    if (song) songs.push(song);
+  }
+  
+  return songs;
+};
+
+export const getAllSongsWithLyrics = async (): Promise<Song[]> => {
+  const db = await getDatabase();
+  
+  const songsRows = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM songs ORDER BY title'
+  );
+  
+  const songs: Song[] = [];
+  for (const { id } of songsRows) {
+    const song = await getSongById(id);
+    if (song) songs.push(song);
+  }
+  
+  return songs;
+};
+
+export const clearAllData = async (): Promise<void> => {
+  const db = await getDatabase();
+  await db.execAsync('DELETE FROM lyrics; DELETE FROM songs;');
+};
