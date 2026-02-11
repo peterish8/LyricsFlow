@@ -42,7 +42,7 @@ export const scanAudioFiles = async (): Promise<AudioFile[]> => {
       uri: asset.uri,
       duration: asset.duration,
       albumId: asset.albumId,
-      album: asset.album,
+      album: (asset as any).album, // Might not be in types but often present in runtime
       artist: undefined,
       albumArt: undefined,
     }));
@@ -69,5 +69,7 @@ export const convertAudioFileToSong = (audioFile: AudioFile): Song => {
     lyrics: [],
     audioUri: audioFile.uri,
     coverImageUri: audioFile.albumArt,
+    separationStatus: 'none',
+    separationProgress: 0,
   };
 };

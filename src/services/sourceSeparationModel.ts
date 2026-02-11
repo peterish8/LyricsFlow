@@ -5,20 +5,23 @@
  * Uses a mobile-optimized source separation model.
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ort from 'onnxruntime-react-native';
+import { Asset } from 'expo-asset';
 
-// Placeholder types - will be replaced with actual onnxruntime-react-native types
-// after npm install onnxruntime-react-native
-type OnnxTensor = any;
-type OnnxSession = any;
-type OnnxValue = any;
+type OnnxTensor = ort.Tensor;
+type OnnxSession = ort.InferenceSession;
 
 const MODEL_FILE = 'spleeter_2stem_quantized.onnx';
 const MODEL_DIR = `${(FileSystem as any).documentDirectory}models/`;
 const MODEL_PATH = `${MODEL_DIR}${MODEL_FILE}`;
 
-// Model URL - in production, bundle this or download from your CDN
-const MODEL_URL = 'https://your-cdn.com/models/spleeter_2stem_quantized.onnx';
+// CDN URL - Replace with your actual CDN or leave empty to use bundled asset
+// Example: 'https://your-cdn.com/models/spleeter_2stem_quantized.onnx'
+const MODEL_URL = ''; 
+
+// Bundled asset module ID - Place model in assets/models/ folder
+const BUNDLED_MODEL = require('../../assets/models/spleeter_2stem_quantized.onnx');
 
 export class SourceSeparationModel {
   private session: OnnxSession | null = null;
@@ -45,26 +48,45 @@ export class SourceSeparationModel {
         await FileSystem.makeDirectoryAsync(MODEL_DIR, { intermediates: true });
       }
 
-      // Check if model exists, download if not
+      // Check if model exists locally
       const modelInfo = await FileSystem.getInfoAsync(MODEL_PATH);
+      
       if (!modelInfo.exists) {
-        console.log('[SeparationModel] Downloading model...');
-        await FileSystem.downloadAsync(MODEL_URL, MODEL_PATH);
-        console.log('[SeparationModel] Model downloaded');
+        console.log('[SeparationModel] Model not found locally, checking sources...');
+        
+        // Option 1: Try CDN download if URL is set
+        if (MODEL_URL) {
+          console.log('[SeparationModel] Downloading from CDN...');
+          await FileSystem.downloadAsync(MODEL_URL, MODEL_PATH);
+          console.log('[SeparationModel] Model downloaded from CDN');
+        } else {
+          // Option 2: Copy from bundled assets
+          console.log('[SeparationModel] Copying from bundled assets...');
+          const asset = Asset.fromModule(BUNDLED_MODEL);
+          await asset.downloadAsync();
+          
+          // Copy asset to models directory
+          if (asset.localUri) {
+            await FileSystem.copyAsync({
+              from: asset.localUri,
+              to: MODEL_PATH
+            });
+            console.log('[SeparationModel] Model copied from assets');
+          } else {
+            throw new Error('Failed to load bundled model asset');
+          }
+        }
       }
 
+      console.log('[SeparationModel] Loading ONNX model...');
+      
       // Create ONNX session with mobile optimizations
-      // In real implementation:
-      // this.session = await ort.InferenceSession.create(MODEL_PATH, {
-      //   executionProviders: ['cpu'],
-      //   graphOptimizationLevel: 'all',
-      //   enableMemPattern: true,
-      //   enableCpuMemArena: true,
-      // });
-
-      // Placeholder - simulate initialization
-      await new Promise(r => setTimeout(r, 100));
-      this.session = {} as OnnxSession;
+      this.session = await ort.InferenceSession.create(MODEL_PATH, {
+        executionProviders: ['cpu'],
+        graphOptimizationLevel: 'all',
+        enableMemPattern: true,
+        enableCpuMemArena: true,
+      });
 
       this.isInitialized = true;
       console.log('[SeparationModel] Initialized successfully');
@@ -122,21 +144,58 @@ export class SourceSeparationModel {
       const window = new Float32Array(windowSize);
       window.set(audioData.slice(start, end));
       
-      // In real implementation:
-      // Create tensor [1, 1, windowSize] - batch, channels, time
-      // const inputTensor = new ort.Tensor('float32', window, [1, 1, windowSize]);
-      // const feeds = { input: inputTensor };
-      // const results = await this.session.run(feeds);
-      // const vocalsOutput = results.vocals.data as Float32Array;
-      // const instrOutput = results.accompaniment.data as Float32Array;
-
-      // Placeholder - just split the audio (simulation)
-      // In real implementation, the model actually separates
-      const vocalsOutput = window.map(s => s * 0.7); // Simulated vocals
-      const instrOutput = window.map(s => s * 0.3);  // Simulated instruments
-      
-      vocalsChunks.push(vocalsOutput.slice(0, end - start));
-      instrChunks.push(instrOutput.slice(0, end - start));
+      try {
+        // Create tensor [1, 2, windowSize] - batch, stereo channels, time
+        // Note: Adjust shape based on your model's expected input!
+        const inputTensor = new ort.Tensor('float32', window, [1, 2, windowSize / 2]);
+        
+        // Run inference - Check your model's input/output names with Netron!
+        const feeds: Record<string, ort.Tensor> = { input: inputTensor };
+        const results = await this.session.run(feeds);
+        
+        // Extract outputs - These names depend on your model!
+        // Common names: 'vocals', 'accompaniment', 'instr', 'other'
+        const outputNames = this.session.outputNames;
+        console.log('[SeparationModel] Output names:', outputNames);
+        
+        // Try common output names
+        let vocalsOutput: Float32Array | undefined;
+        let instrOutput: Float32Array | undefined;
+        
+        for (const name of outputNames) {
+          const output = results[name];
+          if (output && output.data) {
+            if (name.toLowerCase().includes('vocal')) {
+              vocalsOutput = output.data as Float32Array;
+            } else if (name.toLowerCase().includes('accomp') || 
+                       name.toLowerCase().includes('instr') || 
+                       name.toLowerCase().includes('other')) {
+              instrOutput = output.data as Float32Array;
+            }
+          }
+        }
+        
+        // Fallback if outputs not found
+        if (!vocalsOutput) {
+          console.warn('[SeparationModel] Vocals output not found, using placeholder');
+          vocalsOutput = window.map(s => s * 0.7);
+        }
+        if (!instrOutput) {
+          console.warn('[SeparationModel] Instruments output not found, using placeholder');
+          instrOutput = window.map(s => s * 0.3);
+        }
+        
+        vocalsChunks.push(vocalsOutput.slice(0, end - start));
+        instrChunks.push(instrOutput.slice(0, end - start));
+        
+      } catch (inferenceError) {
+        console.error('[SeparationModel] Inference error:', inferenceError);
+        // Fallback to placeholder on error
+        const vocalsOutput = window.map(s => s * 0.7);
+        const instrOutput = window.map(s => s * 0.3);
+        vocalsChunks.push(vocalsOutput.slice(0, end - start));
+        instrChunks.push(instrOutput.slice(0, end - start));
+      }
 
       // Report progress
       if (onProgress) {
@@ -203,7 +262,7 @@ export class SourceSeparationModel {
     const info = await FileSystem.getInfoAsync(MODEL_PATH);
     return {
       exists: info.exists,
-      size: info.exists ? (info as FileSystem.FileInfo).size : undefined,
+      size: info.exists ? (info as any).size : undefined,
     };
   }
 

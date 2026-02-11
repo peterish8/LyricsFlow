@@ -34,7 +34,8 @@ import { DEFAULT_GRADIENT_ID } from '../constants/gradients';
 import { parseTimestampedLyrics, calculateDuration, lyricsToRawText } from '../utils/timestampParser';
 import { generateId } from '../utils/formatters';
 import { formatTime } from '../utils/formatters';
-import { getAutoTimestampService, LyricLine, AutoTimestampResult } from '../services/autoTimestampServiceV2';
+import { getAutoTimestampService, AutoTimestampResult } from '../services/autoTimestampServiceV2';
+import { Song, LyricLine } from '../types/song';
 
 // Helper to parse duration string (mm:ss or seconds)
 const parseDurationInput = (input: string): number => {
@@ -291,7 +292,8 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
     console.log(`${mode} complete:`, result);
 
     if (result.overallConfidence >= 0.8) {
-      applyTimestamps(result.lyrics);
+      const mappedLyrics = result.lyrics.map((l, i) => ({ ...l, lineOrder: i }));
+      applyTimestamps(mappedLyrics);
 
       Alert.alert(
         '✨ Excellent!',
@@ -310,7 +312,7 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         (result.warnings.length > 2 ? `\n...and ${result.warnings.length - 2} more` : ''),
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Use Anyway', onPress: () => applyTimestamps(result.lyrics) }
+          { text: 'Use Anyway', onPress: () => applyTimestamps(result.lyrics.map((l, i) => ({ ...l, lineOrder: i }))) }
         ]
       );
 
@@ -400,7 +402,9 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         scrollSpeed,
         lyricsAlign,
         audioUri: audioUri ?? undefined,
-      };
+        separationStatus: 'none' as const,
+        separationProgress: 0,
+      } as Song;
 
       if (isEditing) {
         await updateSong(songData);

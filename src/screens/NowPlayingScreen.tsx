@@ -48,7 +48,7 @@ import { MagicModeModal } from '../components/MagicModeModal';
 import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { getAutoTimestampService, AutoTimestampResult } from '../services/autoTimestampServiceV2';
 import { lyricsToRawText } from '../utils/timestampParser';
-import { formatTime } from '../utils/formatters';
+import { formatTime, generateId } from '../utils/formatters';
 import { audioService } from '../services/audioService';
 import { useTasksStore } from '../store/tasksStore';
 import { TasksModal } from '../components/TasksModal';
@@ -276,10 +276,21 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     setShowMagicModal(false);
     
     // Register background task with REVERT data (snapshot of current state)
-    const taskId = addTask(latestSong.id, latestSong.title, 'magic', {
-      lyrics: latestSong.lyrics,
-      duration: latestSong.duration,
-      dateModified: latestSong.dateModified
+    const taskId = generateId();
+    addTask({
+      id: taskId,
+      songId: latestSong.id,
+      songTitle: latestSong.title,
+      type: 'magic',
+      status: 'queued',
+      progress: 0,
+      stage: 'Queued',
+      revertData: {
+        lyrics: latestSong.lyrics,
+        duration: latestSong.duration,
+        dateModified: latestSong.dateModified
+      },
+      dateCreated: new Date().toISOString()
     });
     setIsProcessing(true); // Still show local overlay for immediate feedback
     setProcessingStage('Starting Magic mode...');
@@ -354,10 +365,21 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!latestSong?.audioUri) return;
 
     // Register background task with REVERT data
-    const taskId = addTask(latestSong.id, latestSong.title, 'pure-magic', {
-      lyrics: latestSong.lyrics,
-      duration: latestSong.duration,
-      dateModified: latestSong.dateModified
+    const taskId = generateId();
+    addTask({
+      id: taskId,
+      songId: latestSong.id,
+      songTitle: latestSong.title,
+      type: 'pure-magic',
+      status: 'queued',
+      progress: 0,
+      stage: 'Queued',
+      revertData: {
+        lyrics: latestSong.lyrics,
+        duration: latestSong.duration,
+        dateModified: latestSong.dateModified
+      },
+      dateCreated: new Date().toISOString()
     });
     setIsProcessing(true);
     setProcessingStage('Starting Pure Magic mode...');
@@ -415,6 +437,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         lyrics: mappedLyrics,
         duration: Math.max(latestSong.duration, finalDuration),
         dateModified: new Date().toISOString(),
+        separationStatus: latestSong.separationStatus || 'none',
+        separationProgress: latestSong.separationProgress || 0,
       };
 
       await updateSong(updatedSong);
@@ -435,6 +459,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         ...latestSong,
         lyrics: mappedLyrics,
         dateModified: new Date().toISOString(),
+        separationStatus: latestSong.separationStatus || 'none',
+        separationProgress: latestSong.separationProgress || 0,
       };
       await updateSong(updatedSong);
       setCurrentSong(updatedSong);

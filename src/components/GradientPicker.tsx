@@ -37,7 +37,7 @@ export const GradientPicker: React.FC<GradientPickerProps> = memo(({
             >
               <View style={[styles.thumbnailContainer, isSelected && styles.selected]}>
                 <LinearGradient
-                  colors={gradient.colors}
+                  colors={gradient.colors as any}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.thumbnail}

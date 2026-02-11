@@ -12,19 +12,21 @@ import { useSongsStore } from '../store/songsStore';
 import { AuroraHeader } from '../components';
 import { Colors } from '../constants/colors';
 import { formatTime } from '../utils/formatters';
+import { RootStackParamList } from '../types/navigation';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 export const LikedSongsScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { songs } = useSongsStore();
   const likedSongs = songs.filter(s => s.isLiked);
 
   const handleSongPress = (songId: string) => {
-    navigation.navigate('NowPlaying' as never, { songId } as never);
+    navigation.navigate('NowPlaying', { songId });
   };
 
   return (
     <View style={styles.container}>
-      <AuroraHeader palette="liked" />
+      <AuroraHeader palette="library" />
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>

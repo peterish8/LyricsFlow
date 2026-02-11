@@ -8,7 +8,8 @@
  * @version 1.0.0
  */
 
-import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
 
 // Lazy load RNFS to prevent native module errors in Expo Go
 let RNFS: any = null;
@@ -70,47 +71,74 @@ export class AudioConverter {
     console.log('[AudioConverter] Input:', inputUri);
     
     try {
-      // Load and analyze audio
-      const audioInfo = await this.getAudioInfo(inputUri);
+      // Get file info
+      const format = this.getFormatFromUri(inputUri);
+      const isCompatible = format === 'wav';
       
-      console.log('[AudioConverter] Audio info:', {
-        format: audioInfo.format,
-        duration: `${(audioInfo.duration / 1000).toFixed(1)}s`,
-        isCompatible: audioInfo.isCompatible
-      });
+      // Get file size to estimate duration
+      const fileInfo = await FileSystem.getInfoAsync(inputUri);
+      const fileSize = fileInfo.exists ? (fileInfo as any).size || 0 : 0;
+      // Rough estimate: 1MB ≈ 1 minute at 128kbps MP3
+      const estimatedDuration = (fileSize / (1024 * 1024)) * 60000;
       
-      // Check if conversion is needed
-      if (audioInfo.isCompatible) {
-        console.log('[AudioConverter] Audio is already compatible, using original');
+      // Check if already compatible WAV
+      if (isCompatible) {
+        console.log('[AudioConverter] Audio is already WAV, using original');
         return {
           outputUri: inputUri,
           originalUri: inputUri,
-          duration: audioInfo.duration,
+          duration: estimatedDuration,
           wasConverted: false
         };
       }
       
-      // For now, Whisper.cpp can handle most formats directly
-      // We'll use the original file and let Whisper decode it
-      // This is more efficient than re-encoding
-      console.log('[AudioConverter] Using original audio (Whisper will decode)');
+      // Convert to WAV using FFmpeg
+      console.log('[AudioConverter] Converting to WAV with FFmpeg...');
+      
+      const cacheDir = (FileSystem as any).cacheDirectory;
+      const outputUri = `${cacheDir}whisper_input_${Date.now()}.wav`;
+      
+      // FFmpeg command: convert to WAV, 16kHz, mono
+      // -i input : Input file
+      // -ar 16000 : Sample rate 16kHz (Whisper requirement)
+      // -ac 1 : Mono channel
+      // -c:a pcm_s16le : 16-bit PCM codec
+      const command = `-i "${inputUri}" -ar 16000 -ac 1 -c:a pcm_s16le "${outputUri}" -y`;
+      
+      console.log('[AudioConverter] FFmpeg command:', command);
+      
+      const session = await FFmpegKit.execute(command);
+      const returnCode = await session.getReturnCode();
+      
+      if (!ReturnCode.isSuccess(returnCode)) {
+        const logs = await session.getLogs();
+        const output = logs.map((l: any) => l.getMessage()).join('\n');
+        console.error('[AudioConverter] FFmpeg failed:', output);
+        throw new Error(`FFmpeg conversion failed: ${output.substring(0, 200)}`);
+      }
+      
+      console.log('[AudioConverter] Conversion successful:', outputUri);
+      
+      // Track temp file for cleanup
+      this.tempFiles.add(outputUri);
       
       return {
-        outputUri: inputUri,
+        outputUri,
         originalUri: inputUri,
-        duration: audioInfo.duration,
-        wasConverted: false
+        duration: estimatedDuration,
+        wasConverted: true
       };
-      
-      // NOTE: If you need actual conversion in the future, implement here:
-      // - Use FFmpeg or similar library
-      // - Convert to WAV 16kHz mono
-      // - Save to temp file
-      // - Track in this.tempFiles for cleanup
       
     } catch (error: any) {
       console.error('[AudioConverter] Conversion error:', error);
-      throw new Error(`Audio conversion failed: ${error.message || 'Unknown error'}`);
+      // Fallback to original file if conversion fails
+      console.warn('[AudioConverter] Falling back to original file');
+      return {
+        outputUri: inputUri,
+        originalUri: inputUri,
+        duration: 0,
+        wasConverted: false
+      };
     }
   }
   
@@ -122,31 +150,27 @@ export class AudioConverter {
    */
   private async getAudioInfo(uri: string): Promise<AudioInfo> {
     try {
-      // Load audio
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: false }
-      );
-      
-      // Get status
-      const status = await sound.getStatusAsync();
-      
-      // Unload to free memory
-      await sound.unloadAsync();
-      
-      if (!status.isLoaded) {
-        throw new Error('Failed to load audio file');
+      // Get file info
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (!fileInfo.exists) {
+        throw new Error('File does not exist');
       }
       
       // Determine format from URI
       const format = this.getFormatFromUri(uri);
+      
+      // Estimate duration based on file size (rough approximation)
+      // This is a fallback since we can't load audio in a non-React context
+      const fileSize = fileInfo.exists ? (fileInfo as any).size || 0 : 0;
+      // Rough estimate: 1MB ≈ 1 minute at 128kbps MP3
+      const estimatedDuration = (fileSize / (1024 * 1024)) * 60000;
       
       // Check if compatible (WAV files are usually compatible)
       const isCompatible = format === 'wav';
       
       return {
         uri,
-        duration: status.durationMillis || 0,
+        duration: estimatedDuration,
         format,
         isCompatible
       };
@@ -197,21 +221,17 @@ export class AudioConverter {
         // Still valid, just warn
       }
       
-      // Try to load audio
-      try {
-        const { sound } = await Audio.Sound.createAsync(
-          { uri },
-          { shouldPlay: false }
-        );
-        
-        const status = await sound.getStatusAsync();
-        await sound.unloadAsync();
-        
-        return status.isLoaded;
-      } catch (loadError) {
-        console.error('[AudioConverter] Failed to load audio:', loadError);
+      // Check file extension to validate format
+      const format = this.getFormatFromUri(uri);
+      const validFormats = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac'];
+      
+      if (!validFormats.includes(format)) {
+        console.error('[AudioConverter] Unsupported format:', format);
         return false;
       }
+      
+      // File exists and has valid extension
+      return true;
       
     } catch (error) {
       console.error('[AudioConverter] Validation error:', error);

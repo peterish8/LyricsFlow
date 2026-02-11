@@ -114,7 +114,12 @@ The heavy-lifting logic helpers.
 - **`whisperSetup.ts`**: Manages the lifecycle of the AI model. Handles downloading, hash verification, and filesystem cleanup.
 - **`whisperService.ts`**: The bridge to the native C++ Whisper engine. Handles the actual transcription job.
 - **`autoTimestampServiceV2.ts`**: The "brain" of Magic Mode. It implements **Dynamic Time Warping (DTW)** to mathematically align the user's provided text with the AI's raw phonetic output, ensuring perfect sync even if the AI mishears a word.
-- **`audioConverter.ts`**: Handles the dirty work of converting various audio formats (MP3, M4A, AAC) into the strict WAV format required by the AI engine.
+- **`audioConverter.ts`**: Handles FFmpeg audio conversion: MP3/M4A → WAV 16kHz mono for Whisper, and raw PCM Float32 extraction for ONNX models.
+- **`sourceSeparationModel.ts`**: **NEW** - ONNX Runtime wrapper for vocal/instrumental separation. Handles quantized Spleeter/Demucs models (~40-60MB), audio chunking with overlap-add reconstruction, and Hann window smoothing.
+- **`SourceSeparationService.ts`**: **NEW** - Background task coordinator for AI Karaoke. Orchestrates: FFmpeg decode → ONNX inference → FFmpeg encode → Database storage.
+
+### `src/hooks/` (React Hooks)
+- **`useKaraokePlayer.ts`**: **NEW** - Dual-track synchronized playback hook. Manages two expo-audio players (vocals + instruments) with 50ms drift correction, real-time volume mixing, and balance slider integration.
 
 ---
 
@@ -125,6 +130,26 @@ The heavy-lifting logic helpers.
 - **`typography.ts`**: A scaled font system that allows users to adjust readability in the settings.
 
 ---
+
+## 🎤 AI Karaoke Workflow (Source Separation)
+1. **Access**: Tap the "Separate Vocals (AI)" button in Now Playing or via StemProcessButton component.
+2. **Preparation**: 
+   - FFmpeg decodes MP3/M4A to raw PCM Float32 audio data
+   - Audio is chunked into 2-second windows with 50% overlap
+3. **AI Processing**: 
+   - ONNX Runtime loads quantized Spleeter/Demucs model (~40-60MB)
+   - Model processes each chunk: input → vocals + instruments
+   - Overlap-add reconstruction with Hann window for smooth crossfading
+4. **Post-Processing**:
+   - FFmpeg encodes separated stems back to WAV format
+   - Vocal stem saved to: `{documentDirectory}/stems/{songId}_vocals.wav`
+   - Instrumental stem saved to: `{documentDirectory}/stems/{songId}_instruments.wav`
+5. **Database Update**: `vocal_stem_uri`, `instrumental_stem_uri`, `separation_status='completed'` stored in SQLite
+6. **Playback**: 
+   - `useKaraokePlayer` creates dual expo-audio players
+   - Vocal track = master clock, Instrumental = follows with drift correction
+   - `VocalBalanceSlider` controls mix: -1.0 (vocals) to +1.0 (karaoke)
+7. **Sync Engine**: 50ms tolerance, 1-second sync intervals, automatic drift correction
 
 ## 🔄 The Lifecycle of a Lyric
 

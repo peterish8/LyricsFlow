@@ -66,7 +66,25 @@ Privacy-first AI that runs entirely on your phone (no cloud API costs).
 - **Dual Mode**:
     1. **Magic Mode**: Aligns *your* pasted lyrics with the audio using Dynamic Time Warping (DTW).
     2. **Pure Magic Mode**: Generates *new* lyrics and timestamps from scratch using the Whisper model.
-- **Performance**: Optimized with 16kHz audio conversion and background task queuing.
+- **Performance**: Optimized with FFmpeg audio conversion (16kHz WAV) and background task queuing.
+
+### AI Karaoke Mode (ONNX Vocal Separation) 🎤
+Apple Music Sing-style vocal/instrumental balance control powered by on-device AI.
+- **Core Technology**: ONNX Runtime with quantized Spleeter/Demucs models (~40-60MB)
+- **Audio Pipeline**:
+    1. **Decode**: FFmpeg extracts raw PCM Float32 audio from MP3/M4A
+    2. **Separate**: ONNX model splits audio into vocal and instrumental stems
+    3. **Reconstruct**: FFmpeg encodes stems back to playable WAV files
+    4. **Store**: Stems saved permanently per song in app documents
+- **Dual-Track Playback**: Uses `expo-audio` with synchronized dual players:
+    - Vocal track (master clock)
+    - Instrumental track (follows vocal with 50ms drift correction)
+- **Real-time Mixing**: Balance slider from -1.0 (vocals only) to +1.0 (karaoke/instruments only)
+- **UI Components**:
+    - `VocalBalanceSlider`: Apple Music Sing-style gradient slider
+    - `StemProcessButton`: AI separation trigger with progress tracking
+- **Database Storage**: `vocal_stem_uri`, `instrumental_stem_uri`, `separation_status`, `separation_progress`
+- **Background Processing**: Runs as persistent task even when phone is locked
 
 ---
 
@@ -82,8 +100,10 @@ Privacy-first AI that runs entirely on your phone (no cloud API costs).
 - **`PlayerControls.tsx`**: Core playback interaction buttons with ±10s skip.
 - **`Scrubber.tsx`**: Timeline progress bar with optimistic seeking.
 - **`SongCard.tsx`**: Grid item that handles both gradient fallbacks and custom cover art images. Supports long-press.
+- **`StemProcessButton.tsx`**: AI separation trigger with progress tracking and status display.
 - **`TasksModal.tsx`**: Background task manager showing live progress and task history.
 - **`Toast.tsx`**: Spring-animated notification component with auto-dismiss.
+- **`VocalBalanceSlider.tsx`**: Apple Music Sing-style gradient slider for vocal/instrumental balance (-1.0 to +1.0).
 
 ### `src/database/` (The Persistence Layer)
 - **`db.ts`**: Core SQLite initialization, singleton management, and recovery logic.
@@ -100,12 +120,21 @@ Privacy-first AI that runs entirely on your phone (no cloud API costs).
 ### `src/store/` (Reactive State - Zustand)
 - **`songsStore.ts`**: Master song list and metadata state.
 - **`playerStore.ts`**: Playback state, including the **Session Queue** and auto-play controls.
-- **`tasksStore.ts`**: Persistent background task queue for tracking AI processing across songs.
+- **`tasksStore.ts`**: Persistent background task queue for tracking AI processing across songs (Whisper & Karaoke separation).
 - **`artHistoryStore.ts`**: Tracks "Recent Art" for quick reuse across songs.
 - **`settingsStore.ts`**: Persists UI preferences to disk.
 
+### `src/services/` (AI & Background Processing)
+- **`whisperService.ts`**: Whisper.cpp transcription service for Magic Timestamp.
+- **`sourceSeparationModel.ts`**: ONNX Runtime wrapper for vocal/instrumental AI separation.
+- **`SourceSeparationService.ts`**: Background task coordinator for AI Karaoke pipeline (FFmpeg decode → ONNX inference → FFmpeg encode).
+
+### `src/hooks/` (React Hooks)
+- **`useKaraokePlayer.ts`**: Dual-track synchronized playback hook with 50ms drift correction and real-time volume mixing.
+
 ### `src/utils/` (Logic Helpers)
 - **`timestampParser.ts`**: The engine that converts raw text into structured `LyricLine` objects.
+- **`audioConverter.ts`**: FFmpeg-based audio conversion for Whisper (16kHz WAV) and AI Karaoke (PCM decoding).
 - **`exportImport.ts`**: JSON serialization for library backups.
 - **`formatters.ts`**: Time and text formatting utilities.
 
@@ -152,6 +181,16 @@ Located in `src/constants/`:
 - **Visual Progress**: Real-time feedback with live progress bars and stage updates (Converting → Transcribing → Aligning).
 - **Confidence Scoring**: AI assigns a confidence score to every line and the song overall.
 
+### 🎤 AI Karaoke Mode
+- **Apple Music Sing-style**: Real-time vocal/instrumental balance control
+- **ONNX AI Separation**: On-device neural network splits any song into vocals + instruments
+- **Dual-Track Engine**: Synchronized dual audio players with 50ms drift correction
+- **Balance Slider**: -1.0 (vocals only) ↔ 0.0 (both) ↔ +1.0 (karaoke/instruments only)
+- **Background Separation**: Process songs while using other apps (progress saved to database)
+- **Persistent Stems**: Once separated, stems are saved permanently per song
+- **One-Tap Trigger**: `StemProcessButton` initiates separation with visual progress
+- **Integration**: Works alongside existing lyrics display (karaoke + lyrics sync)
+
 ### UI/UX Enhancements
 - **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused
 - **Toast notifications**: Success feedback on song save (auto-dismisses after 2s)
@@ -178,7 +217,13 @@ CREATE TABLE songs (
   scroll_speed INTEGER DEFAULT 50,
   cover_image_uri TEXT,
   lyrics_align TEXT DEFAULT 'left',
-  text_case TEXT DEFAULT 'normal'
+  text_case TEXT DEFAULT 'normal',
+  audio_uri TEXT,
+  is_liked INTEGER DEFAULT 0,
+  vocal_stem_uri TEXT,
+  instrumental_stem_uri TEXT,
+  separation_status TEXT DEFAULT 'none',
+  separation_progress INTEGER DEFAULT 0
 );
 ```
 

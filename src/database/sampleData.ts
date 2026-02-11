@@ -17,6 +17,8 @@ export const SAMPLE_SONGS: Song[] = [
     dateModified: '2026-02-09T10:00:00Z',
     playCount: 5,
     lastPlayed: '2026-02-09T12:00:00Z',
+    separationStatus: 'none',
+    separationProgress: 0,
     lyrics: [
       { timestamp: 0, text: '♪ Instrumental intro ♪', lineOrder: 0 },
       { timestamp: 5, text: 'Waiting in the car', lineOrder: 1 },
@@ -42,6 +44,8 @@ export const SAMPLE_SONGS: Song[] = [
     dateModified: '2026-02-08T15:00:00Z',
     playCount: 12,
     lastPlayed: '2026-02-09T08:00:00Z',
+    separationStatus: 'none',
+    separationProgress: 0,
     lyrics: [
       { timestamp: 0, text: 'Is this the real life?', lineOrder: 0 },
       { timestamp: 4, text: 'Is this just fantasy?', lineOrder: 1 },
@@ -73,6 +77,8 @@ export const SAMPLE_SONGS: Song[] = [
     dateModified: '2026-02-07T20:00:00Z',
     playCount: 8,
     lastPlayed: '2026-02-09T06:00:00Z',
+    separationStatus: 'none',
+    separationProgress: 0,
     lyrics: [
       { timestamp: 0, text: '♪ Synth intro ♪', lineOrder: 0 },
       { timestamp: 6, text: 'I\'ve been tryna call', lineOrder: 1 },
