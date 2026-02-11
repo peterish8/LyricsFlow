@@ -58,6 +58,16 @@ The app handles "messy" data intelligently.
 - **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
+### On-Device AI (Whisper)
+Privacy-first AI that runs entirely on your phone (no cloud API costs).
+- **Core**: Uses `whisper.rn` (providing `whisper.cpp`) for high-performance offline speech-to-text.
+- **Improved Quality**: Uses larger context window (`maxLen: 60`), lyrical prompts, and noise filtering for cleaner transcripts.
+- **Metadata Protection**: Smart state merging ensures manual Title/Artist edits are never overwritten by AI results.
+- **Dual Mode**:
+    1. **Magic Mode**: Aligns *your* pasted lyrics with the audio using Dynamic Time Warping (DTW).
+    2. **Pure Magic Mode**: Generates *new* lyrics and timestamps from scratch using the Whisper model.
+- **Performance**: Optimized with 16kHz audio conversion and background task queuing.
+
 ---
 
 ## 📂 Directory Architecture
@@ -72,6 +82,7 @@ The app handles "messy" data intelligently.
 - **`PlayerControls.tsx`**: Core playback interaction buttons with ±10s skip.
 - **`Scrubber.tsx`**: Timeline progress bar with optimistic seeking.
 - **`SongCard.tsx`**: Grid item that handles both gradient fallbacks and custom cover art images. Supports long-press.
+- **`TasksModal.tsx`**: Background task manager showing live progress and task history.
 - **`Toast.tsx`**: Spring-animated notification component with auto-dismiss.
 
 ### `src/database/` (The Persistence Layer)
@@ -89,6 +100,7 @@ The app handles "messy" data intelligently.
 ### `src/store/` (Reactive State - Zustand)
 - **`songsStore.ts`**: Master song list and metadata state.
 - **`playerStore.ts`**: Playback state, including the **Session Queue** and auto-play controls.
+- **`tasksStore.ts`**: Persistent background task queue for tracking AI processing across songs.
 - **`artHistoryStore.ts`**: Tracks "Recent Art" for quick reuse across songs.
 - **`settingsStore.ts`**: Persists UI preferences to disk.
 
@@ -129,6 +141,16 @@ Located in `src/constants/`:
 - **Hybrid layout**: Top 2 songs in grid ("Most Played"), rest in list view ("All Songs")
 - **List view details**: Shows thumbnail, title, artist, duration (MM:SS format)
 - **Long-press actions**: Access cover art upload from any song card
+- **Recently Played**: Horizontal scrolling list of your last 10 listened songs
+
+### ✨ Magic Timestamp (AI)
+- **Dual Mode Intelligence**:
+    1. **Magic**: Aligns your pasted lyrics with audio using Dynamic Time Warping.
+    2. **Pure Magic**: Generates lyrics from scratch using on-device Whisper AI.
+- **Background Processing**: Start tasks and keep browsing. AI runs in a global queue accessible via the notification bell.
+- **Task Management**: Stop active transcriptions mid-process or restart failed jobs.
+- **Visual Progress**: Real-time feedback with live progress bars and stage updates (Converting → Transcribing → Aligning).
+- **Confidence Scoring**: AI assigns a confidence score to every line and the song overall.
 
 ### UI/UX Enhancements
 - **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused

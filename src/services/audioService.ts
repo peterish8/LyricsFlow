@@ -1,83 +1,106 @@
 /**
  * LyricFlow - Audio Service
- * Handles audio playback using expo-av
+ * Handles audio playback using expo-audio
  */
 
-import { Audio } from 'expo-av';
+import { useAudioPlayer, AudioSource } from 'expo-audio';
 
 class AudioService {
-  private sound: Audio.Sound | null = null;
+  private player: ReturnType<typeof useAudioPlayer> | null = null;
   private isLoaded = false;
+  private currentUri: string | null = null;
 
   async loadAudio(uri: string): Promise<void> {
     try {
-      // Unload previous audio
-      if (this.sound) {
-        await this.unloadAudio();
-      }
-
-      // Set audio mode
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-      });
-
-      // Load new audio
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: false }
-      );
-
-      this.sound = sound;
+      this.currentUri = uri;
       this.isLoaded = true;
+      console.log('[AUDIO SERVICE] Audio loaded:', uri);
     } catch (error) {
       console.error('Failed to load audio:', error);
       throw error;
     }
   }
 
+  setPlayer(player: ReturnType<typeof useAudioPlayer>): void {
+    this.player = player;
+  }
+
   async play(): Promise<void> {
-    if (this.sound && this.isLoaded) {
-      await this.sound.playAsync();
+    if (this.player && this.isLoaded && this.currentUri) {
+      console.log('[AUDIO SERVICE] Playing audio');
+      try {
+        this.player.play();
+      } catch (error) {
+        console.error('[AUDIO SERVICE] Play error:', error);
+      }
+    } else {
+      console.log('[AUDIO SERVICE] Cannot play - player:', !!this.player, 'isLoaded:', this.isLoaded);
     }
   }
 
   async pause(): Promise<void> {
-    if (this.sound && this.isLoaded) {
-      await this.sound.pauseAsync();
+    if (this.player && this.isLoaded) {
+      this.player.pause();
     }
   }
 
-  async seek(positionMillis: number): Promise<void> {
-    if (this.sound && this.isLoaded) {
-      await this.sound.setPositionAsync(positionMillis);
+  async seek(positionSeconds: number): Promise<void> {
+    if (this.player && this.isLoaded) {
+      this.player.seekTo(positionSeconds);
     }
   }
 
-  async getStatus(): Promise<any> {
-    if (this.sound && this.isLoaded) {
-      return await this.sound.getStatusAsync();
+  /**
+   * Enable lock screen / Dynamic Island controls for the current player
+   */
+  setLockScreenActive(metadata?: { title?: string; artist?: string }): void {
+    if (this.player && typeof this.player.setActiveForLockScreen === 'function') {
+      try {
+        this.player.setActiveForLockScreen(true, metadata);
+        console.log('[AUDIO SERVICE] Lock screen controls activated');
+      } catch (error) {
+        // Silently ignore - not available in Expo Go
+      }
     }
-    return null;
   }
 
-  setOnPlaybackStatusUpdate(callback: (status: any) => void): void {
-    if (this.sound) {
-      this.sound.setOnPlaybackStatusUpdate(callback);
-    }
+  getCurrentUri(): string | null {
+    return this.currentUri;
+  }
+
+  getPlayer(): ReturnType<typeof useAudioPlayer> | null {
+    return this.player;
   }
 
   async unloadAudio(): Promise<void> {
-    if (this.sound) {
-      await this.sound.unloadAsync();
-      this.sound = null;
-      this.isLoaded = false;
+    // Clear lock screen controls when unloading
+    if (this.player) {
+      try {
+        this.player.clearLockScreenControls();
+      } catch (e) {
+        // ignore
+      }
     }
+    this.currentUri = null;
+    this.isLoaded = false;
   }
 
   isAudioLoaded(): boolean {
-    return this.isLoaded;
+    return this.isLoaded && this.currentUri !== null;
+  }
+
+  async getDuration(): Promise<number> {
+    if (this.player && this.isLoaded && this.player.duration) {
+      return this.player.duration;
+    }
+    return 0;
+  }
+
+  async getPosition(): Promise<number> {
+    if (this.player && this.isLoaded && this.player.currentTime) {
+      return this.player.currentTime;
+    }
+    return 0;
   }
 }
 

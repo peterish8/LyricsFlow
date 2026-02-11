@@ -10,6 +10,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   useSharedValue,
+  SharedValue,
 } from 'react-native-reanimated';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -31,11 +32,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
   const prevScale = useSharedValue(1);
   const nextScale = useSharedValue(1);
 
-  const handlePressIn = (scaleValue: Animated.SharedValue<number>) => {
+  const handlePressIn = (scaleValue: SharedValue<number>) => {
     scaleValue.value = withSpring(0.9);
   };
 
-  const handlePressOut = (scaleValue: Animated.SharedValue<number>) => {
+  const handlePressOut = (scaleValue: SharedValue<number>) => {
     scaleValue.value = withSpring(1);
   };
 
@@ -67,18 +68,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
       </AnimatedPressable>
 
       {/* Play/Pause */}
-      <AnimatedPressable
-        style={[styles.playButton, playStyle]}
+      <Pressable
+        style={styles.playButton}
         onPress={onPlayPause}
-        onPressIn={() => handlePressIn(playScale)}
-        onPressOut={() => handlePressOut(playScale)}
       >
         <Ionicons
           name={isPlaying ? 'pause-circle' : 'play-circle'}
           size={76}
           color="#fff"
         />
-      </AnimatedPressable>
+      </Pressable>
 
       {/* Skip Forward 10s */}
       <AnimatedPressable

@@ -158,6 +158,32 @@ const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> 
       await database.execAsync('ALTER TABLE songs ADD COLUMN audio_uri TEXT');
       log('Migration complete');
     }
+    if (!columns.some(c => c.name === 'is_liked')) {
+      log('Adding is_liked column...');
+      await database.execAsync('ALTER TABLE songs ADD COLUMN is_liked INTEGER DEFAULT 0');
+      log('Migration complete');
+    }
+    // AI Karaoke: Stem storage columns
+    if (!columns.some(c => c.name === 'vocal_stem_uri')) {
+      log('Adding vocal_stem_uri column...');
+      await database.execAsync('ALTER TABLE songs ADD COLUMN vocal_stem_uri TEXT');
+      log('Migration complete');
+    }
+    if (!columns.some(c => c.name === 'instrumental_stem_uri')) {
+      log('Adding instrumental_stem_uri column...');
+      await database.execAsync('ALTER TABLE songs ADD COLUMN instrumental_stem_uri TEXT');
+      log('Migration complete');
+    }
+    if (!columns.some(c => c.name === 'separation_status')) {
+      log('Adding separation_status column...');
+      await database.execAsync('ALTER TABLE songs ADD COLUMN separation_status TEXT DEFAULT "none"');
+      log('Migration complete');
+    }
+    if (!columns.some(c => c.name === 'separation_progress')) {
+      log('Adding separation_progress column...');
+      await database.execAsync('ALTER TABLE songs ADD COLUMN separation_progress INTEGER DEFAULT 0');
+      log('Migration complete');
+    }
   } catch (e) {
     log('Migration check failed', e);
   }

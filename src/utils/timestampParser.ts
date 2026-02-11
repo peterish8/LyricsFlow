@@ -11,18 +11,22 @@
 
 import { LyricLine } from '../types/song';
 
-// Regex patterns for timestamp detection
-const TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?/g;
-const SINGLE_TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?/;
+// Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
+// Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
+// Now permissive for 1-digit seconds to handle "dirty" lyrics like [0:3.75]
+const TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\]\)]?/g;
+const SINGLE_TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\]\)]?/;
 
 /**
  * Parse a timestamp string into seconds
  * @param minutes - minutes part
  * @param seconds - seconds part
+ * @param milliseconds - optional milliseconds part (e.g. ".75" or ".750")
  * @returns total seconds
  */
-const parseTimeToSeconds = (minutes: string, seconds: string): number => {
-  return parseInt(minutes, 10) * 60 + parseInt(seconds, 10);
+const parseTimeToSeconds = (minutes: string, seconds: string, milliseconds?: string): number => {
+  const secs = parseFloat(seconds + (milliseconds || ''));
+  return parseInt(minutes, 10) * 60 + secs;
 };
 
 /**
@@ -70,7 +74,7 @@ export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
       }
       
       // Parse new timestamp
-      currentTimestamp = parseTimeToSeconds(match[1], match[2]);
+      currentTimestamp = parseTimeToSeconds(match[1], match[2], match[3]);
       
       // Clean the line text by removing ALL timestamps and common separators
       let cleanedText = line.replace(TIMESTAMP_REGEX, '').trim();
@@ -148,9 +152,9 @@ export const lyricsToRawText = (lyrics: LyricLine[]): string => {
   return lyrics
     .map((line) => {
       const minutes = Math.floor(line.timestamp / 60);
-      const seconds = line.timestamp % 60;
-      const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-      return `${timeStr}\n${line.text}`;
+      const seconds = (line.timestamp % 60).toFixed(2); // Keep milliseconds
+      const timeStr = `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(5, '0')}]`;
+      return `${timeStr} ${line.text}`;
     })
     .join('\n');
 };

@@ -12,6 +12,7 @@ import { RootNavigator } from './navigation';
 import { initDatabase } from './database/db';
 import { useSongsStore } from './store/songsStore';
 import { Colors } from './constants/colors';
+import { PlayerProvider } from './providers/PlayerProvider';
 
 const App: React.FC = () => {
   const [isReady, setIsReady] = useState(false);
@@ -51,7 +52,9 @@ const App: React.FC = () => {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <RootNavigator />
+        <PlayerProvider>
+          <RootNavigator />
+        </PlayerProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

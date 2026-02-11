@@ -17,30 +17,54 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { TabScreenProps } from '../types/navigation';
+import { RootStackScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
 import { AuroraHeader, SongCard } from '../components';
 import { Colors } from '../constants/colors';
 import { Song } from '../types/song';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 
-type Props = TabScreenProps<'Search'>;
+type Props = RootStackScreenProps<'Search'>;
 
 const SearchScreen: React.FC<Props> = ({ navigation }) => {
   const [query, setQuery] = useState('');
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [results, setResults] = useState<Song[]>([]);
+  const [filterAudio, setFilterAudio] = useState<'all' | 'audio' | 'no-audio'>('all');
+  const [filterTimestamp, setFilterTimestamp] = useState<'all' | 'timestamp' | 'no-timestamp'>('all');
   const { searchSongs, setCurrentSong } = useSongsStore();
 
   const handleSearch = useCallback(async (text: string) => {
     setQuery(text);
     if (text.trim().length > 0) {
-      const found = await searchSongs(text);
+      let found = await searchSongs(text);
+      
+      // Apply audio filter
+      if (filterAudio === 'audio') {
+        found = found.filter(s => s.audioUri);
+      } else if (filterAudio === 'no-audio') {
+        found = found.filter(s => !s.audioUri);
+      }
+      
+      // Apply timestamp filter
+      if (filterTimestamp === 'timestamp') {
+        found = found.filter(s => s.lyrics.some(l => l.timestamp > 0));
+      } else if (filterTimestamp === 'no-timestamp') {
+        found = found.filter(s => !s.lyrics.some(l => l.timestamp > 0));
+      }
+      
       setResults(found);
     } else {
       setResults([]);
     }
-  }, [searchSongs]);
+  }, [searchSongs, filterAudio, filterTimestamp]);
+
+  // Re-run search when filters change
+  React.useEffect(() => {
+    if (query.trim().length > 0) {
+      handleSearch(query);
+    }
+  }, [filterAudio, filterTimestamp]);
 
   const handleSearchSubmit = useCallback(() => {
     if (query.trim().length === 0) return;
@@ -80,10 +104,9 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
               style={StyleSheet.absoluteFill} 
             />
           ) : (
-            <LinearGradient
-              colors={gradient.colors as [string, string, ...string[]]}
-              style={StyleSheet.absoluteFill}
-            />
+            <View style={styles.defaultResultThumbnail}>
+              <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
+            </View>
           )}
         </View>
         <View style={styles.resultInfo}>
@@ -101,7 +124,6 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <AuroraHeader palette="search" />
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Search Header */}
         <View style={styles.header}>
@@ -126,6 +148,40 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
             )}
           </View>
         </View>
+
+        {/* Filter Chips */}
+        {query.length > 0 && (
+          <View style={styles.filterChips}>
+            <Pressable 
+              style={[styles.chip, filterAudio === 'audio' && styles.chipActive]}
+              onPress={() => setFilterAudio(filterAudio === 'audio' ? 'all' : 'audio')}
+            >
+              <Ionicons name="musical-note" size={16} color={filterAudio === 'audio' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.chipText, filterAudio === 'audio' && styles.chipTextActive]}>Audio</Text>
+            </Pressable>
+            <Pressable 
+              style={[styles.chip, filterAudio === 'no-audio' && styles.chipActive]}
+              onPress={() => setFilterAudio(filterAudio === 'no-audio' ? 'all' : 'no-audio')}
+            >
+              <Ionicons name="musical-note-outline" size={16} color={filterAudio === 'no-audio' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.chipText, filterAudio === 'no-audio' && styles.chipTextActive]}>No Audio</Text>
+            </Pressable>
+            <Pressable 
+              style={[styles.chip, filterTimestamp === 'timestamp' && styles.chipActive]}
+              onPress={() => setFilterTimestamp(filterTimestamp === 'timestamp' ? 'all' : 'timestamp')}
+            >
+              <Ionicons name="time" size={16} color={filterTimestamp === 'timestamp' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.chipText, filterTimestamp === 'timestamp' && styles.chipTextActive]}>Timestamped</Text>
+            </Pressable>
+            <Pressable 
+              style={[styles.chip, filterTimestamp === 'no-timestamp' && styles.chipActive]}
+              onPress={() => setFilterTimestamp(filterTimestamp === 'no-timestamp' ? 'all' : 'no-timestamp')}
+            >
+              <Ionicons name="time-outline" size={16} color={filterTimestamp === 'no-timestamp' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.chipText, filterTimestamp === 'no-timestamp' && styles.chipTextActive]}>No Timestamp</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Content Area */}
         {query.length === 0 ? (
@@ -168,6 +224,7 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: Colors.background,
   },
   safeArea: {
     flex: 1,
@@ -176,9 +233,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     gap: 12,
-    zIndex: 10,
+    backgroundColor: Colors.background,
   },
   backButton: {
     padding: 4,
@@ -240,7 +297,14 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#2C2C2E',
+  },
+  defaultResultThumbnail: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2C2C2E',
   },
   resultInfo: {
     flex: 1,
@@ -262,6 +326,36 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: Colors.textSecondary,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  chipActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  chipTextActive: {
+    color: '#fff',
   },
 });
 

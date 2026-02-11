@@ -7,3 +7,7 @@ export { PlayerControls } from './PlayerControls';
 export { AuroraHeader } from './AuroraHeader';
 export { AIGeneratorModal } from './AIGeneratorModal';
 export { CustomMenu } from './CustomMenu';
+export { MiniPlayer } from './MiniPlayer';
+export { CustomTabBar } from './CustomTabBar';
+export { VocalBalanceSlider } from './VocalBalanceSlider';
+export { StemProcessButton } from './StemProcessButton';

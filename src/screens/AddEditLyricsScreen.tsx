@@ -14,19 +14,27 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
-import { RootStackScreenProps } from '../types/navigation';
+import * as DocumentPicker from 'expo-document-picker';
+import { TabScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
+import { usePlayerStore } from '../store/playerStore';
 import { GradientPicker, AIGeneratorModal } from '../components';
+import { MagicModeModal } from '../components/MagicModeModal';
+import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { Toast } from '../components/Toast';
 import { Colors } from '../constants/colors';
 import { DEFAULT_GRADIENT_ID } from '../constants/gradients';
 import { parseTimestampedLyrics, calculateDuration, lyricsToRawText } from '../utils/timestampParser';
 import { generateId } from '../utils/formatters';
 import { formatTime } from '../utils/formatters';
+import { getAutoTimestampService, LyricLine, AutoTimestampResult } from '../services/autoTimestampServiceV2';
 
 // Helper to parse duration string (mm:ss or seconds)
 const parseDurationInput = (input: string): number => {
@@ -44,9 +52,7 @@ const parseDurationInput = (input: string): number => {
   return 0;
 };
 
-type Props = RootStackScreenProps<'AddEditLyrics'>;
-
-const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
+const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const { songId } = route.params ?? {};
   const isEditing = !!songId;
 
@@ -64,6 +70,14 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
+  
+  // Magic Timestamp state
+  const [showModeSelector, setShowModeSelector] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState('');
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [audioUri, setAudioUri] = useState<string | null>(null);
+  const [isPickingAudio, setIsPickingAudio] = useState(false);
 
   // Load existing song for editing
   useEffect(() => {
@@ -79,6 +93,7 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
           setScrollSpeed(song.scrollSpeed ?? 50);
           setDurationText(formatTime(song.duration));
           setLyricsAlign(song.lyricsAlign ?? 'left');
+          setAudioUri(song.audioUri ?? null);
         }
       };
       loadSong();
@@ -98,6 +113,256 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch (error) {
       console.error('Paste failed:', error);
     }
+  };
+
+  /**
+   * Pick audio file for Magic Timestamp
+   */
+  const pickAudioFile = async () => {
+    // Prevent concurrent picker calls
+    if (isPickingAudio) {
+      console.log('[AddEditLyrics] Already picking audio, ignoring duplicate call');
+      return;
+    }
+
+    try {
+      setIsPickingAudio(true);
+      
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'audio/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        console.log('[AddEditLyrics] Audio picker canceled');
+        return;
+      }
+
+      if (result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        console.log('[AddEditLyrics] Audio file selected:', file.name);
+        setAudioUri(file.uri);
+        
+        // Get audio duration
+        try {
+          // Import dynamically to avoid cycle if any (though utils are safe)
+          const { getAudioConverter } = require('../utils/audioConverter');
+          const converter = getAudioConverter();
+          const durationMs = await converter.getAudioDuration(file.uri);
+          
+          if (durationMs > 0) {
+            const durationSec = Math.round(durationMs / 1000);
+            setDurationText(formatTime(durationSec)); // Sets as MM:SS
+            console.log(`[AddEditLyrics] Duration set to ${durationSec}s (${formatTime(durationSec)})`);
+          }
+        } catch (err) {
+          console.warn('[AddEditLyrics] Failed to get audio duration:', err);
+          // Non-fatal, user can still enter manually
+        }
+        
+        Alert.alert(
+          '✅ Audio File Selected',
+          `${file.name}\n\nYou can now use Magic Timestamp!`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('[AddEditLyrics] Audio picker error:', error);
+      Alert.alert(
+        'Error',
+        'Failed to select audio file. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsPickingAudio(false);
+    }
+  };
+
+  // ============================================================================
+  // MAGIC TIMESTAMP HANDLERS
+  // ============================================================================
+
+  /**
+   * MAGIC MODE: User provides lyrics, AI adds timestamps
+   */
+  const handleMagicMode = async () => {
+    // Validate lyrics exist
+    if (!lyricsText || lyricsText.trim().length === 0) {
+      Alert.alert(
+        'No Lyrics Found',
+        'Please paste your lyrics in the text box first, then tap Magic Timestamp.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (!audioUri) {
+      Alert.alert('No Audio', 'Please select an audio file first.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessingStage('Starting Magic mode...');
+    setShowModeSelector(false);
+
+    try {
+      const service = getAutoTimestampService();
+
+      const result = await service.processAudio(
+        audioUri,
+        lyricsText,
+        (stage, progress) => {
+          setProcessingStage(stage);
+          setProcessingProgress(progress);
+        }
+      );
+
+      handleTimestampResult(result, 'Magic');
+
+    } catch (error: any) {
+      handleTimestampError(error);
+    } finally {
+      setIsProcessing(false);
+      setProcessingStage('');
+      setProcessingProgress(0);
+    }
+  };
+  /**
+   * PURE MAGIC MODE: AI extracts lyrics + timestamps automatically
+   */
+  const handlePureMagicMode = async () => {
+    if (!audioUri) {
+      Alert.alert('No Audio', 'Please select an audio file first.');
+      return;
+    }
+
+    // Confirm with user (this will overwrite existing lyrics)
+    if (lyricsText && lyricsText.trim().length > 0) {
+      Alert.alert(
+        'Overwrite Existing Lyrics?',
+        'Pure Magic will extract new lyrics from audio and replace your current text. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Continue',
+            onPress: () => executePureMagic()
+          }
+        ]
+      );
+    } else {
+      executePureMagic();
+    }
+  };
+
+  /**
+   * Execute Pure Magic mode
+   */
+  const executePureMagic = async () => {
+    setIsProcessing(true);
+    setProcessingStage('Starting Pure Magic mode...');
+    setShowModeSelector(false);
+
+    try {
+      const service = getAutoTimestampService();
+
+      const result = await service.autoGenerateLyrics(
+        audioUri!,
+        (stage, progress) => {
+          setProcessingStage(stage);
+          setProcessingProgress(progress);
+        }
+      );
+
+      handleTimestampResult(result, 'Pure Magic');
+
+    } catch (error: any) {
+      handleTimestampError(error);
+    } finally {
+      setIsProcessing(false);
+      setProcessingStage('');
+      setProcessingProgress(0);
+    }
+  };
+
+  /**
+   * Handle successful timestamp result (both modes)
+   */
+  const handleTimestampResult = (result: AutoTimestampResult, mode: string) => {
+    console.log(`${mode} complete:`, result);
+
+    if (result.overallConfidence >= 0.8) {
+      applyTimestamps(result.lyrics);
+
+      Alert.alert(
+        '✨ Excellent!',
+        `${mode} timestamped ${result.successfulMatches}/${result.totalLines} lines.\n\n` +
+        `Confidence: ${(result.overallConfidence * 100).toFixed(0)}%\n` +
+        `Processing time: ${result.processingTime.toFixed(1)}s`,
+        [{ text: 'Great!' }]
+      );
+
+    } else if (result.overallConfidence >= 0.6) {
+      Alert.alert(
+        '⚠️ Review Recommended',
+        `Confidence: ${(result.overallConfidence * 100).toFixed(0)}%\n\n` +
+        `${result.warnings.length} lines may need adjustment:\n` +
+        result.warnings.slice(0, 2).join('\n') +
+        (result.warnings.length > 2 ? `\n...and ${result.warnings.length - 2} more` : ''),
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Use Anyway', onPress: () => applyTimestamps(result.lyrics) }
+        ]
+      );
+
+    } else {
+      Alert.alert(
+        '❌ Low Accuracy',
+        `Only ${(result.overallConfidence * 100).toFixed(0)}% confidence.\n\n` +
+        'Possible reasons:\n' +
+        '• Heavy background music\n' +
+        '• Unclear vocals\n' +
+        '• Lyrics don\'t match audio\n\n' +
+        'Consider manual timestamping.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  /**
+   * Apply timestamps to lyrics text
+   */
+  const applyTimestamps = (timestampedLyrics: LyricLine[]) => {
+    const rawText = timestampedLyrics
+      .map(line => {
+        if (line.timestamp > 0) {
+          const mins = Math.floor(line.timestamp / 60);
+          const secs = line.timestamp % 60;
+          // Format seconds with 2 decimal places and leading zero if needed (e.g., 03.75)
+          const formattedSecs = secs < 10 ? `0${secs.toFixed(2)}` : secs.toFixed(2);
+          // Format minutes with leading zero (e.g., 02)
+          const formattedMins = mins.toString().padStart(2, '0');
+          return `[${formattedMins}:${formattedSecs}] ${line.text}`;
+        } else {
+          return `[NEEDS_REVIEW] ${line.text}`;
+        }
+      })
+      .join('\n');
+
+    setLyricsText(rawText);
+  };
+
+  /**
+   * Handle timestamp errors
+   */
+  const handleTimestampError = (error: any) => {
+    console.error('Timestamp error:', error);
+
+    Alert.alert(
+      'Error',
+      `Auto-timestamp failed:\n${error.message}\n\n` +
+      'Please try manual timestamping.',
+      [{ text: 'OK' }]
+    );
   };
 
   const handleSave = async () => {
@@ -134,10 +399,20 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
         lastPlayed: undefined,
         scrollSpeed,
         lyricsAlign,
+        audioUri: audioUri ?? undefined,
       };
 
       if (isEditing) {
         await updateSong(songData);
+        // Reload lyrics in player if this song is currently playing
+        const { currentSong: playingSong } = useSongsStore.getState();
+        const { setLyrics: setPlayerLyrics } = usePlayerStore.getState();
+        if (playingSong?.id === songData.id) {
+          setPlayerLyrics(songData.lyrics, songData.duration);
+        }
+        // Update current song in songs store
+        const { setCurrentSong } = useSongsStore.getState();
+        setCurrentSong(songData);
       } else {
         await addSong(songData);
       }
@@ -266,13 +541,56 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
             />
           </View>
 
+        {/* Audio File Selection for Magic Timestamp */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>MAGIC TIMESTAMP</Text>
+          <Pressable 
+            style={[
+              styles.audioPickerButton,
+              isPickingAudio && styles.audioPickerButtonDisabled
+            ]}
+            onPress={pickAudioFile}
+            disabled={isPickingAudio}
+          >
+            <Ionicons 
+              name={audioUri ? "musical-note" : "musical-notes-outline"} 
+              size={20} 
+              color={audioUri ? "#7C3AED" : "#888"} 
+            />
+            <Text style={[
+              styles.audioPickerText,
+              audioUri && styles.audioPickerTextActive
+            ]}>
+              {isPickingAudio ? "Selecting..." : (audioUri ? "✓ Audio File Selected" : "Select Audio File")}
+            </Text>
+            {audioUri && !isPickingAudio && (
+              <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+            )}
+          </Pressable>
+          {audioUri && (
+            <Text style={styles.audioHint}>
+              Tap the Magic button below to auto-timestamp your lyrics!
+            </Text>
+          )}
+        </View>
+
           {/* Lyrics Input */}
           <View style={styles.lyricsSection}>
             <View style={styles.lyricsHeader}>
               <Text style={styles.lyricsLabel}>LYRICS</Text>
               <View style={{ flexDirection: 'row', gap: 16 }}>
-                <Pressable onPress={() => setShowAIModal(true)}>
-                  <Text style={styles.aiButton}>✨ Magic AI</Text>
+                <Pressable 
+                  onPress={() => setShowModeSelector(true)}
+                  disabled={isProcessing}
+                >
+                  <LinearGradient
+                    colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.magicButtonCircle}
+                  >
+                    <Ionicons name="sparkles" size={18} color="#fff" />
+                  </LinearGradient>
                 </Pressable>
                 <Pressable onPress={handlePaste}>
                   <Text style={styles.pasteButton}>Paste</Text>
@@ -290,6 +608,22 @@ const AddEditLyricsScreen: React.FC<Props> = ({ navigation, route }) => {
             />
           </View>
         </ScrollView>
+
+        {/* Magic Timestamp Mode Selector Modal */}
+        {/* Magic Timestamp Mode Selector Modal */}
+        <MagicModeModal
+          visible={showModeSelector}
+          onClose={() => setShowModeSelector(false)}
+          onMagicMode={handleMagicMode}
+          onPureMagicMode={handlePureMagicMode}
+        />
+
+        {/* Processing Overlay */}
+        <ProcessingOverlay
+          isVisible={isProcessing}
+          stage={processingStage}
+          progress={processingProgress}
+        />
 
         <AIGeneratorModal
           visible={showAIModal}
@@ -563,6 +897,71 @@ const styles = StyleSheet.create({
   },
   alignButtonTextActive: {
     color: '#fff',
+  },
+  
+  // ============================================================================
+  // MAGIC TIMESTAMP STYLES
+  // ============================================================================
+  
+  // Magic Button (Small version for header)
+  magicButtonCircle: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+  },
+  magicButtonSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#7C3AED',
+    borderRadius: 8,
+  },
+  magicButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  
+  // Audio Picker Styles
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#888',
+    marginBottom: 12,
+    letterSpacing: 0.5,
+  },
+  audioPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#333',
+  },
+  audioPickerButtonDisabled: {
+    opacity: 0.5,
+  },
+  audioPickerText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#888',
+  },
+  audioPickerTextActive: {
+    color: '#fff',
+  },
+  audioHint: {
+    fontSize: 13,
+    color: '#7C3AED',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });
 

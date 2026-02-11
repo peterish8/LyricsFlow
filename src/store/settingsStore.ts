@@ -24,6 +24,8 @@ interface SettingsState {
   scrollSpeed: ScrollSpeed;
   skipDuration: 10 | 15 | 30;
   keepScreenOn: boolean;
+  showTimeRemaining: boolean;
+  playInMiniPlayerOnly: boolean;
   
   // Library
   defaultView: ViewMode;
@@ -38,6 +40,8 @@ interface SettingsState {
   setScrollSpeed: (speed: ScrollSpeed) => void;
   setSkipDuration: (duration: 10 | 15 | 30) => void;
   setKeepScreenOn: (enabled: boolean) => void;
+  setShowTimeRemaining: (show: boolean) => void;
+  setPlayInMiniPlayerOnly: (enabled: boolean) => void;
   setDefaultView: (view: ViewMode) => void;
   setDefaultSort: (sort: SortOption) => void;
   setShowThumbnails: (show: boolean) => void;
@@ -52,6 +56,8 @@ const DEFAULT_SETTINGS = {
   scrollSpeed: 'medium' as ScrollSpeed,
   skipDuration: 15 as const,
   keepScreenOn: true,
+  showTimeRemaining: true,
+  playInMiniPlayerOnly: false,
   defaultView: 'grid' as ViewMode,
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
@@ -73,6 +79,8 @@ export const useSettingsStore = create<SettingsState>()(
       setScrollSpeed: (scrollSpeed) => set({ scrollSpeed }),
       setSkipDuration: (skipDuration) => set({ skipDuration }),
       setKeepScreenOn: (keepScreenOn) => set({ keepScreenOn }),
+      setShowTimeRemaining: (showTimeRemaining) => set({ showTimeRemaining }),
+      setPlayInMiniPlayerOnly: (playInMiniPlayerOnly) => set({ playInMiniPlayerOnly }),
       
       // Library actions
       setDefaultView: (defaultView) => set({ defaultView }),

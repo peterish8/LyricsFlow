@@ -4,7 +4,7 @@
  */
 
 import React, { memo, useState, useEffect } from 'react';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Pressable } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -15,6 +15,7 @@ import Animated, {
   useDerivedValue,
 } from 'react-native-reanimated';
 import { formatTime } from '../utils/formatters';
+import { usePlayerStore } from '../store/playerStore';
 
 interface ScrubberProps {
   currentTime: number;
@@ -22,12 +23,16 @@ interface ScrubberProps {
   onSeek: (time: number) => void;
 }
 
+import { useSettingsStore } from '../store/settingsStore';
+
 export const Scrubber: React.FC<ScrubberProps> = memo(({
   currentTime,
   duration,
   onSeek,
 }) => {
   const [width, setWidth] = useState(0);
+  const { showTimeRemaining, setShowTimeRemaining } = useSettingsStore();
+  const { setIsScrubbing } = usePlayerStore();
   const isDragging = useSharedValue(false);
   const progress = useSharedValue(0); // 0 to 1
   const thumbScale = useSharedValue(1);
@@ -39,15 +44,21 @@ export const Scrubber: React.FC<ScrubberProps> = memo(({
     }
   }, [currentTime, duration]);
 
+  const handleSeekStart = () => {
+    setIsScrubbing(true);
+  };
+
   const handleSeekEnd = (value: number) => {
     const time = value * duration;
     onSeek(Math.max(0, Math.min(time, duration)));
+    setIsScrubbing(false);
   };
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
       isDragging.value = true;
       thumbScale.value = withSpring(1.5);
+      runOnJS(handleSeekStart)();
     })
     .onUpdate((e) => {
       if (width > 0) {
@@ -113,7 +124,11 @@ export const Scrubber: React.FC<ScrubberProps> = memo(({
       {/* Time Labels */}
       <View style={styles.timeContainer}>
         <Text style={styles.time}>{formatTime(currentTime)}</Text>
-        <Text style={styles.time}>-{formatTime(remaining)}</Text>
+        <Pressable onPress={() => setShowTimeRemaining(!showTimeRemaining)}>
+          <Text style={styles.time}>
+            {showTimeRemaining ? `-${formatTime(remaining)}` : formatTime(duration)}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );

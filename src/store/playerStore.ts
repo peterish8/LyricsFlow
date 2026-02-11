@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { LyricLine } from '../types/song';
 import { getCurrentLineIndex } from '../utils/timestampParser';
+import { audioService } from '../services/audioService';
 
 interface PlayerState {
   // State
@@ -16,6 +17,7 @@ interface PlayerState {
   lyrics: LyricLine[];         // Current song's lyrics
   queueSongIds: string[];      // In-memory queue for upcoming songs
   shouldAutoPlayOnLoad: boolean;
+  isScrubbing: boolean;        // User is actively scrubbing
   
   // Scroll speed settings
   scrollSpeed: 'slow' | 'medium' | 'fast';
@@ -25,10 +27,12 @@ interface PlayerState {
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
-  seek: (time: number) => void;
+  seek: (time: number, fromSync?: boolean) => void;
   skipPrevious: () => void;
   skipNext: () => void;
   setLyrics: (lyrics: LyricLine[], duration: number) => void;
+  setDuration: (duration: number) => void; // Added
+  setIsPlaying: (isPlaying: boolean) => void; // Added
   tick: (dt?: number) => void;            // Called by interval timer
   reset: () => void;
   setScrollSpeed: (speed: 'slow' | 'medium' | 'fast') => void;
@@ -37,6 +41,7 @@ interface PlayerState {
   dequeueNextSong: () => string | null;
   clearQueue: () => void;
   setShouldAutoPlayOnLoad: (value: boolean) => void;
+  setIsScrubbing: (value: boolean) => void;
 }
 
 // Get tick interval based on scroll speed
@@ -57,29 +62,68 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   lyrics: [],
   queueSongIds: [],
   shouldAutoPlayOnLoad: false,
+  isScrubbing: false,
   scrollSpeed: 'medium',
   skipDuration: 15,
   
+  // Setters
+  setDuration: (duration: number) => set({ duration }),
+  setIsPlaying: (isPlaying: boolean) => set({ isPlaying }),
+
   // Play (start auto-scroll)
-  play: () => {
+  play: async () => {
+    console.log('[PLAYER] Play called');
     set({ isPlaying: true });
+    
+    // Play audio if loaded (deferred to allow UI to update first)
+    setTimeout(async () => {
+      try {
+        if (audioService.isAudioLoaded()) {
+          console.log('[PLAYER] Playing audio');
+          await audioService.play();
+        } else {
+          console.log('[PLAYER] No audio loaded');
+        }
+      } catch (error) {
+        console.error('[PLAYER] Play error:', error);
+      }
+    }, 0);
   },
   
   // Pause (stop auto-scroll)
-  pause: () => {
+  pause: async () => {
     set({ isPlaying: false });
+    
+    // Pause audio if loaded
+    try {
+      if (audioService.isAudioLoaded()) {
+        await audioService.pause();
+      }
+    } catch (error) {
+      console.error('[PLAYER] Pause error:', error);
+    }
   },
   
   // Toggle play/pause
-  togglePlay: () => {
-    set((state) => ({ isPlaying: !state.isPlaying }));
+  togglePlay: async () => {
+    const { isPlaying } = get();
+    if (isPlaying) {
+      await get().pause();
+    } else {
+      await get().play();
+    }
   },
   
   // Seek to specific time
-  seek: (time: number) => {
+  seek: (time: number, fromSync = false) => {
     const { lyrics, duration } = get();
     const clampedTime = Math.max(0, Math.min(time, duration));
     const lineIndex = getCurrentLineIndex(lyrics, clampedTime);
+    
+    // Call audio service to seek if not from sync
+    if (!fromSync) {
+      audioService.seek(clampedTime);
+    }
     
     set({ 
       currentTime: clampedTime,
@@ -138,10 +182,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   tick: (dt?: number) => {
     const { isPlaying, currentTime, duration, lyrics, scrollSpeed } = get();
     
-    if (!isPlaying || currentTime >= duration) {
-      if (currentTime >= duration) {
-        set({ isPlaying: false });
-      }
+    if (!isPlaying) return;
+    
+    if (duration > 0 && currentTime >= duration) {
+      set({ isPlaying: false });
       return;
     }
     
@@ -198,6 +242,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setShouldAutoPlayOnLoad: (value) => {
     set({ shouldAutoPlayOnLoad: value });
+  },
+
+  setIsScrubbing: (value) => {
+    set({ isScrubbing: value });
   },
 }));
 

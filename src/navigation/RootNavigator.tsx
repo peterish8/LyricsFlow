@@ -13,6 +13,7 @@ import { Colors } from '../constants/colors';
 import TabNavigator from './TabNavigator';
 import NowPlayingScreen from '../screens/NowPlayingScreen';
 import AddEditLyricsScreen from '../screens/AddEditLyricsScreen';
+import SearchScreen from '../screens/SearchScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -41,6 +42,14 @@ export const RootNavigator: React.FC = () => {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="Search"
+          component={SearchScreen}
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_right',
           }}
         />
       </Stack.Navigator>

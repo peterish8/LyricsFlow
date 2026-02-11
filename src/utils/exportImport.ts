@@ -2,7 +2,7 @@
  * LyricFlow - Export/Import Utilities
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { Song } from '../types/song';

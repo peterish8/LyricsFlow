@@ -12,11 +12,14 @@ import {
   Pressable,
   Switch,
   Image,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TabScreenProps } from '../types/navigation';
 import { useSettingsStore } from '../store/settingsStore';
+import { useArtHistoryStore } from '../store/artHistoryStore';
 import { AuroraHeader, GradientPicker } from '../components';
 import { CustomAlert } from '../components/CustomAlert';
 import { Colors } from '../constants/colors';
@@ -25,19 +28,57 @@ import { clearAllData } from '../database/queries';
 import { useSongsStore } from '../store/songsStore';
 import { Alert } from 'react-native';
 import { scanAudioFiles, convertAudioFileToSong } from '../services/mediaScanner';
+import * as ImagePicker from 'expo-image-picker';
 
 type Props = TabScreenProps<'Settings'>;
 
 const SettingsScreen: React.FC<Props> = () => {
   const settings = useSettingsStore();
-  const { fetchSongs, addSong, songs, deleteSong } = useSongsStore();
+  const { fetchSongs, addSong, songs, deleteSong, updateSong } = useSongsStore();
+  const { addRecentArt } = useArtHistoryStore();
   const [isImporting, setIsImporting] = React.useState(false);
+  const [profileName, setProfileName] = React.useState('LyricFlow User');
+  const [profileImage, setProfileImage] = React.useState<string | null>(null);
+  const [editNameVisible, setEditNameVisible] = React.useState(false);
+  const [tempName, setTempName] = React.useState('');
+  const [selectionModalVisible, setSelectionModalVisible] = React.useState(false);
+  const [availableAudioFiles, setAvailableAudioFiles] = React.useState<any[]>([]);
+  const [selectedFiles, setSelectedFiles] = React.useState<Set<string>>(new Set());
   const [alertConfig, setAlertConfig] = React.useState<{
     visible: boolean;
     title: string;
     message: string;
     buttons: Array<{ text: string; onPress: () => void; style?: 'default' | 'cancel' | 'destructive' }>;
   }>({ visible: false, title: '', message: '', buttons: [] });
+
+  const handleEditName = () => {
+    setTempName(profileName);
+    setEditNameVisible(true);
+  };
+
+  const handleSaveName = () => {
+    if (tempName.trim()) {
+      setProfileName(tempName.trim());
+    }
+    setEditNameVisible(false);
+  };
+
+  const handleEditAvatar = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0].uri) {
+        setProfileImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Avatar selection failed:', error);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -143,6 +184,69 @@ const SettingsScreen: React.FC<Props> = () => {
     });
   };
 
+  const handleBatchCoverArt = async () => {
+    const importedSongs = songs.filter(s => s.audioUri);
+    
+    if (importedSongs.length === 0) {
+      setAlertConfig({
+        visible: true,
+        title: 'ℹ️ No Imported Songs',
+        message: 'There are no imported audio files.',
+        buttons: [{ text: 'OK', onPress: () => {} }],
+      });
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0].uri) {
+        const uri = result.assets[0].uri;
+        
+        setAlertConfig({
+          visible: true,
+          title: '🖼️ Apply Cover Art',
+          message: `Set this image as cover for all ${importedSongs.length} imported songs?`,
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+            {
+              text: `Update ${importedSongs.length} Songs`,
+              onPress: async () => {
+                let updated = 0;
+                for (const song of importedSongs) {
+                  try {
+                    await updateSong({
+                      ...song,
+                      coverImageUri: uri,
+                      dateModified: new Date().toISOString(),
+                    });
+                    updated++;
+                  } catch (error) {
+                    console.error('Failed to update:', song.title);
+                  }
+                }
+                addRecentArt(uri);
+                setAlertConfig({
+                  visible: true,
+                  title: '✅ Updated',
+                  message: `Updated cover art for ${updated} songs.`,
+                  buttons: [{ text: 'Done', onPress: () => {} }],
+                });
+              },
+            },
+          ],
+        });
+      }
+    } catch (error) {
+      console.error('Cover art selection failed:', error);
+    }
+  };
+
   const handleImportLocalAudio = async () => {
     try {
       setIsImporting(true);
@@ -154,46 +258,72 @@ const SettingsScreen: React.FC<Props> = () => {
         return;
       }
 
-      // Show custom styled alert
-      setAlertConfig({
-        visible: true,
-        title: '🎵 Audio Files Found',
-        message: `Discovered ${audioFiles.length} songs on your device.\n\nImport all tracks to your library?`,
-        buttons: [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => setIsImporting(false),
-          },
-          {
-            text: `Import ${audioFiles.length} Songs`,
-            onPress: async () => {
-              let imported = 0;
-              for (const audioFile of audioFiles) {
-                try {
-                  const song = convertAudioFileToSong(audioFile);
-                  await addSong(song);
-                  imported++;
-                } catch (error) {
-                  console.error('Failed to import:', audioFile.filename, error);
-                }
-              }
-              setIsImporting(false);
-              setAlertConfig({
-                visible: true,
-                title: '✅ Import Complete',
-                message: `Successfully imported ${imported} of ${audioFiles.length} songs to your library.`,
-                buttons: [{ text: 'Done', onPress: () => {} }],
-              });
-            },
-          },
-        ],
-      });
+      const existingUris = new Set(songs.filter(s => s.audioUri).map(s => s.audioUri));
+      const newAudioFiles = audioFiles.filter(f => !existingUris.has(f.uri));
+
+      if (newAudioFiles.length === 0) {
+        setAlertConfig({
+          visible: true,
+          title: 'ℹ️ Already Imported',
+          message: 'All audio files have already been imported.',
+          buttons: [{ text: 'OK', onPress: () => setIsImporting(false) }],
+        });
+        return;
+      }
+
+      setIsImporting(false);
+      setAvailableAudioFiles(newAudioFiles);
+      setSelectedFiles(new Set());
+      setSelectionModalVisible(true);
     } catch (error) {
       setIsImporting(false);
       console.error('Import failed:', error);
       Alert.alert('Import Failed', 'Could not access media library. Check permissions.');
     }
+  };
+
+  const handleImportSelected = async () => {
+    setSelectionModalVisible(false);
+    setIsImporting(true);
+    
+    let imported = 0;
+    for (const audioFile of availableAudioFiles) {
+      if (selectedFiles.has(audioFile.uri)) {
+        try {
+          const song = convertAudioFileToSong(audioFile);
+          await addSong(song);
+          imported++;
+        } catch (error) {
+          console.error('Failed to import:', audioFile.filename, error);
+        }
+      }
+    }
+    
+    setIsImporting(false);
+    setAlertConfig({
+      visible: true,
+      title: '✅ Import Complete',
+      message: `Successfully imported ${imported} of ${selectedFiles.size} selected songs.`,
+      buttons: [{ text: 'Done', onPress: () => {} }],
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedFiles.size === availableAudioFiles.length) {
+      setSelectedFiles(new Set());
+    } else {
+      setSelectedFiles(new Set(availableAudioFiles.map(f => f.uri)));
+    }
+  };
+
+  const toggleFileSelection = (uri: string) => {
+    const newSelected = new Set(selectedFiles);
+    if (newSelected.has(uri)) {
+      newSelected.delete(uri);
+    } else {
+      newSelected.add(uri);
+    }
+    setSelectedFiles(newSelected);
   };
 
   return (
@@ -203,11 +333,23 @@ const SettingsScreen: React.FC<Props> = () => {
         <ScrollView contentContainerStyle={styles.content}>
           {/* Profile Section */}
           <View style={styles.profileSection}>
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={40} color={Colors.textSecondary} />
-            </View>
-            <Text style={styles.profileName}>LyricFlow User</Text>
-            <Text style={styles.profileEmail}>Offline Mode</Text>
+            <Pressable style={styles.avatar} onPress={handleEditAvatar}>
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+              ) : (
+                <Ionicons name="person" size={40} color={Colors.textSecondary} />
+              )}
+              <View style={styles.editBadge}>
+                <Ionicons name="camera" size={14} color="#000" />
+              </View>
+            </Pressable>
+            <Pressable onPress={handleEditName}>
+              <View style={styles.nameContainer}>
+                <Text style={styles.profileName}>{profileName}</Text>
+                <Ionicons name="create-outline" size={16} color={Colors.textSecondary} style={{ marginLeft: 6 }} />
+              </View>
+            </Pressable>
+            <Text style={styles.profileEmail}>Offline Mode • Privacy First</Text>
           </View>
 
           {/* Quick Actions */}
@@ -252,6 +394,12 @@ const SettingsScreen: React.FC<Props> = () => {
               onToggle={() => {}}
             />
             <SettingsRowSwitch
+              icon="musical-note-outline"
+              label="Play in Mini Player Only"
+              value={settings.playInMiniPlayerOnly}
+              onToggle={settings.setPlayInMiniPlayerOnly}
+            />
+            <SettingsRowSwitch
               icon="sunny-outline"
               label="Keep Screen On"
               value={settings.keepScreenOn}
@@ -265,7 +413,13 @@ const SettingsScreen: React.FC<Props> = () => {
               icon="folder-outline"
               label={isImporting ? 'Importing...' : 'Import Local Audio'}
               value={isImporting ? '' : 'Tap to scan'}
-              onPress={isImporting ? undefined : handleImportLocalAudio}
+              onPress={handleImportLocalAudio}
+            />
+            <SettingsRow
+              icon="image-outline"
+              label="Set Cover for All Imported"
+              value="Batch update"
+              onPress={handleBatchCoverArt}
             />
             <SettingsRowSwitch
               icon="download-outline"
@@ -313,6 +467,101 @@ const SettingsScreen: React.FC<Props> = () => {
         buttons={alertConfig.buttons}
         onClose={() => setAlertConfig({ ...alertConfig, visible: false })}
       />
+      
+      <Modal
+        visible={editNameVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditNameVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setEditNameVisible(false)}>
+          <View style={styles.nameModal}>
+            <Text style={styles.nameModalTitle}>Edit Name</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={tempName}
+              onChangeText={setTempName}
+              placeholder="Enter your name"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              autoFocus
+            />
+            <View style={styles.nameModalButtons}>
+              <Pressable style={styles.nameModalButton} onPress={() => setEditNameVisible(false)}>
+                <Text style={styles.nameModalButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.nameModalButton, styles.nameModalButtonPrimary]} onPress={handleSaveName}>
+                <Text style={[styles.nameModalButtonText, styles.nameModalButtonTextPrimary]}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={selectionModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectionModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.selectionOverlay}
+          onPress={() => setSelectionModalVisible(false)}
+        >
+          <Pressable 
+            style={styles.selectionContainer}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.selectionHeader}>
+              <Text style={styles.selectionTitle}>Select Songs ({selectedFiles.size}/{availableAudioFiles.length})</Text>
+              <Pressable onPress={() => setSelectionModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </Pressable>
+            </View>
+            <Pressable style={styles.selectAllButton} onPress={toggleSelectAll}>
+              <Ionicons 
+                name={selectedFiles.size === availableAudioFiles.length ? "checkbox" : "square-outline"} 
+                size={24} 
+                color="#007AFF" 
+              />
+              <Text style={styles.selectAllText}>Select All</Text>
+            </Pressable>
+            <ScrollView style={styles.selectionList}>
+              {availableAudioFiles.map((file) => (
+                <Pressable
+                  key={file.uri}
+                  style={styles.selectionItem}
+                  onPress={() => toggleFileSelection(file.uri)}
+                >
+                  <Ionicons 
+                    name={selectedFiles.has(file.uri) ? "checkbox" : "square-outline"} 
+                    size={24} 
+                    color={selectedFiles.has(file.uri) ? "#007AFF" : Colors.textSecondary} 
+                  />
+                  <View style={styles.selectionItemInfo}>
+                    <Text style={styles.selectionItemTitle} numberOfLines={1}>{file.filename.replace(/\.[^/.]+$/, '')}</Text>
+                    <Text style={styles.selectionItemArtist} numberOfLines={1}>{file.artist || file.album || 'Unknown'}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <View style={styles.selectionActions}>
+              <Pressable 
+                style={[styles.selectionButton, styles.selectionButtonCancel]} 
+                onPress={() => setSelectionModalVisible(false)}
+              >
+                <Text style={styles.selectionButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.selectionButton, styles.selectionButtonImport, selectedFiles.size === 0 && styles.selectionButtonDisabled]} 
+                onPress={handleImportSelected}
+                disabled={selectedFiles.size === 0}
+              >
+                <Text style={[styles.selectionButtonText, styles.selectionButtonTextImport]}>Import {selectedFiles.size}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -385,47 +634,75 @@ const styles = StyleSheet.create({
   },
   profileSection: {
     alignItems: 'center',
-    marginTop: 48,
-    marginBottom: 24,
+    marginTop: 24,
+    marginBottom: 32,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     backgroundColor: Colors.card,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    position: 'relative',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 45,
+  },
+  editBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: Colors.background,
+  },
+  nameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   profileName: {
     fontSize: 24,
     fontWeight: '700',
     color: Colors.textPrimary,
-    marginBottom: 4,
   },
   profileEmail: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textSecondary,
+    marginTop: 4,
   },
   quickActions: {
     flexDirection: 'row',
     gap: 12,
     marginBottom: 32,
+    paddingHorizontal: 4,
   },
   quickAction: {
     flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 20,
+    padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 100,
+    height: 110,
     gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   quickActionText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: Colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
   },
   section: {
     marginBottom: 32,
@@ -442,8 +719,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
+    paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(44,44,46,0.5)',
+    borderBottomColor: 'rgba(44,44,46,0.3)',
     gap: 16,
   },
   settingsLabel: {
@@ -460,6 +738,148 @@ const styles = StyleSheet.create({
   settingsValueText: {
     fontSize: 16,
     color: Colors.textSecondary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  nameModal: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 16,
+    padding: 24,
+    width: '80%',
+    maxWidth: 320,
+  },
+  nameModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  nameInput: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: Colors.textPrimary,
+    marginBottom: 20,
+  },
+  nameModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  nameModalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+  },
+  nameModalButtonPrimary: {
+    backgroundColor: '#007AFF',
+  },
+  nameModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  nameModalButtonTextPrimary: {
+    color: '#fff',
+  },
+  selectionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'flex-end',
+  },
+  selectionContainer: {
+    backgroundColor: '#1C1C1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: 40,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  selectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  selectAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  selectAllText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  selectionList: {
+    maxHeight: 400,
+  },
+  selectionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  selectionItemInfo: {
+    flex: 1,
+  },
+  selectionItemTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  selectionItemArtist: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  selectionActions: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  selectionButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  selectionButtonCancel: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  selectionButtonImport: {
+    backgroundColor: '#007AFF',
+  },
+  selectionButtonDisabled: {
+    backgroundColor: 'rgba(0,122,255,0.3)',
+  },
+  selectionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  selectionButtonTextImport: {
+    color: '#fff',
   },
 });
 

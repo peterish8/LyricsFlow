@@ -15,29 +15,40 @@ import {
   Alert,
   Modal,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { TabScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
+import { usePlayerStore } from '../store/playerStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
-import { AuroraHeader, SongCard, CustomMenu } from '../components';
+import { AuroraHeader, SongCard, CustomMenu, MiniPlayer } from '../components';
 import { Colors } from '../constants/colors';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Song } from '../types/song';
 import * as ImagePicker from 'expo-image-picker';
+import { useTasksStore } from '../store/tasksStore';
+import { TasksModal } from '../components/TasksModal';
 
 type Props = TabScreenProps<'Library'>;
 
 const LibraryScreen: React.FC<Props> = ({ navigation }) => {
-  const { songs, isLoading, fetchSongs, setCurrentSong, updateSong } = useSongsStore();
+  const { songs, isLoading, fetchSongs, setCurrentSong, updateSong, currentSong } = useSongsStore();
   const { recentArts, addRecentArt } = useArtHistoryStore();
+  const gradientOpacity = React.useRef(new Animated.Value(1)).current;
   
   const [artMenuVisible, setArtMenuVisible] = React.useState(false);
   const [artMenuAnchor, setArtMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
   const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
   const [recentArtVisible, setRecentArtVisible] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [showTasksModal, setShowTasksModal] = React.useState(false);
+
+  const { tasks } = useTasksStore();
+  const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
 
   useEffect(() => {
     fetchSongs();
@@ -50,12 +61,36 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
+  const playInMiniPlayerOnly = useSettingsStore((state) => state.playInMiniPlayerOnly);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchSongs();
+    setRefreshing(false);
+  };
+
   const handleSongPress = useCallback((song: Song) => {
-    setCurrentSong(song);
-    navigation.navigate('NowPlaying', { songId: song.id });
-  }, [navigation, setCurrentSong]);
+    if (playInMiniPlayerOnly) {
+      // If tapping the currently playing song, open NowPlayingScreen
+      if (currentSong?.id === song.id) {
+        navigation.navigate('NowPlaying', { songId: song.id });
+      } else {
+        // First tap or different song: Play in mini player (just set current)
+        setCurrentSong(song);
+      }
+    } else {
+      // Default: Always navigate to NowPlayingScreen
+      setCurrentSong(song);
+      navigation.navigate('NowPlaying', { songId: song.id });
+    }
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly, currentSong]);
 
   const handleSongLongPress = useCallback((song: Song, event: any) => {
+    if (!event?.nativeEvent) {
+      setSelectedSongForArt(song);
+      setArtMenuVisible(true);
+      return;
+    }
     const { pageX, pageY } = event.nativeEvent;
     setSelectedSongForArt(song);
     setArtMenuAnchor({ x: pageX, y: pageY });
@@ -125,6 +160,31 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         setTimeout(() => setRecentArtVisible(true), 100);
       },
     }] : []),
+    {
+      label: 'Delete Song',
+      icon: 'trash-outline' as const,
+      onPress: async () => {
+        setArtMenuVisible(false);
+        if (selectedSongForArt) {
+          Alert.alert(
+            'Delete Song',
+            `Delete "${selectedSongForArt.title}"? This cannot be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  const { deleteSong } = useSongsStore.getState();
+                  await deleteSong(selectedSongForArt.id);
+                  fetchSongs();
+                },
+              },
+            ]
+          );
+        }
+      },
+    },
   ];
 
   const topSongs = songs.slice(0, 2);
@@ -160,28 +220,44 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <AuroraHeader palette="library" />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: gradientOpacity }]}>
+        <AuroraHeader palette="library" />
+      </Animated.View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft} />
           <View style={styles.headerRight}>
-            <Pressable style={styles.headerButton}>
-              <Ionicons name="notifications-outline" size={24} color="#fff" />
+            <Pressable 
+              style={styles.headerButton}
+              onPress={() => navigation.navigate('Search')}
+            >
+              <Ionicons name="search" size={24} color="#fff" />
+            </Pressable>
+            <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
+              <View>
+                <Ionicons name="notifications-outline" size={24} color="#fff" />
+                {activeTasksCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{activeTasksCount}</Text>
+                  </View>
+                )}
+              </View>
             </Pressable>
             <Pressable 
               style={styles.headerButton}
-              onPress={() => navigation.navigate('Search' as never)}
+              onPress={handleAddPress}
             >
-              <Ionicons name="search-outline" size={24} color="#fff" />
+              <Ionicons name="add" size={24} color="#fff" />
             </Pressable>
           </View>
         </View>
 
         {/* Content */}
-        <FlatList
+        <FlatList<Song>
           key="library-list"
-          data={[]}
+          data={[] as Song[]}
           keyExtractor={(item) => item.id}
           renderItem={() => null}
           contentContainerStyle={styles.listContent}
@@ -190,25 +266,37 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
             songs.length > 0 ? (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Most Played</Text>
+                  <Text style={styles.sectionTitle}>Recently Played</Text>
                 </View>
-                <View style={styles.topGrid}>
-                  {topSongs.map((song, index) => (
-                    <View key={song.id} style={[styles.cardWrapper, index % 2 === 0 && styles.cardLeft]}>
-                      <SongCard
-                        id={song.id}
-                        title={song.title}
-                        artist={song.artist}
-                        album={song.album}
-                        gradientId={song.gradientId}
-                        coverImageUri={song.coverImageUri}
-                        duration={song.duration}
-                        onPress={() => handleSongPress(song)}
-                        onLongPress={(e) => handleSongLongPress(song, e)}
-                      />
-                    </View>
-                  ))}
-                </View>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalScroll}
+                >
+                  {songs
+                    .filter(song => song.lastPlayed)
+                    .sort((a, b) => {
+                      const dateA = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
+                      const dateB = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
+                      return dateB - dateA;
+                    })
+                    .slice(0, 10)
+                    .map((song) => (
+                      <View key={song.id} style={styles.horizontalCard}>
+                        <SongCard
+                          id={song.id}
+                          title={song.title}
+                          artist={song.artist}
+                          album={song.album}
+                          gradientId={song.gradientId}
+                          coverImageUri={song.coverImageUri}
+                          duration={song.duration}
+                          onPress={() => handleSongPress(song)}
+                          onLongPress={() => handleSongLongPress(song, {} as any)}
+                        />
+                      </View>
+                    ))}
+                </ScrollView>
                 {songs.length > 2 && (
                   <>
                     <View style={styles.sectionHeader}>
@@ -219,16 +307,15 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                         key={song.id}
                         style={styles.listItem}
                         onPress={() => handleSongPress(song)}
-                        onLongPress={(e) => handleSongLongPress(song, e)}
+                        onLongPress={(e: any) => handleSongLongPress(song, e)}
                       >
                         <View style={styles.listItemThumbnail}>
                           {song.coverImageUri ? (
                             <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
                           ) : (
-                            <LinearGradient
-                              colors={getGradientById(song.gradientId)?.colors as [string, string, ...string[]] || GRADIENTS[0].colors as [string, string, ...string[]]}
-                              style={styles.listItemImage}
-                            />
+                            <View style={styles.defaultListThumbnail}>
+                              <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
+                            </View>
                           )}
                         </View>
                         <View style={styles.listItemContent}>
@@ -246,17 +333,23 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           }
           refreshControl={
             <RefreshControl
-              refreshing={isLoading}
-              onRefresh={fetchSongs}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
               tintColor={Colors.textSecondary}
             />
           }
+          onScroll={(e) => {
+            const offsetY = e.nativeEvent.contentOffset.y;
+            Animated.timing(gradientOpacity, {
+              toValue: offsetY < 50 ? 1 : 0,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
+          }}
+          scrollEventThrottle={8}
         />
 
-        {/* FAB */}
-        <Pressable style={styles.fab} onPress={handleAddPress}>
-          <Ionicons name="add" size={28} color="#000" />
-        </Pressable>
+        {/* FAB - Hidden */}
       </SafeAreaView>
       
       <CustomMenu
@@ -296,6 +389,13 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </Pressable>
       </Modal>
+      
+      <TasksModal
+        visible={showTasksModal}
+        onClose={() => setShowTasksModal(false)}
+      />
+      
+      <MiniPlayer />
     </View>
   );
 };
@@ -324,6 +424,26 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     padding: 4,
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 16,
@@ -334,6 +454,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     marginBottom: 32,
+  },
+  horizontalScroll: {
+    paddingRight: 16,
+    gap: 12,
+  },
+  horizontalCard: {
+    width: 160,
   },
   row: {
     gap: 16,
@@ -406,7 +533,7 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 180,
     right: 24,
     width: 56,
     height: 56,
@@ -435,6 +562,14 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 6,
     overflow: 'hidden',
+    backgroundColor: '#2C2C2E',
+  },
+  defaultListThumbnail: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2C2C2E',
   },
   listItemImage: {
     width: '100%',

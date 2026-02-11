@@ -11,12 +11,13 @@ export type RootStackParamList = {
   Main: undefined;
   NowPlaying: { songId: string };
   AddEditLyrics: { songId?: string }; // undefined = add new, string = edit existing
+  Search: undefined;
 };
 
 // Bottom Tab Navigator
 export type TabParamList = {
   Library: undefined;
-  Search: undefined;
+  Liked: undefined;
   Settings: undefined;
 };
 

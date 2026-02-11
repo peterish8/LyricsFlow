@@ -1,0 +1,6 @@
+DEBUG First Compare:
+Lyric: ["two","augusts","ago"]
+Window: [" Two"," August"," ago,"]
+DTW Score: 0.047619047619047616
+Similarity: 0.9545454545454545
+Final Score: 0.8156516978122067

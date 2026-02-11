@@ -6,6 +6,7 @@
 import React, { memo } from 'react';
 import { StyleSheet, View, Text, Pressable, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Colors } from '../constants/colors';
 import { formatSongSubtitle } from '../utils/formatters';
@@ -53,12 +54,9 @@ export const SongCard: React.FC<SongCardProps> = memo(({
             style={styles.thumbnail} 
           />
         ) : (
-          <LinearGradient
-            colors={gradient.colors as [string, string, ...string[]]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.thumbnail}
-          />
+          <View style={styles.defaultThumbnail}>
+            <Ionicons name="disc" size={48} color="rgba(255,255,255,0.3)" />
+          </View>
         )}
         <View style={styles.thumbnailOverlay} />
       </View>
@@ -94,7 +92,13 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: Colors.card,
+    backgroundColor: '#2C2C2E',
+  },
+  defaultThumbnail: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2C2C2E',
   },
   thumbnail: {
     flex: 1,

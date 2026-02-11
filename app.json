@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lyricflow.app"
+      "bundleIdentifier": "com.lyricflow.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,13 +25,25 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.lyricflow.app"
+      "package": "com.lyricflow.app",
+      "scheme": "lyricflow",
+      "permissions": [
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-audio",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow LuvLyrics to access your microphone for audio recording."
+        }
+      ]
     ],
     "extra": {
       "eas": {

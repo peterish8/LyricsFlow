@@ -9,10 +9,11 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { TabParamList } from '../types/navigation';
 import { Colors } from '../constants/colors';
+import { CustomTabBar } from '../components';
 
 // Import screens
 import LibraryScreen from '../screens/LibraryScreen';
-import SearchScreen from '../screens/SearchScreen';
+import LikedSongsScreen from '../screens/LikedSongsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -34,7 +35,7 @@ export const TabNavigator: React.FC = () => {
         options={{
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'library' : 'library-outline'}
+              name={focused ? 'home' : 'home-outline'}
               size={24}
               color={color}
             />
@@ -42,12 +43,13 @@ export const TabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Search"
-        component={SearchScreen}
+        name="Liked"
+        component={LikedSongsScreen}
         options={{
+          tabBarLabel: 'Liked',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'search' : 'search-outline'}
+              name={focused ? 'heart' : 'heart-outline'}
               size={24}
               color={color}
             />
@@ -75,9 +77,9 @@ const styles = StyleSheet.create({
   tabBar: {
     backgroundColor: '#212121',
     borderTopColor: 'rgba(255,255,255,0.05)',
-    height: 85,
+    height: 70,
     paddingTop: 8,
-    paddingBottom: 25,
+    paddingBottom: 10,
   },
   tabBarLabel: {
     fontSize: 10,

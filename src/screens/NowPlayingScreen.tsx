@@ -13,6 +13,10 @@ import {
   Dimensions,
   GestureResponderEvent,
   Image,
+  Modal,
+  ScrollView,
+  Animated as RNAnimated,
+  PanResponder,
 } from 'react-native';
 import Animated, { 
   FadeInDown, 
@@ -35,9 +39,19 @@ import {
   PlayerControls,
   CustomMenu,
 } from '../components';
-import { getGradientById, GRADIENTS } from '../constants/gradients';
+import { getGradientById, GRADIENTS, getGradientColors } from '../constants/gradients';
+import { Colors } from '../constants/colors';
 import { calculateDuration } from '../utils/timestampParser';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { Alert } from 'react-native';
+import { MagicModeModal } from '../components/MagicModeModal';
+import { ProcessingOverlay } from '../components/ProcessingOverlay';
+import { getAutoTimestampService, AutoTimestampResult } from '../services/autoTimestampServiceV2';
+import { lyricsToRawText } from '../utils/timestampParser';
+import { formatTime } from '../utils/formatters';
+import { audioService } from '../services/audioService';
+import { useTasksStore } from '../store/tasksStore';
+import { TasksModal } from '../components/TasksModal';
 
 type Props = RootStackScreenProps<'NowPlaying'>;
 
@@ -49,7 +63,9 @@ const LyricItem = React.memo<{
   displayLineIndex: number;
   align: 'left' | 'center' | 'right';
   onPress: () => void;
-}>(({ item, index, displayLineIndex, align, onPress }) => {
+  hasTimestamps: boolean;
+  isPlaying: boolean;
+}>(({ item, index, displayLineIndex, align, onPress, hasTimestamps, isPlaying }) => {
   const isActive = index === displayLineIndex;
   const isPast = index < displayLineIndex;
   
@@ -59,7 +75,7 @@ const LyricItem = React.memo<{
   const bar3Height = useSharedValue(16);
   
   useEffect(() => {
-    if (isActive && item.text.toUpperCase().includes('[INSTRUMENTAL]')) {
+    if (isActive && isPlaying && item.text.toUpperCase().includes('[INSTRUMENTAL]')) {
       const animate = () => {
         bar1Height.value = withSpring(Math.random() * 20 + 20, { damping: 10 });
         bar2Height.value = withSpring(Math.random() * 20 + 30, { damping: 10 });
@@ -67,12 +83,9 @@ const LyricItem = React.memo<{
       };
       const interval = setInterval(animate, 400);
       return () => clearInterval(interval);
-    } else {
-      bar1Height.value = 24;
-      bar2Height.value = 40;
       bar3Height.value = 16;
     }
-  }, [isActive]);
+  }, [isActive, isPlaying]);
   
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 }],
@@ -109,8 +122,9 @@ const LyricItem = React.memo<{
             style={[
               styles.lyricText,
               animatedStyle,
-              isActive && styles.lyricActive,
-              isPast && styles.lyricPast,
+              !hasTimestamps && styles.lyricNoTimestamp,
+              hasTimestamps && isActive && styles.lyricActive,
+              hasTimestamps && isPast && styles.lyricPast,
               align === 'left' && styles.lyricLeft,
               align === 'center' && styles.lyricCenter,
               align === 'right' && styles.lyricRight,
@@ -124,13 +138,28 @@ const LyricItem = React.memo<{
   );
 });
 
+const ConnectedScrubber = React.memo(({ onSeek }: { onSeek: (time: number) => void }) => {
+  const currentTime = usePlayerStore(state => state.currentTime);
+  const duration = usePlayerStore(state => state.duration);
+
+  return (
+    <Scrubber
+      currentTime={currentTime}
+      duration={duration}
+      onSeek={onSeek}
+    />
+  );
+});
+
 const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const { songId } = route.params;
-  const { currentSong, getSong, updateSong, setCurrentSong } = useSongsStore();
+  const isFocused = useIsFocused();
+  const { currentSong, getSong, updateSong, setCurrentSong, songs } = useSongsStore();
   const { recentArts, addRecentArt } = useArtHistoryStore();
+  // Player is now managed by PlayerProvider
   const {
     isPlaying,
-    currentTime,
+    // currentTime, // REMOVED: Caused full re-renders
     currentLineIndex,
     lyrics,
     duration,
@@ -147,7 +176,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     dequeueNextSong,
     shouldAutoPlayOnLoad,
     setShouldAutoPlayOnLoad,
+    queueSongIds,
+    clearQueue,
   } = usePlayerStore();
+
+  // Player registration and sync now handled by PlayerProvider
 
   const flatListRef = useRef<FlatList>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -164,6 +197,29 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const hideControlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsOpacity = useSharedValue(1);
   const controlsTranslateY = useSharedValue(0);
+  const vinylSpinValue = useRef(new RNAnimated.Value(0)).current;
+  const titleScrollAnim = useRef(new RNAnimated.Value(0)).current;
+  const [titleWidth, setTitleWidth] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  
+  // Pan responder for swipe down on vinyl screen
+  const vinylPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // More permissible gesture detection
+        return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 50) {
+          handleDismiss();
+        }
+      },
+      onPanResponderTerminate: () => {
+        // Handle termination if needed
+      }
+    })
+  ).current;
   
   // Menus state
   const [menuVisible, setMenuVisible] = useState(false);
@@ -174,8 +230,282 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   
   const [textCaseMenuVisible, setTextCaseMenuVisible] = useState(false);
   const [textCaseMenuAnchor, setTextCaseMenuAnchor] = useState<{ x: number, y: number } | undefined>(undefined);
+  const [showLyrics, setShowLyrics] = useState(true);
+  const [queueVisible, setQueueVisible] = useState(false);
+  
+  // Magic Mode State
+  const [showMagicModal, setShowMagicModal] = useState(false);
+  const [showTasksModal, setShowTasksModal] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState('');
+  const [processingProgress, setProcessingProgress] = useState(0);
 
-  // Auto-hide controls after 3.5 seconds only when playing
+  // Tasks Store
+  const { addTask, updateTask, tasks } = useTasksStore();
+  const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+
+  // Magic Mode Handler
+  const handleMagicMode = async () => {
+    // Get latest song data from store to ensure we have fresh metadata
+    const songId = currentSong?.id;
+    if (!songId) {
+      Alert.alert('Error', 'No song is currently selected.');
+      return;
+    }
+
+    const latestSong = await getSong(songId);
+    if (!latestSong?.audioUri) {
+      Alert.alert('No Audio', 'Magic Timestamp requires an audio file.');
+      return;
+    }
+
+    if (!latestSong.lyrics || latestSong.lyrics.length === 0) {
+      Alert.alert(
+        'No Lyrics', 
+        'This song has no lyrics to align. Use Pure Magic to generate lyrics from audio.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Use Pure Magic', onPress: handlePureMagicMode }
+        ]
+      );
+      return;
+    }
+
+    setShowMagicModal(false);
+    
+    setShowMagicModal(false);
+    
+    // Register background task with REVERT data (snapshot of current state)
+    const taskId = addTask(latestSong.id, latestSong.title, 'magic', {
+      lyrics: latestSong.lyrics,
+      duration: latestSong.duration,
+      dateModified: latestSong.dateModified
+    });
+    setIsProcessing(true); // Still show local overlay for immediate feedback
+    setProcessingStage('Starting Magic mode...');
+
+    try {
+      const service = getAutoTimestampService();
+      const rawLyrics = lyricsToRawText(latestSong.lyrics);
+
+      updateTask(taskId, { status: 'processing', stage: 'Initializing Whisper...' });
+
+      const result = await service.processAudio(
+        latestSong.audioUri,
+        rawLyrics,
+        (stage, progress) => {
+          setProcessingStage(stage);
+          setProcessingProgress(progress);
+          updateTask(taskId, { stage, progress });
+        }
+      );
+
+      await handleTimestampResult(result, 'Magic');
+      updateTask(taskId, { status: 'completed', stage: 'Complete!', progress: 1, dateCompleted: new Date().toISOString() });
+
+    } catch (error: any) {
+      updateTask(taskId, { status: 'failed', stage: `Error: ${error.message}` });
+      handleTimestampError(error);
+    } finally {
+      setIsProcessing(false);
+      setProcessingStage('');
+      setProcessingProgress(0);
+    }
+  };
+
+  // Pure Magic Handler
+  const handlePureMagicMode = async () => {
+    if (isProcessing) return; // Prevent concurrent calls
+
+    const songId = currentSong?.id;
+    if (!songId) {
+      Alert.alert('Error', 'No song is currently selected.');
+      return;
+    }
+
+    const latestSong = await getSong(songId);
+    if (!latestSong?.audioUri) {
+      Alert.alert('No Audio', 'Pure Magic requires an audio file.');
+      return;
+    }
+
+    // Confirm overwrite
+    if (latestSong.lyrics && latestSong.lyrics.length > 0) {
+       Alert.alert(
+        'Overwrite Lyrics?',
+        'Pure Magic will replace existing lyrics. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Continue', onPress: executePureMagic }
+        ]
+      );
+    } else {
+      executePureMagic();
+    }
+  };
+
+  const executePureMagic = async () => {
+    const songId = currentSong?.id;
+    if (!songId) return;
+
+    setShowMagicModal(false);
+    
+    const latestSong = await getSong(songId);
+    if (!latestSong?.audioUri) return;
+
+    // Register background task with REVERT data
+    const taskId = addTask(latestSong.id, latestSong.title, 'pure-magic', {
+      lyrics: latestSong.lyrics,
+      duration: latestSong.duration,
+      dateModified: latestSong.dateModified
+    });
+    setIsProcessing(true);
+    setProcessingStage('Starting Pure Magic mode...');
+
+    try {
+      const service = getAutoTimestampService();
+
+      updateTask(taskId, { status: 'processing', stage: 'Initializing AI...' });
+
+      const result = await service.autoGenerateLyrics(
+        latestSong.audioUri,
+        (stage, progress) => {
+          setProcessingStage(stage);
+          setProcessingProgress(progress);
+          updateTask(taskId, { stage, progress });
+        }
+      );
+
+      await handleTimestampResult(result, 'Pure Magic');
+      updateTask(taskId, { status: 'completed', stage: 'Complete!', progress: 1, dateCompleted: new Date().toISOString() });
+
+    } catch (error: any) {
+      updateTask(taskId, { status: 'failed', stage: `Error: ${error.message}` });
+      handleTimestampError(error);
+    } finally {
+      setIsProcessing(false);
+      setProcessingStage('');
+      setProcessingProgress(0);
+    }
+  };
+
+  const handleTimestampResult = async (result: AutoTimestampResult, mode: string) => {
+    // Map lyrics to include lineOrder to satisfy Song type
+    const mappedLyrics = result.lyrics.map((line, index) => ({
+      ...line,
+      lineOrder: index
+    }));
+
+    // CRITICAL: Fetch latest song data from store to ensure we don't overwrite
+    // manually edited metadata (title/artist) with stale component state.
+    const songId = currentSong?.id;
+    if (!songId) return;
+    
+    const latestSong = await getSong(songId);
+    if (!latestSong) return;
+
+    if (result.overallConfidence >= 0.6) {
+      // Update song in DB and Store
+      const finalDuration = mappedLyrics.length > 0 
+        ? mappedLyrics[mappedLyrics.length - 1].timestamp + 10 
+        : latestSong.duration;
+      
+      const updatedSong = {
+        ...latestSong,
+        lyrics: mappedLyrics,
+        duration: Math.max(latestSong.duration, finalDuration),
+        dateModified: new Date().toISOString(),
+      };
+
+      await updateSong(updatedSong);
+      setCurrentSong(updatedSong);
+      setLyrics(mappedLyrics, updatedSong.duration);
+      
+      Alert.alert(
+        '✨ Magic Complete!',
+        `${mode} successfully processed lyrics.\nConfidence: ${(result.overallConfidence * 100).toFixed(0)}%`
+      );
+    } else {
+       Alert.alert(
+        '⚠️ Low Confidence',
+        `Confidence: ${(result.overallConfidence * 100).toFixed(0)}%. Lyrics updated but may need manual review.`
+      );
+      // Still update to save progress
+      const updatedSong = {
+        ...latestSong,
+        lyrics: mappedLyrics,
+        dateModified: new Date().toISOString(),
+      };
+      await updateSong(updatedSong);
+      setCurrentSong(updatedSong);
+      setLyrics(mappedLyrics, updatedSong.duration);
+    }
+  };
+
+
+  const handleTimestampError = async (error: any) => {
+    console.error('Magic Timestamp Error:', error);
+    
+    // Release service to clear any stuck context
+    try {
+      const service = getAutoTimestampService();
+      await service.release();
+    } catch (e) {
+      console.warn('Failed to release service on error:', e);
+    }
+
+    Alert.alert('Error', `Magic Timestamp failed: ${error.message}`);
+    setIsProcessing(false);
+  };
+
+  // Title scrolling animation
+  useEffect(() => {
+    const shouldScroll = isFocused && isPlaying && titleWidth > 0 && containerWidth > 0 && titleWidth > containerWidth;
+    
+    if (shouldScroll) {
+      titleScrollAnim.setValue(0);
+      RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.delay(1000),
+          RNAnimated.timing(titleScrollAnim, {
+            toValue: -(titleWidth - containerWidth + 20),
+            duration: (titleWidth - containerWidth + 20) * 30,
+            useNativeDriver: true,
+          }),
+          RNAnimated.delay(1000),
+          RNAnimated.timing(titleScrollAnim, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      titleScrollAnim.stopAnimation();
+      titleScrollAnim.setValue(0);
+    }
+  }, [isPlaying, titleWidth, containerWidth, currentSong?.title]);
+
+  // Vinyl rotation animation
+  useEffect(() => {
+    if (isPlaying && (!showLyrics || lyrics.length === 0)) {
+      vinylSpinValue.setValue(0);
+      RNAnimated.timing(vinylSpinValue, {
+        toValue: 100,
+        duration: 600000,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      vinylSpinValue.stopAnimation();
+    }
+  }, [isPlaying, showLyrics, lyrics.length]);
+
+  const vinylSpin = vinylSpinValue.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0deg', '36000deg'],
+  });
+
+  // Auto-hide controls after 3.5 seconds only when playing AND has lyrics
   useEffect(() => {
     if (hideControlsTimerRef.current) {
       clearTimeout(hideControlsTimerRef.current);
@@ -185,7 +515,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     controlsTranslateY.value = withSpring(0);
     setControlsVisible(true);
     
-    if (!isPlaying) return;
+    // Don't auto-hide if no lyrics or not playing
+    if (!isPlaying || lyrics.length === 0) return;
     
     hideControlsTimerRef.current = setTimeout(() => {
       controlsOpacity.value = withSpring(0);
@@ -198,11 +529,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         clearTimeout(hideControlsTimerRef.current);
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, lyrics.length]);
 
   const handleScreenTap = () => {
-    if (!isPlaying) return;
-    
+    // Show controls on tap/scroll regardless of play state
     controlsOpacity.value = withSpring(1);
     controlsTranslateY.value = withSpring(0);
     setControlsVisible(true);
@@ -232,6 +562,15 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         const finalDuration = song.duration > 0 ? song.duration : calculateDuration(song.lyrics);
         setLyrics(song.lyrics, finalDuration);
         setCurrentSong(song);
+        
+        // Audio loading now handled by PlayerProvider
+        
+        // Auto-fill queue with remaining songs if empty
+        if (queueSongIds.length === 0) {
+          const remainingSongs = songs.filter(s => s.id !== songId).map(s => s.id);
+          remainingSongs.forEach(id => enqueueSong(id));
+        }
+        
         if (shouldAutoPlayOnLoad) {
           play();
           setShouldAutoPlayOnLoad(false);
@@ -244,9 +583,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     loadSong();
 
     return () => {
-      reset();
+      // No cleanup needed - let audio play in background and update store
     };
-  }, [songId, shouldAutoPlayOnLoad]);
+    // FIXED: Don't re-run when shouldAutoPlayOnLoad changes (it flips to false after load)
+  }, [songId]);
 
   // Auto-scroll animation loop (requestAnimationFrame)
   useEffect(() => {
@@ -258,7 +598,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       lastFrameTimeRef.current = null;
     };
 
-    if (!isPlaying) {
+    if (!isPlaying || !showLyrics || !isFocused) {
       cancelLoop();
       return;
     }
@@ -272,11 +612,24 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       lastFrameTimeRef.current = frameTime;
 
       if (hasTimestamps.current) {
-        tick(dt);
-      } else if (flatListRef.current && contentHeightRef.current > 0 && duration > 0) {
-        const visibleHeight = SCREEN_HEIGHT * 0.6;
-        const scrollDistance = Math.max(0, contentHeightRef.current - visibleHeight + 200);
-        const speed = duration > 0 ? (scrollDistance / duration) : (currentSong?.scrollSpeed ?? 50);
+        // Tick to update time even without audio
+        // FIXED: Only tick if NO audio is driving the time to prevent jitter/glitches
+        if (!currentSong?.audioUri) {
+          tick(dt);
+        }
+      } else if (flatListRef.current && contentHeightRef.current > 0) {
+        // Calculate max scrollable distance (total content - viewport)
+        // We use SCREEN_HEIGHT as approx viewport height
+        const viewportHeight = SCREEN_HEIGHT;
+        const maxScrollOffset = Math.max(0, contentHeightRef.current - viewportHeight);
+        
+        // Use exact audio duration if available, else fallback
+        const effectiveDuration = duration > 0 ? duration : 60;
+        
+        // Speed = Total Distance / Total Time
+        // This ensures scanning finishes exactly when audio ends
+        const speed = (maxScrollOffset / effectiveDuration);
+        
         autoScrollOffsetRef.current += speed * dt;
 
         flatListRef.current.scrollToOffset({
@@ -284,7 +637,9 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
           animated: false,
         });
 
-        tick(dt);
+        if (!currentSong?.audioUri) {
+          tick(dt);
+        }
       }
 
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -295,29 +650,37 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelLoop();
     };
-  }, [isPlaying, duration, currentSong?.scrollSpeed]);
+  }, [isPlaying, duration, currentSong?.scrollSpeed, showLyrics, currentSong?.audioUri]);
 
   // Transition to queued song when current one completes
+  // Optimized: Uses subscription to avoid re-rendering on every second
   useEffect(() => {
-    if (transitionInProgressRef.current) return;
-    if (duration <= 0 || currentTime < duration) return;
+    const unsub = usePlayerStore.subscribe((state) => {
+      const { currentTime, duration, isPlaying } = state;
+      
+      if (transitionInProgressRef.current) return;
+      if (duration <= 0 || currentTime < duration) return;
+      if (!isPlaying) return;
 
-    let nextSongId = dequeueNextSong();
-    while (nextSongId && nextSongId === songId) {
-      nextSongId = dequeueNextSong();
-    }
-    if (!nextSongId) return;
+      let nextSongId = dequeueNextSong();
+      while (nextSongId && nextSongId === songId) {
+        nextSongId = dequeueNextSong();
+      }
+      if (!nextSongId) return;
 
-    transitionInProgressRef.current = true;
-    autoScrollOffsetRef.current = 0;
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    setShouldAutoPlayOnLoad(true);
-    navigation.replace('NowPlaying', { songId: nextSongId });
+      transitionInProgressRef.current = true;
+      autoScrollOffsetRef.current = 0;
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setShouldAutoPlayOnLoad(true);
+      navigation.replace('NowPlaying', { songId: nextSongId });
 
-    setTimeout(() => {
-      transitionInProgressRef.current = false;
-    }, 0);
-  }, [currentTime, duration, isPlaying, songId]);
+      setTimeout(() => {
+        transitionInProgressRef.current = false;
+      }, 0);
+    });
+
+    return () => unsub();
+  }, [songId, navigation]);
 
   // Scroll first, then highlight after animation
   useEffect(() => {
@@ -343,13 +706,38 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [currentLineIndex, lyrics.length]);
 
+  // Initial sync when screen mounts or returns from background
+  useEffect(() => {
+    if (lyrics.length > 0 && hasTimestamps.current) {
+      // Sync display with current playback position
+      setDisplayLineIndex(currentLineIndex);
+      
+      // Scroll to current position without animation on mount
+      if (flatListRef.current && currentLineIndex >= 0 && currentLineIndex < lyrics.length) {
+        setTimeout(() => {
+          try {
+            flatListRef.current?.scrollToIndex({
+              index: currentLineIndex,
+              viewPosition: 0.3,
+              animated: false, // No animation on initial sync
+            });
+          } catch (e) {
+            // Ignore scroll errors
+          }
+        }, 100); // Small delay to ensure FlatList is ready
+      }
+    }
+  }, [lyrics.length]); // Only run when lyrics are loaded
+
   const handleDismiss = () => {
     navigation.goBack();
   };
 
   const handleLineTap = (index: number) => {
     if (lyrics[index] && hasTimestamps.current) {
-      seek(lyrics[index].timestamp);
+      const seekTime = lyrics[index].timestamp;
+      seek(seekTime); // PlayerProvider handles audio seeking
+      
       if (!isPlaying) {
         play();
       }
@@ -357,18 +745,26 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleSeek = (time: number) => {
-    seek(time);
+    seek(time); // PlayerProvider handles audio seeking
   };
 
   const handleSkipBackward = () => {
-    seek(Math.max(0, currentTime - 10));
+    const { currentTime } = usePlayerStore.getState();
+    const newTime = Math.max(0, currentTime - 10);
+    seek(newTime); // PlayerProvider handles audio seeking
   };
 
   const handleSkipForward = () => {
-    seek(Math.min(duration, currentTime + 10));
+    const { currentTime, duration } = usePlayerStore.getState();
+    const newTime = Math.min(duration, currentTime + 10);
+    seek(newTime); // PlayerProvider handles audio seeking
   };
 
   const handleMorePress = (event: GestureResponderEvent) => {
+    if (!event?.nativeEvent) {
+      setMenuVisible(true);
+      return;
+    }
     const { pageX, pageY } = event.nativeEvent;
     setMenuAnchor({ x: pageX, y: pageY });
     setMenuVisible(true);
@@ -397,6 +793,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   };
   
   const handleTextMenuPress = (event: GestureResponderEvent) => {
+    if (!event?.nativeEvent) {
+      setTextCaseMenuVisible(true);
+      return;
+    }
     const { pageX, pageY } = event.nativeEvent;
     setTextCaseMenuAnchor({ x: pageX, y: pageY });
     setTextCaseMenuVisible(true);
@@ -416,6 +816,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleArtLongPress = (event: GestureResponderEvent) => {
+    if (!event?.nativeEvent) {
+      setArtMenuVisible(true);
+      return;
+    }
     const { pageX, pageY } = event.nativeEvent;
     setArtMenuAnchor({ x: pageX, y: pageY });
     setArtMenuVisible(true);
@@ -432,8 +836,12 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
       if (!result.canceled && result.assets[0].uri && currentSong) {
         const uri = result.assets[0].uri;
+        // Get full song with lyrics from database
+        const fullSong = await getSong(currentSong.id);
+        if (!fullSong) return;
+        
         const updatedSong = {
-          ...currentSong,
+          ...fullSong,
           coverImageUri: uri,
           dateModified: new Date().toISOString(),
         };
@@ -451,8 +859,12 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const selectRecentArt = async (uri: string) => {
     if (currentSong) {
       try {
+        // Get full song with lyrics from database
+        const fullSong = await getSong(currentSong.id);
+        if (!fullSong) return;
+        
         const updatedSong = {
-          ...currentSong,
+          ...fullSong,
           coverImageUri: uri,
           dateModified: new Date().toISOString(),
         };
@@ -495,8 +907,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       displayLineIndex={displayLineIndex}
       align={currentSong?.lyricsAlign || 'left'}
       onPress={() => handleLineTap(index)}
+      hasTimestamps={hasTimestamps.current}
+      isPlaying={isPlaying}
     />
-  ), [displayLineIndex, currentSong?.lyricsAlign, currentSong?.textCase]);
+  ), [displayLineIndex, currentSong?.lyricsAlign, currentSong?.textCase, handleLineTap, isPlaying]);
 
   const artOptions = [
     {
@@ -513,66 +927,135 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
-      <GradientBackground gradientId={currentSong?.gradientId ?? 'aurora'} />
-      <View style={styles.overlay} />
+      {showLyrics && lyrics.length > 0 && (
+        <>
+          <GradientBackground gradientId={currentSong?.gradientId ?? 'aurora'} />
+          <View style={styles.overlay} />
+        </>
+      )}
 
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <Pressable style={styles.headerButton} onPress={handleDismiss}>
-            <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.6)" />
-          </Pressable>
-          <Pressable style={styles.headerButton} onPress={handleMorePress}>
-            <Ionicons name="ellipsis-horizontal" size={24} color="rgba(255,255,255,0.6)" />
-          </Pressable>
-        </View>
+          <View style={styles.header}>
+            <Pressable 
+              style={styles.headerButton} 
+              onPress={() => {
+                // Ensure we just go back, triggering the native slide-down animation
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  // Fallback if somehow no history (unlikely in modal)
+                  navigation.navigate('Main' as never);
+                }
+              }}
+              hitSlop={20} // Make touch area larger
+            >
+              <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.6)" />
+            </Pressable>
+            <View style={styles.headerRight}>
+              <Pressable 
+                style={styles.headerButton} 
+                onPress={() => navigation.navigate('Search')}
+              >
+                <Ionicons name="search" size={24} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+              <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
+                <View>
+                  <Ionicons name="notifications-outline" size={24} color="rgba(255,255,255,0.6)" />
+                  {activeTasksCount > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{activeTasksCount}</Text>
+                    </View>
+                  )}
+                </View>
+              </Pressable>
+              <Pressable style={styles.headerButton} onPress={async () => {
+                if (currentSong) {
+                  const fullSong = await getSong(currentSong.id);
+                  if (fullSong) {
+                    await updateSong({ ...fullSong, isLiked: !fullSong.isLiked });
+                    setCurrentSong({ ...fullSong, isLiked: !fullSong.isLiked });
+                  }
+                }
+              }}>
+                <Ionicons 
+                  name={currentSong?.isLiked ? "heart" : "heart-outline"} 
+                  size={24} 
+                  color={currentSong?.isLiked ? "#FF3B30" : "rgba(255,255,255,0.6)"} 
+                />
+              </Pressable>
+              <Pressable style={styles.headerButton} onPress={handleMorePress}>
+                <Ionicons name="ellipsis-horizontal" size={24} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+            </View>
+          </View>
 
         <View style={styles.lyricsContainer}>
-          <FlatList
-            ref={flatListRef}
-            data={lyrics}
-            keyExtractor={(item, index) => `${item.timestamp}-${index}`}
-            renderItem={renderLyric}
-            contentContainerStyle={styles.lyricsContent}
-            showsVerticalScrollIndicator={false}
-            onScroll={(e) => {
-              if (!isPlaying) return;
-              
-              const currentY = e.nativeEvent.contentOffset.y;
-              const scrollingDown = currentY < scrollYRef.current;
-              scrollYRef.current = currentY;
-              
-              if (scrollingDown) {
-                handleScreenTap();
-              }
-            }}
-            scrollEventThrottle={16}
-            onScrollBeginDrag={() => {
-              userScrollingRef.current = true;
-            }}
-            onMomentumScrollEnd={() => {
-              setTimeout(() => {
-                userScrollingRef.current = false;
-              }, 1000);
-            }}
-            onScrollToIndexFailed={(info) => {
-              // Silently ignore scroll failures
-            }}
-            onContentSizeChange={(_, h) => {
-              contentHeightRef.current = h;
-            }}
-            ListHeaderComponent={<View style={{ height: SCREEN_HEIGHT * 0.3 }} />}
-            ListFooterComponent={<View style={{ height: SCREEN_HEIGHT * 0.6 }} />}
-          />
-          <Pressable 
-            onPress={handleScreenTap} 
-            style={StyleSheet.absoluteFill}
-            pointerEvents="box-none"
-          />
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.5)']}
-            style={styles.bottomFade}
-            pointerEvents="none"
-          />
+          {showLyrics && lyrics.length > 0 ? (
+            <View style={{ flex: 1 }}>
+              <FlatList
+                ref={flatListRef}
+                data={lyrics}
+                keyExtractor={(item, index) => `${item.timestamp}-${index}`}
+                renderItem={renderLyric}
+                contentContainerStyle={styles.lyricsContent}
+                showsVerticalScrollIndicator={false}
+                removeClippedSubviews={false}
+                maxToRenderPerBatch={5}
+                updateCellsBatchingPeriod={100}
+                windowSize={11}
+                initialNumToRender={10}
+                onScroll={(e) => {
+                  // Show controls when scrolling up to see previous lyrics
+                  if (lyrics.length === 0) return;
+                  
+                  const currentY = e.nativeEvent.contentOffset.y;
+                  const scrollingUp = currentY < scrollYRef.current; // Scrolling up = seeing previous text
+                  scrollYRef.current = currentY;
+                  
+                  if (scrollingUp) {
+                    handleScreenTap();
+                  }
+                }}
+                scrollEventThrottle={8}
+                onScrollBeginDrag={() => {
+                  userScrollingRef.current = true;
+                }}
+                onMomentumScrollEnd={() => {
+                  setTimeout(() => {
+                    userScrollingRef.current = false;
+                  }, 1000);
+                }}
+                onScrollToIndexFailed={(info) => {
+                  // Silently ignore scroll failures
+                }}
+                onContentSizeChange={(_, h) => {
+                  contentHeightRef.current = h;
+                }}
+                ListHeaderComponent={<View style={{ height: SCREEN_HEIGHT * 0.3 }} />}
+                ListFooterComponent={<View style={{ height: SCREEN_HEIGHT * 0.6 }} />}
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.5)']}
+                style={styles.bottomFade}
+                pointerEvents="none"
+              />
+            </View>
+          ) : (
+            <View style={styles.noLyricsContainer} {...vinylPanResponder.panHandlers}>
+              <RNAnimated.View style={{ transform: [{ rotate: vinylSpin }] }}>
+                {currentSong?.coverImageUri ? (
+                  <Image 
+                    source={{ uri: currentSong.coverImageUri }} 
+                    style={styles.vinylCover}
+                  />
+                ) : (
+                  <View style={styles.vinylDisc}>
+                    <Ionicons name="disc" size={120} color="rgba(255,255,255,0.2)" />
+                  </View>
+                )}
+              </RNAnimated.View>
+            </View>
+          )}
         </View>
 
         {controlsVisible && (
@@ -584,28 +1067,47 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
               pointerEvents="none"
             />
 
-            <View style={styles.songInfo}>
+            <View style={[styles.songInfo, (!hasTimestamps.current || !showLyrics) && styles.songInfoBlackBg]}>
             <Pressable 
               style={styles.songThumbnail} 
               onLongPress={handleArtLongPress}
               delayLongPress={1500}
             >
               {currentSong?.coverImageUri ? (
-                <Image 
-                  source={{ uri: currentSong.coverImageUri }} 
-                  style={StyleSheet.absoluteFill} 
-                />
+                <>
+                  <Image 
+                    source={{ uri: currentSong.coverImageUri }} 
+                    style={StyleSheet.absoluteFill} 
+                  />
+                  <View style={styles.vinylOverlay}>
+                    <View style={styles.vinylRing1} />
+                    <View style={styles.vinylRing2} />
+                    <View style={styles.vinylCenter} />
+                  </View>
+                </>
               ) : (
-                <LinearGradient
-                  colors={gradient.colors as [string, string, ...string[]]}
-                  style={StyleSheet.absoluteFill}
-                />
+                <View style={styles.defaultThumbnail}>
+                  <Ionicons name="disc" size={32} color="rgba(255,255,255,0.3)" />
+                </View>
               )}
             </Pressable>
-            <View style={styles.songDetails}>
-              <Text style={styles.songTitle} numberOfLines={1}>
-                {currentSong?.title ?? 'Unknown Song'}
-              </Text>
+            <View style={styles.songDetails} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+              <View style={{ overflow: 'hidden', width: '100%' }}>
+                <RNAnimated.Text
+                  style={[
+                    styles.songTitle,
+                    { transform: [{ translateX: titleScrollAnim }] }
+                  ]}
+                  numberOfLines={1}
+                  onTextLayout={(e) => {
+                    if (e.nativeEvent.lines[0]) {
+                      setTitleWidth(e.nativeEvent.lines[0].width);
+                    }
+                  }}
+                >
+                  {currentSong?.title ?? 'Unknown Song'}
+                </RNAnimated.Text>
+              </View>
               <Text style={styles.songArtist} numberOfLines={1}>
                 {currentSong?.artist ?? 'Unknown Artist'}
                 {currentSong?.album && (
@@ -613,16 +1115,34 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                 )}
               </Text>
             </View>
+            <Pressable 
+              style={[
+                styles.magicButton,
+                { shadowColor: getGradientColors(currentSong?.gradientId || 'aurora')[0] },
+                isProcessing && { opacity: 0.5 }
+              ]} 
+              onPress={() => setShowMagicModal(true)}
+              disabled={isProcessing}
+            >
+              <LinearGradient
+                colors={getGradientColors(currentSong?.gradientId || 'aurora') as any}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.magicGradient}
+              >
+                <Ionicons 
+                  name="sparkles" 
+                  size={18} 
+                  color="#FFFFFF" 
+                />
+              </LinearGradient>
+            </Pressable>
             <Pressable style={styles.moreButton} onPress={handleMorePress}>
               <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.6)" />
             </Pressable>
           </View>
 
-          <Scrubber
-            currentTime={currentTime}
-            duration={duration}
-            onSeek={handleSeek}
-          />
+          <ConnectedScrubber onSeek={handleSeek} />
 
           <PlayerControls
             isPlaying={isPlaying}
@@ -632,14 +1152,24 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
           />
 
           <View style={styles.actionButtons}>
-            <Pressable style={styles.actionButton}>
-              <Ionicons name="chatbubble-outline" size={22} color="rgba(255,255,255,0.5)" />
+            <Pressable 
+              style={styles.actionButton} 
+              onPress={lyrics.length > 0 ? () => setShowLyrics(!showLyrics) : undefined}
+              disabled={lyrics.length === 0}
+            >
+              <Ionicons 
+                name={showLyrics ? "eye-off-outline" : "eye-outline"} 
+                size={22} 
+                color={lyrics.length === 0 ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.8)"} 
+              />
             </Pressable>
-            <Pressable style={styles.actionButton}>
-              <Ionicons name="share-outline" size={22} color="rgba(255,255,255,0.5)" />
-            </Pressable>
-            <Pressable style={styles.actionButton}>
-              <Ionicons name="list-outline" size={22} color="rgba(255,255,255,0.5)" />
+            <Pressable style={styles.actionButton} onPress={() => setQueueVisible(true)}>
+              <Ionicons name="list-outline" size={22} color="rgba(255,255,255,0.8)" />
+              {queueSongIds.length > 0 && (
+                <View style={styles.queueBadge}>
+                  <Text style={styles.queueBadgeText}>{queueSongIds.length}</Text>
+                </View>
+              )}
             </Pressable>
           </View>
         </Animated.View>
@@ -674,8 +1204,22 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
             label: 'Add to Queue',
             icon: 'list-outline',
             onPress: () => handleMenuAction('queue'),
-          }
+          },
         ]}
+      />
+
+      {/* Magic Mode Modal */}
+      <MagicModeModal
+        visible={showMagicModal}
+        onClose={() => setShowMagicModal(false)}
+        onMagicMode={handleMagicMode}
+        onPureMagicMode={handlePureMagicMode}
+      />
+
+      {/* Tasks Modal */}
+      <TasksModal
+        visible={showTasksModal}
+        onClose={() => setShowTasksModal(false)}
       />
 
       <CustomMenu
@@ -714,6 +1258,61 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
           },
         ]}
       />
+      
+      <Modal
+        visible={queueVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setQueueVisible(false)}
+      >
+        <Pressable 
+          style={styles.queueOverlay} 
+          onPress={() => setQueueVisible(false)}
+        >
+          <View style={styles.queueContainer}>
+            <View style={styles.queueHeader}>
+              <Text style={styles.queueTitle}>Queue ({queueSongIds.length})</Text>
+              {queueSongIds.length > 0 && (
+                <Pressable onPress={() => { clearQueue(); setQueueVisible(false); }}>
+                  <Text style={styles.queueClear}>Clear</Text>
+                </Pressable>
+              )}
+            </View>
+            <ScrollView style={styles.queueScroll}>
+              {queueSongIds.length === 0 ? (
+                <View style={styles.queueEmpty}>
+                  <Ionicons name="musical-notes-outline" size={48} color="rgba(255,255,255,0.3)" />
+                  <Text style={styles.queueEmptyText}>Queue is empty</Text>
+                </View>
+              ) : (
+                queueSongIds.map((id, index) => {
+                  const queueSong = songs.find(s => s.id === id);
+                  if (!queueSong) return null;
+                  const gradient = getGradientById(queueSong.gradientId) || GRADIENTS[0];
+                  return (
+                    <View key={id} style={styles.queueItem}>
+                      <Text style={styles.queueNumber}>{index + 1}</Text>
+                      <View style={styles.queueThumbnail}>
+                        {queueSong.coverImageUri ? (
+                          <Image source={{ uri: queueSong.coverImageUri }} style={styles.queueImage} />
+                        ) : (
+                          <View style={styles.defaultQueueThumbnail}>
+                            <Ionicons name="disc" size={20} color="rgba(255,255,255,0.3)" />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.queueInfo}>
+                        <Text style={styles.queueSongTitle} numberOfLines={1}>{queueSong.title}</Text>
+                        <Text style={styles.queueSongArtist} numberOfLines={1}>{queueSong.artist || 'Unknown'}</Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -737,12 +1336,36 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
+  headerRight: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   headerButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   lyricsContainer: {
     flex: 1,
@@ -772,16 +1395,63 @@ const styles = StyleSheet.create({
   songInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
+  },
+  songInfoBlackBg: {
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    marginHorizontal: -16,
+    paddingLeft: 16,
+    paddingRight: 16,
   },
   songThumbnail: {
     width: 56,
     height: 56,
     borderRadius: 8,
     overflow: 'hidden',
+    backgroundColor: '#2C2C2E',
+  },
+  vinylOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vinylRing1: {
+    position: 'absolute',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  vinylRing2: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  vinylCenter: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  defaultThumbnail: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2C2C2E',
   },
   songDetails: {
     flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   songTitle: {
     fontSize: 18,
@@ -814,6 +1484,129 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 8,
+    position: 'relative',
+  },
+  queueBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  queueBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  queueOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  queueContainer: {
+    backgroundColor: '#1C1C1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 40,
+  },
+  queueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  queueTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  queueClear: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF3B30',
+  },
+  queueScroll: {
+    paddingHorizontal: 20,
+  },
+  queueEmpty: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  queueEmptyText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 12,
+  },
+  queueItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  queueNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    width: 24,
+  },
+  queueThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#2C2C2E',
+  },
+  queueImage: {
+    width: '100%',
+    height: '100%',
+  },
+  defaultQueueThumbnail: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2C2C2E',
+  },
+  queueInfo: {
+    flex: 1,
+  },
+  queueSongTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  queueSongArtist: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  noLyricsContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 280,
+  },
+  vinylCover: {
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+  },
+  vinylDisc: {
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: '#2C2C2E',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   lyricLine: {
     paddingVertical: 10,
@@ -852,6 +1645,10 @@ const styles = StyleSheet.create({
   lyricPast: {
     color: 'rgba(255,255,255,0.25)',
   },
+  lyricNoTimestamp: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   instrumentalContainer: {
     width: '100%',
     paddingVertical: 12,
@@ -884,6 +1681,18 @@ const styles = StyleSheet.create({
   },
   bar3: {
     height: 16,
+  },
+  magicButton: {
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  magicGradient: {
+    padding: 8,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

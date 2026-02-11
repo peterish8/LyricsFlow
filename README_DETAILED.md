@@ -49,6 +49,17 @@ The app handles "messy" data intelligently.
 - **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
+### On-Device Whisper AI
+The app implements a privacy-first AI pipeline that runs entirely on the user's device.
+- **Engine**: Powered by `whisper.rn` (a wrapper for the high-performance C++ `whisper.cpp` library).
+- **Model Management**: `WhisperSetup.ts` handles the one-time download and validation of the Quantized Whisper Model (approx. 142MB), storing it in the secure document storage.
+- **Audio Pipeline**:
+    1. **Input**: User selects any audio file via the system picker.
+    2. **Conversion**: `AudioConverter.ts` normalizes audio to 16kHz mono WAV (required by Whisper) using `ffmpeg-kit` or native decoding.
+    3. **Inference**: usage of the Tiny/Base English model to extract word-level timestamps with improved `maxLen` and prompts.
+    4. **Alignment**: Comparison of phonetic structures between user text and AI output to sync standard lyrics.
+- **Cancellation**: Services now support immediate `stop()` calls, allowing users to halt the native Whisper engine mid-transcription to save battery and resources.
+
 ---
 
 ## 📂 Directory Architecture
@@ -65,6 +76,7 @@ The UI building blocks of the application.
 - **`PlayerControls.tsx`**: Clean, accessible buttons for playback control.
 - **`Scrubber.tsx`**: A custom-built timeline progress bar that supports smooth, optimistic seeking.
 - **`SongCard.tsx`**: Used in the library grid; it intelligently switches between a gradient preview and the user's custom cover art.
+- **`TasksModal.tsx`**: Centralized manager for background AI jobs. Supports pausing, stopping, and viewing song-specific processing history.
 
 ### `src/database/`
 The persistence layer.
@@ -87,6 +99,7 @@ Reactive state management.
 
 - **`songsStore.ts`**: Manages the master list of songs, loading them from SQLite into memory for fast UI access.
 - **`playerStore.ts`**: Handles the active playback state, including the **in-memory queue** system and the auto-play sequence.
+- **`tasksStore.ts`**: Manages the global background task queue, tracking song-specific statuses (Queued, Processing, Completed, Failed, Cancelled).
 - **`artHistoryStore.ts`**: Tracks recently used cover art images so users can quickly re-apply them to other songs.
 - **`settingsStore.ts`**: Persists UI preferences like font size and theme.
 
@@ -94,8 +107,14 @@ Reactive state management.
 The heavy-lifting logic helpers.
 
 - **`timestampParser.ts`**: The engine that converts raw text into structured `LyricLine` objects.
-- **`exportImport.ts`**: Handles JSON serialization/deserialization for backing up or sharing your library.
-- **`formatters.ts`**: Time-to-string conversion (e.g., `125` seconds to `2:05`).
+- **`exportImport.ts`**: JSON serialization for library backups.
+- **`formatters.ts`**: Time and text formatting utilities.
+
+### `src/services/` (The AI Layer)
+- **`whisperSetup.ts`**: Manages the lifecycle of the AI model. Handles downloading, hash verification, and filesystem cleanup.
+- **`whisperService.ts`**: The bridge to the native C++ Whisper engine. Handles the actual transcription job.
+- **`autoTimestampServiceV2.ts`**: The "brain" of Magic Mode. It implements **Dynamic Time Warping (DTW)** to mathematically align the user's provided text with the AI's raw phonetic output, ensuring perfect sync even if the AI mishears a word.
+- **`audioConverter.ts`**: Handles the dirty work of converting various audio formats (MP3, M4A, AAC) into the strict WAV format required by the AI engine.
 
 ---
 
@@ -115,6 +134,17 @@ The heavy-lifting logic helpers.
 4. **Display**: `NowPlayingScreen` loads the structured data.
 5. **Animation**: The **60fps Scroll Engine** starts. `LyricsLine.tsx` calculates its own "glow" state based on the store's `currentTime`.
 6. **Interaction**: User taps a line; `seek()` updates the store, and the scroll engine instantly recalculates the offset for a zero-latency jump.
+
+## 🪄 Magic Timestamp Workflow
+1. **Access**: 
+   - **From Player**: Tap the ✨ Magic button on the Now Playing screen while listening.
+   - **From Editor**: Tap "Select Audio" in `AddEditLyricsScreen` to pick a local file.
+2. **Mode Choice**:
+   - **✨ Magic (Alignment)**: You provide the text (paste/type). The system uses **Dynamic Time Warping (DTW)** to "stretch" your text onto the timeline based on the audio's phonetic structure.
+   - **🪄 Pure Magic (Extraction)**: No text needed. The system listens to the audio, transcribes the words using Whisper AI, and timestamps them simultaneously.
+3. **Processing**: Tasks are queued in `tasksStore`. A notification badge appears globally. You can monitor progress in real-time (`Converting` → `Transcribing` → `Aligning`).
+4. **Result**: Upon completion, the song updates via `handleTimestampResult` which ensures manual metadata (Title/Artist) is merged with AI lyrics without overwriting existing edits.
+5. **Control**: Users can tap "Stop" in the Tasks Modal at any time to kill the native Whisper process.
 
 ---
 

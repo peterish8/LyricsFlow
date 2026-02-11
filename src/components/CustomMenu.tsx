@@ -82,7 +82,7 @@ export const CustomMenu: React.FC<CustomMenuProps> = ({
             {/* Title Header */}
             {title && (
               <View style={styles.header}>
-                <Text style={styles.headerTitle}>{title}</Text>
+                <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">{title}</Text>
               </View>
             )}
 
@@ -159,6 +159,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingVertical: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -167,6 +168,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: 'rgba(255,255,255,0.4)',
+    textAlign: 'center',
   },
   option: {
     flexDirection: 'row',
