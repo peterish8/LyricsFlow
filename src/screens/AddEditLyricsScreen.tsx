@@ -171,15 +171,10 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       return;
     }
 
-    if (!lyricsText.trim()) {
-      Alert.alert('Missing Lyrics', 'Please enter some lyrics.');
-      return;
-    }
-
     setIsSaving(true);
 
     try {
-      const parsedLyrics = parseTimestampedLyrics(lyricsText);
+      const parsedLyrics = lyricsText.trim() ? parseTimestampedLyrics(lyricsText) : [];
       const manualDuration = parseDurationInput(durationText);
       const calculatedDuration = calculateDuration(parsedLyrics);
       const duration = manualDuration > 0 ? manualDuration : calculatedDuration;

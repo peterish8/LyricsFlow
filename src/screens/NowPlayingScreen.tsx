@@ -663,7 +663,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -939,7 +939,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
               onPress={() => setShowSearchModal(true)}
             >
               <LinearGradient
-                colors={getGradientById(currentSong?.gradientId ?? 'aurora')?.colors ?? ['#FF0080', '#7928CA']}
+                colors={(getGradientById(currentSong?.gradientId ?? 'aurora')?.colors ?? ['#FF0080', '#7928CA']) as any}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.magicGradient}

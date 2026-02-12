@@ -10,8 +10,8 @@ interface VinylRecordProps {
 
 const VinylRecord: React.FC<VinylRecordProps> = ({ imageUri, size = 300 }) => {
   // Calculate relative sizes based on the main size
-  const labelSize = size * 0.45; // Label is roughly 45% of total diameter
-  const holeSize = size * 0.04; // Center hole is small
+  const labelSize = size * 0.6; // Label is 60% of total diameter (bigger cover art)
+  const holeSize = size * 0.03; // Center hole smaller
   
   return (
     <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
@@ -33,9 +33,6 @@ const VinylRecord: React.FC<VinylRecordProps> = ({ imageUri, size = 300 }) => {
         <View style={[styles.groove, { width: size * 0.8, height: size * 0.8, borderRadius: size * 0.8 / 2 }]} />
         <View style={[styles.groove, { width: size * 0.75, height: size * 0.75, borderRadius: size * 0.75 / 2 }]} />
         <View style={[styles.groove, { width: size * 0.7, height: size * 0.7, borderRadius: size * 0.7 / 2 }]} />
-        <View style={[styles.groove, { width: size * 0.65, height: size * 0.65, borderRadius: size * 0.65 / 2 }]} />
-        <View style={[styles.groove, { width: size * 0.6, height: size * 0.6, borderRadius: size * 0.6 / 2 }]} />
-        <View style={[styles.groove, { width: size * 0.55, height: size * 0.55, borderRadius: size * 0.55 / 2 }]} />
 
         {/* Inner Label (Album Art) */}
         <View style={[styles.labelContainer, { width: labelSize, height: labelSize, borderRadius: labelSize / 2 }]}>

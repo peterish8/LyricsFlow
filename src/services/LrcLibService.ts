@@ -5,7 +5,7 @@
 
 import { LyricLine } from '../types/song';
 
-const BASE_URL = 'https://lrclib.net';
+const BASE_URL = 'https://lrclib.net/api';
 
 export interface LrcLibTrack {
   id: number;
@@ -20,12 +20,21 @@ export interface LrcLibTrack {
 
 export const LrcLibService = {
   /**
-   * Search for lyrics by query
+   * Search for lyrics by query or specific fields
    */
-  search: async (query: string): Promise<LrcLibTrack[]> => {
+  search: async (params: string | { track_name?: string; artist_name?: string; album_name?: string; q?: string }): Promise<LrcLibTrack[]> => {
     try {
-      // LRCLIB API uses specific query parameters, not /api prefix
-      const searchUrl = `${BASE_URL}/search?artist_name=${encodeURIComponent(query)}&track_name=${encodeURIComponent(query)}`;
+      let queryPath = '';
+      if (typeof params === 'string') {
+        queryPath = `/search?q=${encodeURIComponent(params)}`;
+      } else {
+        const querySegments = Object.entries(params)
+          .filter(([_, v]) => v)
+          .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`);
+        queryPath = `/search?${querySegments.join('&')}`;
+      }
+
+      const searchUrl = `${BASE_URL}${queryPath}`;
       console.log('[LrcLibService] Searching LRCLIB:', searchUrl);
       
       const controller = new AbortController();
@@ -33,9 +42,11 @@ export const LrcLibService = {
       
       const response = await fetch(searchUrl, {
         signal: controller.signal,
+        method: 'GET',
         headers: {
-          'User-Agent': 'LuvLyrics/1.0',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'application/json',
+          'Content-Type': 'application/json',
         }
       });
       clearTimeout(timeoutId);
@@ -72,9 +83,11 @@ export const LrcLibService = {
       
       const response = await fetch(url, {
         signal: controller.signal,
+        method: 'GET',
         headers: {
-          'User-Agent': 'LuvLyrics/1.0',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'application/json',
+          'Content-Type': 'application/json',
         }
       });
       clearTimeout(timeoutId);

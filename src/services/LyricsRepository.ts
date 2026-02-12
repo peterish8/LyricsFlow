@@ -1,35 +1,27 @@
 /**
  * LyricsRepository
- * Central controller for fetching lyrics with Waterfall Strategy:
- * 1. Tier 1: LRCLIB (Synced)
- * 2. Tier 2: Genius (Fallback - Plain Text)
+ * Simplified with Lyrica API (aggregates LRCLIB, YouTube Music, Genius, JioSaavn)
  */
 
-import { LrcLibService, LrcLibTrack } from './LrcLibService';
-import { GeniusService, GeniusTrack } from './GeniusService';
-import { SmartLyricMatcher, ScoredResult } from './SmartLyricMatcher';
-import { Song } from '../types/song';
+import { lyricaService, LyricaResult } from './LyricaService';
+import { SmartLyricMatcher } from './SmartLyricMatcher';
 
 export interface SearchResult {
   id: string;
-  source: 'LRCLIB' | 'Genius';
+  source: string;
   type: 'synced' | 'plain';
   trackName: string;
   artistName: string;
   albumName?: string;
   plainLyrics: string;
-  syncedLyrics?: string; // Only for LRCLIB
+  syncedLyrics?: string;
   matchScore: number;
   matchReason: string;
   duration?: number;
-  url?: string; // For Genius
-  albumArt?: string; // For Genius
+  albumArt?: string;
 }
 
 export const LyricsRepository = {
-  /**
-   * Search and return ranking of best matches from all sources
-   */
   searchSmart: async (
     query: string,
     targetMetadata: { title: string; artist: string; duration: number },
@@ -37,109 +29,60 @@ export const LyricsRepository = {
   ): Promise<SearchResult[]> => {
     const results: SearchResult[] = [];
     
-    // 1. Search LRCLIB (Tier 1)
-    onProgress?.('Searching LRCLIB (Synced)...');
-    let lrcResults: LrcLibTrack[] = [];
-    try {
-      lrcResults = await LrcLibService.search(query);
-    } catch (error) {
-      console.error('[LyricsRepository] LRCLIB network/error:', error);
-      onProgress?.('LRCLIB unavailable. Trying Genius...');
-    }
+    onProgress?.('Searching global databases...');
     
-    // Score LRCLIB results
-    const scoredLrc = lrcResults.map(res => {
-      const scored = SmartLyricMatcher.calculateScore(
-        res, 
-        null, // No user lyrics to compare yet (unless we pass them)
-        targetMetadata
+    try {
+      const lyricaResult = await lyricaService.fetchLyrics(
+        targetMetadata.title,
+        targetMetadata.artist
       );
       
-      return {
-        id: `lrc-${res.id}`,
-        source: 'LRCLIB' as const,
-        type: (res.syncedLyrics ? 'synced' : 'plain') as 'synced' | 'plain',
-        trackName: res.trackName,
-        artistName: res.artistName,
-        albumName: res.albumName,
-        plainLyrics: res.plainLyrics,
-        syncedLyrics: res.syncedLyrics,
+      if (!lyricaResult) {
+        onProgress?.('No lyrics found');
+        return [];
+      }
+
+      const hasTimestamps = lyricaService.hasTimestamps(lyricaResult.lyrics);
+      const parsedLyrics = hasTimestamps 
+        ? lyricaService.parseLrc(lyricaResult.lyrics)
+        : [];
+
+      const scored = SmartLyricMatcher.calculateScore(
+        {
+          id: 1,
+          trackName: lyricaResult.metadata?.title || targetMetadata.title,
+          artistName: lyricaResult.metadata?.artist || targetMetadata.artist,
+          duration: lyricaResult.metadata?.duration || targetMetadata.duration,
+          plainLyrics: lyricaResult.lyrics,
+          syncedLyrics: hasTimestamps ? lyricaResult.lyrics : '',
+          albumName: lyricaResult.metadata?.album || '',
+          instrumental: false,
+        },
+        null,
+        targetMetadata
+      );
+
+      results.push({
+        id: 'lyrica-1',
+        source: lyricaResult.source,
+        type: hasTimestamps ? 'synced' : 'plain',
+        trackName: lyricaResult.metadata?.title || targetMetadata.title,
+        artistName: lyricaResult.metadata?.artist || targetMetadata.artist,
+        albumName: lyricaResult.metadata?.album,
+        plainLyrics: lyricaResult.lyrics,
+        syncedLyrics: hasTimestamps ? lyricaResult.lyrics : undefined,
         matchScore: scored.matchScore,
         matchReason: scored.matchReason,
-        duration: res.duration
-      };
-    });
+        duration: lyricaResult.metadata?.duration,
+        albumArt: lyricaResult.metadata?.coverArt,
+      });
 
-    results.push(...scoredLrc);
-
-    // 2. Check if we have a good match
-    const bestMatch = scoredLrc.sort((a, b) => b.matchScore - a.matchScore)[0];
-    const hasGoodSynced = bestMatch && bestMatch.matchScore > 60 && bestMatch.type === 'synced';
-
-    // 3. Fallback to Genius (Tier 2) if necessary
-    // We fetch Genius if we don't have a good synced match, OR just to offer alternatives
-    // To save bandwidth, maybe only if top score < 80? But user wants "Waterfall".
-    // Let's being robust: If score < 80 (likely no perfect sync), fetch Genius.
-    if (!hasGoodSynced || scoredLrc.length === 0) {
-      onProgress?.('Verification finished. Checking Genius...');
-
-      try {
-        const geniusHits = await GeniusService.searchGenius(query);
-
-        // We only take top 3 Genius hits to avoid scraping too much
-        const topGenius = geniusHits.slice(0, 3);
-
-        for (const hit of topGenius) {
-          onProgress?.(`Fetching text for: ${hit.title}...`);
-
-          // Never allow one failed page fetch to abort the whole search.
-          let lyricsText: string | null = null;
-          try {
-            lyricsText = await GeniusService.scrapeGeniusLyrics(hit.url);
-          } catch (error) {
-            console.error(`[LyricsRepository] Genius scrape failed for ${hit.url}:`, error);
-            continue;
-          }
-
-          if (lyricsText) {
-            const scoredGenius = SmartLyricMatcher.calculateScore(
-              {
-                id: hit.id,
-                trackName: hit.title,
-                artistName: hit.artist,
-                duration: targetMetadata.duration, // Genius doesn't give duration easily, assume match
-                plainLyrics: lyricsText,
-                syncedLyrics: '',
-                albumName: '',
-                instrumental: false
-              },
-              null,
-              targetMetadata
-            );
-
-            results.push({
-              id: `gen-${hit.id}`,
-              source: 'Genius',
-              type: 'plain',
-              trackName: hit.title,
-              artistName: hit.artist,
-              albumArt: hit.albumArt,
-              plainLyrics: lyricsText,
-              matchScore: scoredGenius.matchScore, // Usually high if title matches
-              matchReason: 'Genius Metadata Match',
-              url: hit.url
-            });
-          }
-        }
-      } catch (error) {
-        console.error('[LyricsRepository] Genius network/error:', error);
-        onProgress?.('Genius unavailable (network/rate limit). Showing available results.');
-      }
+      onProgress?.(`Found lyrics from ${lyricaResult.source}`);
+    } catch (error) {
+      console.error('[LyricsRepository] Error:', error);
+      onProgress?.('Search failed');
     }
 
-    // Return sorted by Score
-    const sorted = results.sort((a, b) => b.matchScore - a.matchScore);
-    onProgress?.(sorted.length > 0 ? `Found ${sorted.length} result(s)` : 'No lyrics found from online sources');
-    return sorted;
+    return results;
   }
 };

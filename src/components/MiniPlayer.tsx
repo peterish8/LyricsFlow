@@ -13,6 +13,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Colors } from '../constants/colors';
 import { Scrubber } from './Scrubber';
+import { calculateOverlayStrength } from '../utils/imageAnalyzer';
 
 export const MiniPlayer: React.FC = () => {
   // const navigation = useNavigation();
@@ -21,6 +22,8 @@ export const MiniPlayer: React.FC = () => {
   // const duration = usePlayerStore(state => state.duration); // Removed to prevent re-renders
   const [isExpanded, setIsExpanded] = useState(false);
   const [showExpandedContent, setShowExpandedContent] = useState(false);
+  const [vignetteOpacity, setVignetteOpacity] = useState(0.6);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.5);
   const compactOpacity = useRef(new Animated.Value(1)).current;
   const expandedOpacity = useRef(new Animated.Value(0)).current;
   const collapseTranslateY = useRef(new Animated.Value(0)).current;
@@ -168,6 +171,32 @@ export const MiniPlayer: React.FC = () => {
   useEffect(() => {
     vinylSpinValue.setValue(0);
   }, [currentSong?.id]);
+
+  // Analyze cover art brightness
+  useEffect(() => {
+    if (currentSong?.coverImageUri) {
+      // Non-blocking brightness detection
+      setTimeout(() => {
+        Image.getSize(
+          currentSong.coverImageUri,
+          (width, height) => {
+            const avgDimension = (width + height) / 2;
+            const estimatedBrightness = avgDimension > 1000 ? 180 : 120;
+            const result = calculateOverlayStrength(estimatedBrightness);
+            setVignetteOpacity(result.vignetteOpacity);
+            setOverlayOpacity(result.overlayOpacity);
+          },
+          () => {
+            setVignetteOpacity(0.6);
+            setOverlayOpacity(0.5);
+          }
+        );
+      }, 0);
+    } else {
+      setVignetteOpacity(0.6);
+      setOverlayOpacity(0.5);
+    }
+  }, [currentSong?.coverImageUri]);
 
   // Handle play/pause rotation without resetting
   useEffect(() => {
@@ -363,11 +392,19 @@ export const MiniPlayer: React.FC = () => {
             blurRadius={20}
           />
           <LinearGradient
-            colors={['rgba(0,0,0,0.8)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
+            colors={[
+              `rgba(0,0,0,${vignetteOpacity})`,
+              `rgba(0,0,0,${overlayOpacity * 0.3})`,
+              `rgba(0,0,0,${vignetteOpacity})`
+            ]}
             style={StyleSheet.absoluteFill}
           />
           <LinearGradient
-            colors={['rgba(0,0,0,0.8)', 'transparent', 'rgba(0,0,0,0.8)']}
+            colors={[
+              `rgba(0,0,0,${vignetteOpacity})`,
+              'transparent',
+              `rgba(0,0,0,${vignetteOpacity})`
+            ]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={StyleSheet.absoluteFill}

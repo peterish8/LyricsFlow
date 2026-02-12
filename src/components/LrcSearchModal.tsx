@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LyricsRepository, SearchResult } from '../services/LyricsRepository';
+import { LrcLibService } from '../services/LrcLibService';
 import { Colors } from '../constants/colors';
 
 interface LrcSearchModalProps {
@@ -33,33 +34,39 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
   initialQuery 
 }) => {
   const [query, setQuery] = useState(`${initialQuery.title} ${initialQuery.artist}`);
+  const [artistName, setArtistName] = useState(initialQuery.artist);
+  const [songName, setSongName] = useState(initialQuery.title);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null);
+  const [editedLyrics, setEditedLyrics] = useState('');
 
   useEffect(() => {
     if (visible) {
+      setArtistName(initialQuery.artist);
+      setSongName(initialQuery.title);
       setQuery(`${initialQuery.title} ${initialQuery.artist}`);
       handleSearch();
     } else {
       setPreviewItem(null);
+      setEditedLyrics('');
       setResults([]);
       setQuery('');
     }
   }, [visible]);
 
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    if (!songName.trim()) return;
 
     setLoading(true);
-    setStatusMessage('Searching LRCLIB...');
+    setStatusMessage('Searching global databases...');
     setResults([]);
 
     try {
       const searchResults = await LyricsRepository.searchSmart(
-        query,
-        initialQuery,
+        `${songName} ${artistName}`,
+        { ...initialQuery, title: songName, artist: artistName },
         (msg) => setStatusMessage(msg)
       );
       setResults(searchResults);
@@ -74,11 +81,24 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
 
   const handleSelect = (item: SearchResult) => {
     setPreviewItem(item);
+    setEditedLyrics(item.syncedLyrics || item.plainLyrics);
   };
 
   const handleApply = () => {
     if (!previewItem) return;
-    onSelect(previewItem);
+    
+    // Convert edited text back into structured lines
+    const parsedLines = LrcLibService.parseLrc(editedLyrics);
+    
+    // Call onSelect with the updated previewItem
+    onSelect({
+      ...previewItem,
+      syncedLyrics: previewItem.type === 'synced' ? editedLyrics : '',
+      plainLyrics: previewItem.type === 'plain' ? editedLyrics : previewItem.plainLyrics,
+      // We pass the parsed lines implicitly or however the parent handles it.
+      // Usually the parent will re-parse, but we ensure the content is updated.
+    });
+    
     onClose();
   };
 
@@ -148,17 +168,31 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
         </View>
 
         <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search title, artist..."
-            placeholderTextColor="#666"
-            onSubmitEditing={handleSearch}
-            returnKeyType="search"
-          />
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.searchInput}
+              value={songName}
+              onChangeText={setSongName}
+              placeholder="Song name"
+              placeholderTextColor="#666"
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+            />
+          </View>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.searchInput}
+              value={artistName}
+              onChangeText={setArtistName}
+              placeholder="Artist name"
+              placeholderTextColor="#666"
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+            />
+          </View>
           <TouchableOpacity onPress={handleSearch} style={styles.searchButton}>
             <Ionicons name="search" size={20} color="#fff" />
+            <Text style={styles.searchButtonText}>Search</Text>
           </TouchableOpacity>
         </View>
 
@@ -197,15 +231,22 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
               </View>
 
               <ScrollView style={styles.previewScroll} contentContainerStyle={styles.previewScrollContent}>
-                <Text style={styles.previewText}>
-                  {previewItem.syncedLyrics || previewItem.plainLyrics}
-                </Text>
+                <TextInput
+                  style={styles.previewInput}
+                  value={editedLyrics}
+                  onChangeText={setEditedLyrics}
+                  multiline
+                  scrollEnabled={false} // ScrollView handles scrolling
+                  textAlignVertical="top"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
               </ScrollView>
             </View>
 
             <View style={styles.previewFooter}>
               <TouchableOpacity style={styles.applyButton} onPress={handleApply}>
-                <Text style={styles.applyButtonText}>Apply Lyrics</Text>
+                <Text style={styles.applyButtonText}>Apply Edited Lyrics</Text>
                 <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginLeft: 8 }} />
               </TouchableOpacity>
             </View>
@@ -258,9 +299,11 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   searchContainer: {
-    flexDirection: 'row',
     padding: 16,
     gap: 12,
+  },
+  inputRow: {
+    flexDirection: 'row',
   },
   searchInput: {
     flex: 1,
@@ -272,11 +315,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   searchButton: {
-    backgroundColor: Colors.primary || '#007AFF', // Fallback if color undef
+    backgroundColor: Colors.primary || '#007AFF',
     borderRadius: 8,
-    width: 44,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   listContent: {
     padding: 16,
@@ -427,11 +478,13 @@ const styles = StyleSheet.create({
   previewScrollContent: {
     paddingBottom: 24,
   },
-  previewText: {
+  previewInput: {
     color: '#ddd',
     fontSize: 14,
     lineHeight: 22,
     fontFamily: 'monospace',
+    minHeight: 300,
+    padding: 0,
   },
   previewFooter: {
     padding: 16,
