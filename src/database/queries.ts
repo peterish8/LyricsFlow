@@ -91,8 +91,6 @@ export const getAllSongs = async (): Promise<Song[]> => {
       textCase: (row.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
       audioUri: row.audio_uri ?? undefined,
       isLiked: row.is_liked === 1,
-      separationStatus: (row.separation_status as any) ?? 'none',
-      separationProgress: row.separation_progress ?? 0,
     }));
   });
 };
@@ -146,8 +144,6 @@ export const getSongById = async (id: string): Promise<Song | null> => {
       textCase: (songRow.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
       audioUri: songRow.audio_uri ?? undefined,
       isLiked: songRow.is_liked === 1,
-      separationStatus: (songRow.separation_status as any) ?? 'none',
-      separationProgress: songRow.separation_progress ?? 0,
       lyrics: lyricsRows.map((row) => ({
         id: row.id,
         timestamp: row.timestamp,
@@ -165,8 +161,8 @@ export const insertSong = async (song: Song): Promise<void> => {
     log(`Inserting song: ${song.id}`);
     
     const sql = `
-      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked, separation_status, separation_progress)
-      VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'titlecase'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, ${song.isLiked ? 1 : 0}, '${song.separationStatus || 'none'}', ${song.separationProgress || 0});
+      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked)
+      VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'titlecase'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, ${song.isLiked ? 1 : 0});
     `;
     
     await db.execAsync(sql);
@@ -188,7 +184,7 @@ export const updateSong = async (song: Song): Promise<void> => {
     log(`Updating song: ${song.id}`);
     
     await db.execAsync(`
-      UPDATE songs SET title = '${esc(song.title)}', artist = ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, album = ${song.album ? `'${esc(song.album)}'` : 'NULL'}, gradient_id = '${song.gradientId}', duration = ${song.duration}, date_modified = '${song.dateModified}', scroll_speed = ${song.scrollSpeed ?? 50}, lyrics_align = '${song.lyricsAlign ?? 'left'}', text_case = '${song.textCase ?? 'titlecase'}', cover_image_uri = ${song.coverImageUri ? `'${esc(song.coverImageUri)}'` : 'NULL'}, audio_uri = ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, is_liked = ${song.isLiked ? 1 : 0}, separation_status = '${song.separationStatus || 'none'}', separation_progress = ${song.separationProgress || 0} WHERE id = '${song.id}';
+      UPDATE songs SET title = '${esc(song.title)}', artist = ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, album = ${song.album ? `'${esc(song.album)}'` : 'NULL'}, gradient_id = '${song.gradientId}', duration = ${song.duration}, date_modified = '${song.dateModified}', scroll_speed = ${song.scrollSpeed ?? 50}, lyrics_align = '${song.lyricsAlign ?? 'left'}', text_case = '${song.textCase ?? 'titlecase'}', cover_image_uri = ${song.coverImageUri ? `'${esc(song.coverImageUri)}'` : 'NULL'}, audio_uri = ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, is_liked = ${song.isLiked ? 1 : 0} WHERE id = '${song.id}';
     `);
     
     // Only update lyrics if provided

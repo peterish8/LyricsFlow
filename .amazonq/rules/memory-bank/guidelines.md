@@ -490,3 +490,4 @@ const styles = StyleSheet.create({
 8. **Document complex logic**: Comments for algorithms, non-obvious decisions
 9. **Consistent naming**: Follow established conventions throughout codebase
 10. **Test edge cases**: Handle empty states, missing data, network failures
+11. **Teacher Forcing for AI**: Always use guided, instructional prompts to bias AI models towards provided "Source of Truth" text and prevent hallucinations.

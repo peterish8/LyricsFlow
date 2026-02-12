@@ -69,7 +69,5 @@ export const convertAudioFileToSong = (audioFile: AudioFile): Song => {
     lyrics: [],
     audioUri: audioFile.uri,
     coverImageUri: audioFile.albumArt,
-    separationStatus: 'none',
-    separationProgress: 0,
   };
 };

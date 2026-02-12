@@ -41,20 +41,13 @@
 - **expo-av**: ~16.0.8 - Audio/video playback
 - **expo-audio**: ~1.1.1 - Audio recording and playback
 - **expo-media-library**: ~18.2.1 - Media library access
-- **whisper.rn**: ^0.5.5 - On-device speech-to-text AI
+- **whisper.rn**: ^0.5.5 - (Legacy) On-device speech-to-text AI
 - **react-native-worklets**: 0.5.1 - High-performance audio processing
 
-### File System & Utilities
-- **expo-file-system**: ~19.0.21 - File system access
-- **expo-document-picker**: ~14.0.8 - Document selection
-- **expo-image-picker**: ^17.0.10 - Image selection
-- **expo-sharing**: ^14.0.8 - File sharing
-- **expo-clipboard**: ^8.0.8 - Clipboard operations
-- **react-native-fs**: ^2.20.0 - File system utilities
-
-### Utilities
-- **string-similarity**: ^4.0.4 - Text similarity algorithms (DTW)
-- **@expo/vector-icons**: ^15.0.3 - Icon library
+### Search & Services
+- **LRCLIB API**: Primary source for synced lyrics (.lrc)
+- **Genius Scraper**: Fallback source for plain text lyrics with robust metadata scrubbing
+- **Smart Lyric Matcher**: Fuzzy matching and scoring logic for search results
 
 ### Development Tools
 - **expo-dev-client**: ~6.0.20 - Custom development client
@@ -155,6 +148,11 @@ expo start --web
 - **16kHz Audio**: Reduced sample rate for faster processing
 - **Quantized Models**: Smaller Whisper models for mobile devices
 - **On-Device**: No network latency or API costs
+- **"Anti-Gravity" Forced Alignment**: 
+    - **WhisperX**: Used on desktop for VAD and segmentation.
+    - **Wav2Vec2**: Phoneme-level alignment for ±10ms precision.
+    - **Teacher Forcing**: Improved prompting to guide the model.
+    - **Force Mapper**: Python-based fuzzy word sequence matching.
 
 ## Version Control
 - **Git**: Version control system

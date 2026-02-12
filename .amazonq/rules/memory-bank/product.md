@@ -20,14 +20,16 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 - **Glow effects**: Active lyrics with white glow (opacity: 0.6, radius: 20px)
 - **Skip controls**: ±10 second seek buttons for precise navigation
 
-### AI-Powered Timestamp Generation (Magic Mode)
-- **Dual Mode Intelligence**:
-  - **Magic Mode**: Aligns pasted lyrics with audio using Dynamic Time Warping (DTW)
-  - **Pure Magic Mode**: Generates lyrics from scratch using on-device Whisper AI
-- **Privacy-First**: Runs entirely on-device using `whisper.rn` (no cloud API costs)
-- **Performance Optimized**: 16kHz audio conversion and quantized models for mobile speed
-- **Visual Progress**: Real-time feedback (Converting → Transcribing → Aligning)
-- **Confidence Scoring**: AI assigns confidence scores to every line and overall song
+### Smart Lyric Search (The Magic Button) ✨
+- **Waterfall Strategy**: Tiered fetching from **LRCLIB (Synced)** first, then falling back to **Genius (Plain Text)**.
+- **Lyric Preview Mode**: Full-screen preview allows users to verify and scroll through found lyrics before applying them.
+- **Dynamic Theming**: The Magic Button background dynamically shifts its gradient to match the current song's `gradientId`.
+- **Robust Scraping**: Intelligent cleaning of Genius metadata ensures a pure reading experience without web clutter.
+- **Match Scoring**: Automatic verification of result relevance using title, artist, and duration metadata.
+
+### On-Device AI (Legacy)
+- **Whisper AI**: (Legacy) Support for local transcription using `whisper.rn`.
+- **Privacy-First**: No network required for transcription after initial model download.
 
 ### Cover Art Management
 - **Custom uploads**: Long-press (1.5s) cover art to upload from gallery

@@ -15,7 +15,7 @@ import { Colors } from '../constants/colors';
 import { Scrubber } from './Scrubber';
 
 export const MiniPlayer: React.FC = () => {
-  const navigation = useNavigation();
+  // const navigation = useNavigation();
   const { currentSong } = useSongsStore();
   const { isPlaying, togglePlay, lyrics, tick } = usePlayerStore();
   // const duration = usePlayerStore(state => state.duration); // Removed to prevent re-renders
@@ -221,7 +221,7 @@ export const MiniPlayer: React.FC = () => {
     );
   }
 
-  const gradient = getGradientById(currentSong.gradientId) || GRADIENTS[0];
+  // const gradient = getGradientById(currentSong.gradientId) || GRADIENTS[0];
   
   
   const hasTimestamps = lyrics.some(l => l.timestamp > 0);
@@ -327,7 +327,7 @@ export const MiniPlayer: React.FC = () => {
     }
   };
 
-  const expandedHeight = hasTimestamps ? 240 : 140;
+  // const expandedHeight = hasTimestamps ? 240 : 140;
 
   // Determine lyric font size based on length
   // Moved to ConnectedLyricText

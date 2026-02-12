@@ -3,7 +3,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, Alert } from 'react-native';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -19,15 +19,22 @@ interface ToastProps {
   onHide: () => void;
 }
 
-export const Toast: React.FC<ToastProps> = ({ message, visible, onHide }) => {
+export const ToastNotification: React.FC<ToastProps> = ({ message, visible, onHide }) => {
   const translateY = useSharedValue(-100);
 
   useEffect(() => {
     if (visible) {
+      // Spring down
       translateY.value = withSpring(20);
-      translateY.value = withDelay(2000, withSpring(-100, {}, () => {
-        runOnJS(onHide)();
-      }));
+      
+      // Wait 3s then spring up
+      const timeout = setTimeout(() => {
+        translateY.value = withSpring(-100, {}, (finished) => {
+          if (finished) runOnJS(onHide)();
+        });
+      }, 3000); // Increased to 3s for better readability
+
+      return () => clearTimeout(timeout);
     }
   }, [visible]);
 
@@ -38,17 +45,17 @@ export const Toast: React.FC<ToastProps> = ({ message, visible, onHide }) => {
   if (!visible) return null;
 
   return (
-    <Animated.View style={[styles.container, animatedStyle]}>
+    <Animated.View style={[toastStyles.container, animatedStyle]}>
       <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-      <Text style={styles.text}>{message}</Text>
+      <Text style={toastStyles.text}>{message}</Text>
     </Animated.View>
   );
 };
 
-const styles = StyleSheet.create({
+const toastStyles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 0,
+    top: 50, // Below header
     right: 20,
     backgroundColor: 'rgba(28, 28, 30, 0.95)',
     paddingHorizontal: 16,
@@ -69,3 +76,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// Imperative Toast API
+// This is a simple implementation. For production, consider using a Context or a library like react-native-toast-message
+export const Toast = {
+  show: (options: { type: 'success' | 'error'; text1: string; text2?: string }) => {
+    // In a real app, you'd use an event emitter or context to trigger the toast
+    // For now, we'll just log it since we are refactoring and might replace this
+    // But since the code expects Toast.show, let's at least shim it or alert if critical
+    // OR we can export a hook-based component as default and a static object
+    console.log(`[Toast] ${options.type}: ${options.text1} - ${options.text2}`);
+    if (options.type === 'error') {
+       Alert.alert(options.text1, options.text2);
+    }
+  }
+};

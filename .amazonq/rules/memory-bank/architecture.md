@@ -12,8 +12,7 @@
 ## Directory Structure
 
 ### src/components/
-UI building blocks:
-- AIGeneratorModal.tsx - ChatGPT prompt templates
+- LrcSearchModal.tsx - Unified search UI with **Preview Mode**
 - AuroraHeader.tsx - Skia-powered blurred backgrounds
 - CustomMenu.tsx - iOS-style anchored menus
 - GradientBackground.tsx - Animated morphing gradients
@@ -22,51 +21,38 @@ UI building blocks:
 - PlayerControls.tsx - Playback buttons
 - Scrubber.tsx - Timeline progress bar
 - SongCard.tsx - Grid items with cover art
-- StemProcessButton.tsx - AI separation trigger
-- TasksModal.tsx - Background task manager
+- VinylRecord.tsx - Rotating vinyl UI
 - Toast.tsx - Spring-animated notifications
-- VocalBalanceSlider.tsx - Karaoke balance control
 
 ### src/database/
-Persistence layer:
 - db.ts - SQLite initialization, singleton, recovery
 - queries.ts - CRUD operations with retry logic
 - sampleData.ts - Welcome songs for first launch
 
 ### src/screens/
-Full-page layouts:
-- LibraryScreen.tsx - Home with grid + list hybrid
-- NowPlayingScreen.tsx - Main lyric reader (60fps scroll)
+- LibraryScreen.tsx - Home screen (Grid + List)
+- NowPlayingScreen.tsx - Lyric reader (60fps Engine) with **Dynamic Magic Button**
 - AddEditLyricsScreen.tsx - Song metadata form
-- SearchScreen.tsx - Real-time search
+- SearchScreen.tsx - Real-time library search
 - SettingsScreen.tsx - App preferences
 
-### src/services/
-AI and processing:
-- whisperSetup.ts - Model lifecycle management
-- whisperService.ts - C++ Whisper bridge
-- autoTimestampServiceV2.ts - DTW alignment
-- audioConverter.ts - FFmpeg audio conversion
-- sourceSeparationModel.ts - ONNX vocal separation
-- SourceSeparationService.ts - Karaoke pipeline
-
-### src/hooks/
-React hooks:
-- useKaraokePlayer.ts - Dual-track sync playback
-
-### src/store/
-Zustand state:
-- songsStore.ts - Master song list
-- playerStore.ts - Playback state, queue
-- tasksStore.ts - Background tasks (Whisper + Karaoke)
-- artHistoryStore.ts - Recent cover art
-- settingsStore.ts - UI preferences
+### src/services/ (The Search Engine)
+- LyricsRepository.ts - Waterfall logic (LRCLIB → Genius)
+- LrcLibService.ts - LRCLIB API client
+- GeniusService.ts - Scraper with metadata scrubbing
+- SmartLyricMatcher.ts - Result scoring logic
+- whisperService.ts - (Legacy) Local transcription
 
 ### src/utils/
 Logic helpers:
 - timestampParser.ts - Lyric text → structured data
 - exportImport.ts - JSON backup/restore
 - formatters.ts - Time/text formatting
+
+### LyricApp/ (Desktop Python Tools)
+- forced_aligner.py - WhisperX + Wav2Vec2 alignment pipeline
+- force_mapper.py - Fuzzy matching and interpolation engine
+- setup_env.bat - Dependency installation helper
 
 ## Key Design Patterns
 
@@ -82,27 +68,23 @@ export const getDatabase = async () => {
 };
 ```
 
-### 2. Audio Dual-Track Sync
+### 2. Search Waterfall Strategy
 ```typescript
-// useKaraokePlayer.ts - 50ms drift correction
-const startSyncMonitor = () => {
-  setInterval(() => {
-    const diff = Math.abs(vocalPlayer.currentTime - instrPlayer.currentTime);
-    if (diff > 50) instrPlayer.seekTo(vocalPlayer.currentTime);
-  }, 1000);
-};
+// LyricsRepository.ts - LRCLIB -> Genius fallback
+const bestMatch = await LrcLibService.search(query);
+if (!bestMatch || bestMatch.matchScore < 60) {
+  results = await GeniusService.searchGenius(query);
+}
 ```
 
-### 3. Background Task Queue
+### 3. Smart Scraping & Sanitization
 ```typescript
-// tasksStore.ts - Persistent AI task tracking
-type Task = {
-  id: string;
-  songId: string;
-  type: 'magic' | 'pure-magic' | 'separation';
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress: number;
-};
+// GeniusService.ts - Cleaning web-injected metadata
+const cleanedLines = plainText.split('\n').filter(line => {
+  if (/^\d+\s+contributors?$/i.test(line)) return false;
+  if (/^you might also like$/i.test(line)) return false;
+  return true;
+});
 ```
 
 ## Database Schema
@@ -125,10 +107,7 @@ CREATE TABLE songs (
   text_case TEXT DEFAULT 'normal',
   audio_uri TEXT,
   is_liked INTEGER DEFAULT 0,
-  vocal_stem_uri TEXT,
-  instrumental_stem_uri TEXT,
-  separation_status TEXT DEFAULT 'none',
-  separation_progress INTEGER DEFAULT 0
+  lyricSource TEXT -- 'LRCLIB' | 'Genius'
 );
 ```
 
@@ -140,19 +119,17 @@ CREATE TABLE songs (
 - Active line fixed at 30% from top
 - Auto-hide controls after 3.5s when playing
 
-### FFmpeg Integration
-- MP3/M4A → WAV 16kHz mono (for Whisper)
-- MP3/M4A → PCM Float32 (for ONNX)
-- Fallback to original if conversion fails
+### Lyric Preview Mode
+- Full text/timestamp preview before database update
+- Prevents accidental overwrites of existing lyrics
+- Integrated in `LrcSearchModal.tsx`
 
-### ONNX Model Loading
-1. Check local document directory
-2. Try CDN download (if URL configured)
-3. Copy from bundled assets (if available)
-4. Load with CPU execution provider
+### Dynamic Magic Button
+- Gradient colors updated on-the-fly based on `currentSong.gradientId`
+- Uses `LinearGradient` for a native, premium feel
+- High-vibrancy "Sparkle" UI
 
 ### Error Recovery
 - Database: Automatic retry with connection reset
-- Whisper: Context recreation on pointer errors
-- Audio: Fallback to original file on conversion fail
-- Karaoke: Placeholder separation on ONNX errors
+- Network: Timeout and AbortController for fetch calls
+- Search: Waterfall fallback ensures results even if one provider fails

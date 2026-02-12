@@ -58,52 +58,30 @@ The app handles "messy" data intelligently.
 - **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
-### On-Device AI (Whisper)
-Privacy-first AI that runs entirely on your phone (no cloud API costs).
-- **Core**: Uses `whisper.rn` (providing `whisper.cpp`) for high-performance offline speech-to-text.
-- **Improved Quality**: Uses larger context window (`maxLen: 60`), lyrical prompts, and noise filtering for cleaner transcripts.
-- **Metadata Protection**: Smart state merging ensures manual Title/Artist edits are never overwritten by AI results.
-- **Dual Mode**:
-    1. **Magic Mode**: Aligns *your* pasted lyrics with the audio using Dynamic Time Warping (DTW).
-    2. **Pure Magic Mode**: Generates *new* lyrics and timestamps from scratch using the Whisper model.
-- **Performance**: Optimized with FFmpeg audio conversion (16kHz WAV) and background task queuing.
+### Smart Lyric Search Engine (Waterfall Strategy) 🪄
+High-precision lyric fetching with a tiered fallback approach.
+- **Tier 1: LRCLIB (Synced)**: Attempts to fetch perfectly synced LRC lyrics with sub-millisecond precision.
+- **Tier 2: Genius (Fallback)**: If no synced lyrics exist, scrapes Genius.com for high-quality plain text.
+- **Robust Scraping**: `GeniusService.ts` includes advanced sanitization to remove "contributors," "metadata," and "you might also like" injections often found in web-scraped lyrics.
+- **Lyric Preview Mode**: Users can preview and scroll through fetched lyrics before applying them to verify quality and timestamps.
+- **Smart Scoring**: `SmartLyricMatcher.ts` ranks results based on title, artist, and duration similarity.
 
-### AI Karaoke Mode (ONNX Vocal Separation) 🎤
-Apple Music Sing-style vocal/instrumental balance control powered by on-device AI.
-- **Core Technology**: ONNX Runtime with quantized Spleeter/Demucs models (~40-60MB)
-- **Audio Pipeline**:
-    1. **Decode**: FFmpeg extracts raw PCM Float32 audio from MP3/M4A
-    2. **Separate**: ONNX model splits audio into vocal and instrumental stems
-    3. **Reconstruct**: FFmpeg encodes stems back to playable WAV files
-    4. **Store**: Stems saved permanently per song in app documents
-- **Dual-Track Playback**: Uses `expo-audio` with synchronized dual players:
-    - Vocal track (master clock)
-    - Instrumental track (follows vocal with 50ms drift correction)
-- **Real-time Mixing**: Balance slider from -1.0 (vocals only) to +1.0 (karaoke/instruments only)
-- **UI Components**:
-    - `VocalBalanceSlider`: Apple Music Sing-style gradient slider
-    - `StemProcessButton`: AI separation trigger with progress tracking
-- **Database Storage**: `vocal_stem_uri`, `instrumental_stem_uri`, `separation_status`, `separation_progress`
-- **Background Processing**: Runs as persistent task even when phone is locked
+### Dynamic Theme Engine 🎨
+- **Magic Button**: The "Sparkle" button now dynamically shifts its background gradient based on the current song's `gradientId`, creating a unified, premium appearance.
+- **60fps Scroll Engine**: Uses `requestAnimationFrame` for buttery-smooth scrolling on high-refresh-rate displays.
+- **Design System**: 24+ curated vibrant visual presets (Midnight Dreams, Ocean Breeze, Sunset Vibes, etc.).
 
 ---
 
 ## 📂 Directory Architecture
 
 ### `src/components/` (The Building Blocks)
-- **`AIGeneratorModal.tsx`**: Interface for generating prompt templates for ChatGPT.
+- **`LrcSearchModal.tsx`**: New unified search interface with list filtering, source badges, and **Preview Mode**.
 - **`AuroraHeader.tsx`**: **Skia-powered** organic blurred background system.
-- **`CustomMenu.tsx`**: iOS-style anchored "drop-up" menu. Supports dynamic positioning near tap source. Event passthrough for submenus.
-- **`GradientBackground.tsx`**: Animated morphing gradients with GPU-accelerated transforms.
-- **`GradientPicker.tsx`**: High-performance preset selector.
 - **`LyricsLine.tsx`**: Animated line component with distance-based blur and glow.
+- **`VinylRecord.tsx`**: Realistic rotating vinyl UI for the player.
 - **`PlayerControls.tsx`**: Core playback interaction buttons with ±10s skip.
 - **`Scrubber.tsx`**: Timeline progress bar with optimistic seeking.
-- **`SongCard.tsx`**: Grid item that handles both gradient fallbacks and custom cover art images. Supports long-press.
-- **`StemProcessButton.tsx`**: AI separation trigger with progress tracking and status display.
-- **`TasksModal.tsx`**: Background task manager showing live progress and task history.
-- **`Toast.tsx`**: Spring-animated notification component with auto-dismiss.
-- **`VocalBalanceSlider.tsx`**: Apple Music Sing-style gradient slider for vocal/instrumental balance (-1.0 to +1.0).
 
 ### `src/database/` (The Persistence Layer)
 - **`db.ts`**: Core SQLite initialization, singleton management, and recovery logic.
@@ -111,26 +89,25 @@ Apple Music Sing-style vocal/instrumental balance control powered by on-device A
 - **`sampleData.ts`**: Template metadata to populate the app on first run.
 
 ### `src/screens/` (The Orchestration Layer)
-- **`LibraryScreen.tsx`**: Hybrid layout - top 2 songs in grid, rest in list with thumbnails/duration. Long-press for cover art upload.
-- **`NowPlayingScreen.tsx`**: Main lyric reader with 60fps scroll engine, fixed active line positioning (30% from top), auto-hide controls, text case transformation, instrumental bars animation, cover art upload menu.
-- **`AddEditLyricsScreen.tsx`**: Form for song metadata, lyrics parsing, alignment picker, toast notifications.
+- **`LibraryScreen.tsx`**: Home view with grid/list hybrid layout.
+- **`NowPlayingScreen.tsx`**: Main reader with 60fps scroll engine, **Magic Button (Dynamic Gradient)**, and search integration.
+- **`AddEditLyricsScreen.tsx`**: Manual entry and metadata management.
 - **`SearchScreen.tsx`**: Real-time cross-field search engine.
 - **`SettingsScreen.tsx`**: iOS-style configuration with clear data option.
 
+### `src/services/` (The Core Engine)
+- **`LyricsRepository.ts`**: Orchestrates the multi-source search (LRCLIB → Genius).
+- **`LrcLibService.ts`**: LRCLIB API client for synced lyrics.
+- **`GeniusService.ts`**: Robust scraper with metadata scrubbing.
+- **`SmartLyricMatcher.ts`**: Result scoring and verification logic.
+- **`whisperService.ts`**: (Legacy) Whisper.cpp transcription support.
+
 ### `src/store/` (Reactive State - Zustand)
 - **`songsStore.ts`**: Master song list and metadata state.
-- **`playerStore.ts`**: Playback state, including the **Session Queue** and auto-play controls.
+- **`playerStore.ts`**: Playback state and session queue.
 - **`tasksStore.ts`**: Persistent background task queue for tracking AI processing across songs (Whisper & Karaoke separation).
 - **`artHistoryStore.ts`**: Tracks "Recent Art" for quick reuse across songs.
 - **`settingsStore.ts`**: Persists UI preferences to disk.
-
-### `src/services/` (AI & Background Processing)
-- **`whisperService.ts`**: Whisper.cpp transcription service for Magic Timestamp.
-- **`sourceSeparationModel.ts`**: ONNX Runtime wrapper for vocal/instrumental AI separation.
-- **`SourceSeparationService.ts`**: Background task coordinator for AI Karaoke pipeline (FFmpeg decode → ONNX inference → FFmpeg encode).
-
-### `src/hooks/` (React Hooks)
-- **`useKaraokePlayer.ts`**: Dual-track synchronized playback hook with 50ms drift correction and real-time volume mixing.
 
 ### `src/utils/` (Logic Helpers)
 - **`timestampParser.ts`**: The engine that converts raw text into structured `LyricLine` objects.

@@ -21,54 +21,43 @@ LuvLyrics/
 ### Source Directory (`src/`)
 
 #### **`src/components/`** - UI Building Blocks
-- **`AIGeneratorModal.tsx`**: Interface for generating ChatGPT prompt templates
 - **`AuroraHeader.tsx`**: Skia-powered organic blurred background system
-- **`CustomAlert.tsx`**: Custom alert dialog component
 - **`CustomMenu.tsx`**: iOS-style anchored drop-up menu with dynamic positioning
-- **`CustomTabBar.tsx`**: Custom tab bar for navigation
 - **`GradientBackground.tsx`**: Animated morphing gradients with GPU acceleration
 - **`GradientPicker.tsx`**: High-performance preset selector
+- **`LrcSearchModal.tsx`**: Unified search interface with **Preview Mode** and source filtering
 - **`LyricsLine.tsx`**: Animated line component with distance-based blur and glow
-- **`MagicModeModal.tsx`**: AI timestamp generation interface
-- **`MiniPlayer.tsx`**: Compact player for non-playing screens
 - **`PlayerControls.tsx`**: Core playback interaction buttons with ±10s skip
-- **`ProcessingOverlay.tsx`**: Visual feedback during AI processing
 - **`Scrubber.tsx`**: Timeline progress bar with optimistic seeking
 - **`SongCard.tsx`**: Grid/list item with gradient fallbacks and custom cover art
+- **`VinylRecord.tsx`**: Realistic rotating vinyl record UI for Now Playing
 - **`Toast.tsx`**: Spring-animated notification component with auto-dismiss
 - **`index.ts`**: Component exports
 
 #### **`src/constants/`** - Design System
 - **`colors.ts`**: True Black foundation for AMOLED contrast
-- **`gradients.ts`**: 24+ curated vibrant visual presets (Midnight Dreams, Ocean Breeze, etc.)
+- **`gradients.ts`**: 24+ curated vibrant visual presets
 - **`typography.ts`**: Scaled font sizes for accessibility
-- **`index.ts`**: Constants exports
 
 #### **`src/database/`** - Persistence Layer
-- **`db.ts`**: SQLite initialization, singleton management, recovery logic
-- **`queries.ts`**: CRUD operations with built-in retry logic and error handling
-- **`sampleData.ts`**: Template metadata for first-run population
-- **`index.ts`**: Database exports
-
-#### **`src/navigation/`** - Navigation Structure
-- **`RootNavigator.tsx`**: Root stack navigator
-- **`TabNavigator.tsx`**: Bottom tab navigation
-- **`index.ts`**: Navigation exports
+- **`db.ts`**: SQLite initialization and singleton management
+- **`queries.ts`**: CRUD operations with retry logic
 
 #### **`src/screens/`** - Main Application Screens
-- **`AddEditLyricsScreen.tsx`**: Form for song metadata, lyrics parsing, alignment picker
-- **`LibraryScreen.tsx`**: Hybrid layout (grid + list) with thumbnails and duration
-- **`NowPlayingScreen.tsx`**: Main lyric reader with 60fps scroll engine
-- **`SearchScreen.tsx`**: Real-time cross-field search engine
-- **`SettingsScreen.tsx`**: iOS-style configuration with clear data option
-- **`index.ts`**: Screen exports
+- **`AddEditLyricsScreen.tsx`**: Form for song metadata and lyrics
+- **`LibraryScreen.tsx`**: Hybrid layout (grid + list)
+- **`NowPlayingScreen.tsx`**: Main reader with 60fps scroll engine and **Dynamic Magic Button**
+- **`SearchScreen.tsx`**: Real-time library search
+- **`SettingsScreen.tsx`**: App configuration
 
 #### **`src/services/`** - Business Logic Services
+- **`LyricsRepository.ts`**: Waterfall search orchestrator (LRCLIB → Genius)
+- **`LrcLibService.ts`**: LRCLIB API client for synced lyrics
+- **`GeniusService.ts`**: Scraper with robust metadata scrubbing
+- **`SmartLyricMatcher.ts`**: Search result scoring logic
 - **`audioService.ts`**: Audio playback management
-- **`autoTimestampServiceV2.ts`**: Dynamic Time Warping (DTW) for lyric alignment
-- **`mediaScanner.ts`**: Device media scanning functionality
-- **`whisperService.ts`**: On-device Whisper AI integration
-- **`whisperSetup.ts`**: Whisper model initialization and configuration
+- **`mediaScanner.ts`**: Device media scanning
+- **`whisperService.ts`**: (Legacy) On-device transcription
 
 #### **`src/store/`** - State Management (Zustand)
 - **`artHistoryStore.ts`**: Tracks "Recent Art" for quick reuse

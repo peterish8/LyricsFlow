@@ -16,6 +16,7 @@ export const Colors = {
   
   // Accents
   accent: '#7f13ec',          // Purple
+  primary: '#7f13ec',         // Primary (Purple)
   accentBlue: '#3EA6FF',      // Blue alternative
   
   // Dividers & Borders

@@ -34,24 +34,27 @@ import { usePlayerStore } from '../store/playerStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import {
   GradientBackground,
-  LyricsLine,
+  // LyricsLine,
   Scrubber,
   PlayerControls,
   CustomMenu,
+  VinylRecord,
+  LrcSearchModal,
 } from '../components';
-import { getGradientById, GRADIENTS, getGradientColors } from '../constants/gradients';
+import { SearchResult } from '../services/LyricsRepository';
+import { LrcLibService } from '../services/LrcLibService';
+import { GeniusService } from '../services/GeniusService';
+import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Colors } from '../constants/colors';
 import { calculateDuration } from '../utils/timestampParser';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { Alert } from 'react-native';
-import { MagicModeModal } from '../components/MagicModeModal';
-import { ProcessingOverlay } from '../components/ProcessingOverlay';
-import { getAutoTimestampService, AutoTimestampResult } from '../services/autoTimestampServiceV2';
-import { lyricsToRawText } from '../utils/timestampParser';
-import { formatTime, generateId } from '../utils/formatters';
-import { audioService } from '../services/audioService';
-import { useTasksStore } from '../store/tasksStore';
-import { TasksModal } from '../components/TasksModal';
+// import { MagicModeModal } from '../components/MagicModeModal';
+// import { ProcessingOverlay } from '../components/ProcessingOverlay';
+// import { getAutoTimestampService, AutoTimestampResult } from '../services/autoTimestampServiceV2';
+// import { lyricsToRawText } from '../utils/timestampParser';
+// import { formatTime, generateId } from '../utils/formatters';
+// import { audioService } from '../services/audioService';
 
 type Props = RootStackScreenProps<'NowPlaying'>;
 
@@ -69,7 +72,7 @@ const LyricItem = React.memo<{
   const isActive = index === displayLineIndex;
   const isPast = index < displayLineIndex;
   
-  const scale = useSharedValue(1);
+  // const scale = useSharedValue(1);
   const bar1Height = useSharedValue(24);
   const bar2Height = useSharedValue(40);
   const bar3Height = useSharedValue(16);
@@ -82,8 +85,10 @@ const LyricItem = React.memo<{
         bar3Height.value = withSpring(Math.random() * 15 + 10, { damping: 10 });
       };
       const interval = setInterval(animate, 400);
-      return () => clearInterval(interval);
-      bar3Height.value = 16;
+      return () => {
+        clearInterval(interval);
+        bar3Height.value = 16;
+      };
     }
   }, [isActive, isPlaying]);
   
@@ -168,10 +173,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     pause,
     togglePlay,
     seek,
-    skipPrevious,
-    skipNext,
+    // skipPrevious,
+    // skipNext,
     tick,
-    reset,
+    // reset,
     enqueueSong,
     dequeueNextSong,
     shouldAutoPlayOnLoad,
@@ -191,7 +196,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const transitionInProgressRef = useRef(false);
   const userScrollingRef = useRef(false);
   const scrollYRef = useRef(0);
-  const displayLineIndexRef = useRef(0);
+  // const displayLineIndexRef = useRef(0);
   const [displayLineIndex, setDisplayLineIndex] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideControlsTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -234,255 +239,15 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const [queueVisible, setQueueVisible] = useState(false);
   
   // Magic Mode State
-  const [showMagicModal, setShowMagicModal] = useState(false);
-  const [showTasksModal, setShowTasksModal] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStage, setProcessingStage] = useState('');
-  const [processingProgress, setProcessingProgress] = useState(0);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+
 
   // Tasks Store
-  const { addTask, updateTask, tasks } = useTasksStore();
-  const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+  // const { addTask, updateTask, tasks } = useTasksStore();
+  // const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+  // const activeTasksCount = 0;
 
-  // Magic Mode Handler
-  const handleMagicMode = async () => {
-    // Get latest song data from store to ensure we have fresh metadata
-    const songId = currentSong?.id;
-    if (!songId) {
-      Alert.alert('Error', 'No song is currently selected.');
-      return;
-    }
-
-    const latestSong = await getSong(songId);
-    if (!latestSong?.audioUri) {
-      Alert.alert('No Audio', 'Magic Timestamp requires an audio file.');
-      return;
-    }
-
-    if (!latestSong.lyrics || latestSong.lyrics.length === 0) {
-      Alert.alert(
-        'No Lyrics', 
-        'This song has no lyrics to align. Use Pure Magic to generate lyrics from audio.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Use Pure Magic', onPress: handlePureMagicMode }
-        ]
-      );
-      return;
-    }
-
-    setShowMagicModal(false);
-    
-    setShowMagicModal(false);
-    
-    // Register background task with REVERT data (snapshot of current state)
-    const taskId = generateId();
-    addTask({
-      id: taskId,
-      songId: latestSong.id,
-      songTitle: latestSong.title,
-      type: 'magic',
-      status: 'queued',
-      progress: 0,
-      stage: 'Queued',
-      revertData: {
-        lyrics: latestSong.lyrics,
-        duration: latestSong.duration,
-        dateModified: latestSong.dateModified
-      },
-      dateCreated: new Date().toISOString()
-    });
-    setIsProcessing(true); // Still show local overlay for immediate feedback
-    setProcessingStage('Starting Magic mode...');
-
-    try {
-      const service = getAutoTimestampService();
-      const rawLyrics = lyricsToRawText(latestSong.lyrics);
-
-      updateTask(taskId, { status: 'processing', stage: 'Initializing Whisper...' });
-
-      const result = await service.processAudio(
-        latestSong.audioUri,
-        rawLyrics,
-        (stage, progress) => {
-          setProcessingStage(stage);
-          setProcessingProgress(progress);
-          updateTask(taskId, { stage, progress });
-        }
-      );
-
-      await handleTimestampResult(result, 'Magic');
-      updateTask(taskId, { status: 'completed', stage: 'Complete!', progress: 1, dateCompleted: new Date().toISOString() });
-
-    } catch (error: any) {
-      updateTask(taskId, { status: 'failed', stage: `Error: ${error.message}` });
-      handleTimestampError(error);
-    } finally {
-      setIsProcessing(false);
-      setProcessingStage('');
-      setProcessingProgress(0);
-    }
-  };
-
-  // Pure Magic Handler
-  const handlePureMagicMode = async () => {
-    if (isProcessing) return; // Prevent concurrent calls
-
-    const songId = currentSong?.id;
-    if (!songId) {
-      Alert.alert('Error', 'No song is currently selected.');
-      return;
-    }
-
-    const latestSong = await getSong(songId);
-    if (!latestSong?.audioUri) {
-      Alert.alert('No Audio', 'Pure Magic requires an audio file.');
-      return;
-    }
-
-    // Confirm overwrite
-    if (latestSong.lyrics && latestSong.lyrics.length > 0) {
-       Alert.alert(
-        'Overwrite Lyrics?',
-        'Pure Magic will replace existing lyrics. Continue?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Continue', onPress: executePureMagic }
-        ]
-      );
-    } else {
-      executePureMagic();
-    }
-  };
-
-  const executePureMagic = async () => {
-    const songId = currentSong?.id;
-    if (!songId) return;
-
-    setShowMagicModal(false);
-    
-    const latestSong = await getSong(songId);
-    if (!latestSong?.audioUri) return;
-
-    // Register background task with REVERT data
-    const taskId = generateId();
-    addTask({
-      id: taskId,
-      songId: latestSong.id,
-      songTitle: latestSong.title,
-      type: 'pure-magic',
-      status: 'queued',
-      progress: 0,
-      stage: 'Queued',
-      revertData: {
-        lyrics: latestSong.lyrics,
-        duration: latestSong.duration,
-        dateModified: latestSong.dateModified
-      },
-      dateCreated: new Date().toISOString()
-    });
-    setIsProcessing(true);
-    setProcessingStage('Starting Pure Magic mode...');
-
-    try {
-      const service = getAutoTimestampService();
-
-      updateTask(taskId, { status: 'processing', stage: 'Initializing AI...' });
-
-      const result = await service.autoGenerateLyrics(
-        latestSong.audioUri,
-        (stage, progress) => {
-          setProcessingStage(stage);
-          setProcessingProgress(progress);
-          updateTask(taskId, { stage, progress });
-        }
-      );
-
-      await handleTimestampResult(result, 'Pure Magic');
-      updateTask(taskId, { status: 'completed', stage: 'Complete!', progress: 1, dateCompleted: new Date().toISOString() });
-
-    } catch (error: any) {
-      updateTask(taskId, { status: 'failed', stage: `Error: ${error.message}` });
-      handleTimestampError(error);
-    } finally {
-      setIsProcessing(false);
-      setProcessingStage('');
-      setProcessingProgress(0);
-    }
-  };
-
-  const handleTimestampResult = async (result: AutoTimestampResult, mode: string) => {
-    // Map lyrics to include lineOrder to satisfy Song type
-    const mappedLyrics = result.lyrics.map((line, index) => ({
-      ...line,
-      lineOrder: index
-    }));
-
-    // CRITICAL: Fetch latest song data from store to ensure we don't overwrite
-    // manually edited metadata (title/artist) with stale component state.
-    const songId = currentSong?.id;
-    if (!songId) return;
-    
-    const latestSong = await getSong(songId);
-    if (!latestSong) return;
-
-    if (result.overallConfidence >= 0.6) {
-      // Update song in DB and Store
-      const finalDuration = mappedLyrics.length > 0 
-        ? mappedLyrics[mappedLyrics.length - 1].timestamp + 10 
-        : latestSong.duration;
-      
-      const updatedSong = {
-        ...latestSong,
-        lyrics: mappedLyrics,
-        duration: Math.max(latestSong.duration, finalDuration),
-        dateModified: new Date().toISOString(),
-        separationStatus: latestSong.separationStatus || 'none',
-        separationProgress: latestSong.separationProgress || 0,
-      };
-
-      await updateSong(updatedSong);
-      setCurrentSong(updatedSong);
-      setLyrics(mappedLyrics, updatedSong.duration);
-      
-      Alert.alert(
-        '✨ Magic Complete!',
-        `${mode} successfully processed lyrics.\nConfidence: ${(result.overallConfidence * 100).toFixed(0)}%`
-      );
-    } else {
-       Alert.alert(
-        '⚠️ Low Confidence',
-        `Confidence: ${(result.overallConfidence * 100).toFixed(0)}%. Lyrics updated but may need manual review.`
-      );
-      // Still update to save progress
-      const updatedSong = {
-        ...latestSong,
-        lyrics: mappedLyrics,
-        dateModified: new Date().toISOString(),
-        separationStatus: latestSong.separationStatus || 'none',
-        separationProgress: latestSong.separationProgress || 0,
-      };
-      await updateSong(updatedSong);
-      setCurrentSong(updatedSong);
-      setLyrics(mappedLyrics, updatedSong.duration);
-    }
-  };
-
-
-  const handleTimestampError = async (error: any) => {
-    console.error('Magic Timestamp Error:', error);
-    
-    // Release service to clear any stuck context
-    try {
-      const service = getAutoTimestampService();
-      await service.release();
-    } catch (e) {
-      console.warn('Failed to release service on error:', e);
-    }
-
-    Alert.alert('Error', `Magic Timestamp failed: ${error.message}`);
-    setIsProcessing(false);
-  };
+  // Magic Mode Handler (REMOVED)
 
   // Title scrolling animation
   useEffect(() => {
@@ -682,11 +447,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   // Optimized: Uses subscription to avoid re-rendering on every second
   useEffect(() => {
     const unsub = usePlayerStore.subscribe((state) => {
-      const { currentTime, duration, isPlaying } = state;
+      const { currentTime, duration: storeDuration, isPlaying: storeIsPlaying } = state;
       
       if (transitionInProgressRef.current) return;
-      if (duration <= 0 || currentTime < duration) return;
-      if (!isPlaying) return;
+      if (storeDuration <= 0 || currentTime < storeDuration) return;
+      if (!storeIsPlaying) return;
 
       let nextSongId = dequeueNextSong();
       while (nextSongId && nextSongId === songId) {
@@ -781,8 +546,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleSkipForward = () => {
-    const { currentTime, duration } = usePlayerStore.getState();
-    const newTime = Math.min(duration, currentTime + 10);
+    const { currentTime, duration: storeDuration } = usePlayerStore.getState();
+    const newTime = Math.min(storeDuration, currentTime + 10);
     seek(newTime); // PlayerProvider handles audio seeking
   };
 
@@ -839,6 +604,50 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     };
     await updateSong(updatedSong);
     setCurrentSong(updatedSong);
+  };
+
+  const handleSearchResult = async (result: SearchResult) => {
+    setShowSearchModal(false);
+    
+    let finalLyrics = result.syncedLyrics || result.plainLyrics;
+    
+    // If from Genius, scrape if needed
+    if (result.source === 'Genius' && !finalLyrics && result.url) {
+       const scraped = await GeniusService.scrapeGeniusLyrics(result.url);
+       if (scraped) finalLyrics = scraped;
+    }
+
+    if (!finalLyrics) {
+      Alert.alert('Error', 'No lyrics text found in this result.');
+      return;
+    }
+
+    // Parse
+    let parsedLines = LrcLibService.parseLrc(finalLyrics);
+    if (result.source === 'Genius' || result.type === 'plain') {
+       if (!finalLyrics.includes('[')) {
+          parsedLines = GeniusService.convertToLyricLines(finalLyrics);
+       }
+    }
+
+    // Update Song
+    if (currentSong) {
+      const newDuration = (result.duration && result.duration > 0) ? result.duration : currentSong.duration;
+      
+      const updatedSong = {
+        ...currentSong,
+        lyrics: parsedLines,
+        duration: newDuration,
+        lyricSource: result.source,
+        dateModified: new Date().toISOString(),
+      };
+      
+      await updateSong(updatedSong);
+      setCurrentSong(updatedSong);
+      setLyrics(parsedLines, newDuration);
+      
+      Alert.alert('Success', `Lyrics updated from ${result.source}`);
+    }
   };
 
   const handleArtLongPress = (event: GestureResponderEvent) => {
@@ -909,9 +718,9 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     transform: [{ translateY: controlsTranslateY.value }],
   }));
 
-  const gradient = currentSong
-    ? getGradientById(currentSong.gradientId) ?? GRADIENTS[0]
-    : GRADIENTS[0];
+  // const gradient = currentSong
+  //   ? getGradientById(currentSong.gradientId) ?? GRADIENTS[0]
+  //   : GRADIENTS[0];
 
   const transformText = (text: string, textCase?: 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') => {
     if (!textCase || textCase === 'normal') return text;
@@ -984,7 +793,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Ionicons name="search" size={24} color="rgba(255,255,255,0.6)" />
               </Pressable>
-              <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
+              {/* <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
                 <View>
                   <Ionicons name="notifications-outline" size={24} color="rgba(255,255,255,0.6)" />
                   {activeTasksCount > 0 && (
@@ -993,7 +802,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                     </View>
                   )}
                 </View>
-              </Pressable>
+              </Pressable> */}
               <Pressable style={styles.headerButton} onPress={async () => {
                 if (currentSong) {
                   const fullSong = await getSong(currentSong.id);
@@ -1069,16 +878,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
           ) : (
             <View style={styles.noLyricsContainer} {...vinylPanResponder.panHandlers}>
               <RNAnimated.View style={{ transform: [{ rotate: vinylSpin }] }}>
-                {currentSong?.coverImageUri ? (
-                  <Image 
-                    source={{ uri: currentSong.coverImageUri }} 
-                    style={styles.vinylCover}
+                 <VinylRecord 
+                    imageUri={currentSong?.coverImageUri} 
+                    size={300} 
                   />
-                ) : (
-                  <View style={styles.vinylDisc}>
-                    <Ionicons name="disc" size={120} color="rgba(255,255,255,0.2)" />
-                  </View>
-                )}
               </RNAnimated.View>
             </View>
           )}
@@ -1099,23 +902,12 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
               onLongPress={handleArtLongPress}
               delayLongPress={1500}
             >
-              {currentSong?.coverImageUri ? (
-                <>
-                  <Image 
-                    source={{ uri: currentSong.coverImageUri }} 
-                    style={StyleSheet.absoluteFill} 
+              <RNAnimated.View style={{ transform: [{ rotate: vinylSpin }] }}>
+                 <VinylRecord 
+                    imageUri={currentSong?.coverImageUri} 
+                    size={56} 
                   />
-                  <View style={styles.vinylOverlay}>
-                    <View style={styles.vinylRing1} />
-                    <View style={styles.vinylRing2} />
-                    <View style={styles.vinylCenter} />
-                  </View>
-                </>
-              ) : (
-                <View style={styles.defaultThumbnail}>
-                  <Ionicons name="disc" size={32} color="rgba(255,255,255,0.3)" />
-                </View>
-              )}
+              </RNAnimated.View>
             </Pressable>
             <View style={styles.songDetails} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
               <View style={{ overflow: 'hidden', width: '100%' }}>
@@ -1141,26 +933,18 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                 )}
               </Text>
             </View>
+            {/* Magic Button (Dynamic Gradient) */}
             <Pressable 
-              style={[
-                styles.magicButton,
-                { shadowColor: getGradientColors(currentSong?.gradientId || 'aurora')[0] },
-                isProcessing && { opacity: 0.5 }
-              ]} 
-              onPress={() => setShowMagicModal(true)}
-              disabled={isProcessing}
+              style={styles.magicButton} 
+              onPress={() => setShowSearchModal(true)}
             >
               <LinearGradient
-                colors={getGradientColors(currentSong?.gradientId || 'aurora') as any}
+                colors={getGradientById(currentSong?.gradientId ?? 'aurora')?.colors ?? ['#FF0080', '#7928CA']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.magicGradient}
               >
-                <Ionicons 
-                  name="sparkles" 
-                  size={18} 
-                  color="#FFFFFF" 
-                />
+                <Ionicons name="sparkles" size={20} color="#fff" />
               </LinearGradient>
             </Pressable>
             <Pressable style={styles.moreButton} onPress={handleMorePress}>
@@ -1234,18 +1018,15 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         ]}
       />
 
-      {/* Magic Mode Modal */}
-      <MagicModeModal
-        visible={showMagicModal}
-        onClose={() => setShowMagicModal(false)}
-        onMagicMode={handleMagicMode}
-        onPureMagicMode={handlePureMagicMode}
-      />
-
-      {/* Tasks Modal */}
-      <TasksModal
-        visible={showTasksModal}
-        onClose={() => setShowTasksModal(false)}
+      <LrcSearchModal
+        visible={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        onSelect={handleSearchResult}
+        initialQuery={{
+          title: currentSong?.title || '',
+          artist: currentSong?.artist || '',
+          duration: currentSong?.duration || 0,
+        }}
       />
 
       <CustomMenu
@@ -1314,7 +1095,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                 queueSongIds.map((id, index) => {
                   const queueSong = songs.find(s => s.id === id);
                   if (!queueSong) return null;
-                  const gradient = getGradientById(queueSong.gradientId) || GRADIENTS[0];
+                  // const queueGradient = getGradientById(queueSong.gradientId) || GRADIENTS[0];
                   return (
                     <View key={id} style={styles.queueItem}>
                       <Text style={styles.queueNumber}>{index + 1}</Text>
@@ -1435,9 +1216,8 @@ const styles = StyleSheet.create({
   songThumbnail: {
     width: 56,
     height: 56,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#2C2C2E',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   vinylOverlay: {
     ...StyleSheet.absoluteFillObject,

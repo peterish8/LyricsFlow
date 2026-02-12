@@ -19,24 +19,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+// import { LinearGradient } from 'expo-linear-gradient';
 import { TabScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
-import { usePlayerStore } from '../store/playerStore';
+// import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { AuroraHeader, SongCard, CustomMenu, MiniPlayer } from '../components';
 import { Colors } from '../constants/colors';
-import { getGradientById, GRADIENTS } from '../constants/gradients';
+// import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Song } from '../types/song';
 import * as ImagePicker from 'expo-image-picker';
-import { useTasksStore } from '../store/tasksStore';
-import { TasksModal } from '../components/TasksModal';
+// import { useTasksStore } from '../store/tasksStore';
+// import { TasksModal } from '../components/TasksModal';
 
 type Props = TabScreenProps<'Library'>;
 
 const LibraryScreen: React.FC<Props> = ({ navigation }) => {
-  const { songs, isLoading, fetchSongs, setCurrentSong, updateSong, currentSong } = useSongsStore();
+  const { songs, fetchSongs, setCurrentSong, updateSong, currentSong } = useSongsStore();
   const { recentArts, addRecentArt } = useArtHistoryStore();
   const gradientOpacity = React.useRef(new Animated.Value(1)).current;
   
@@ -45,10 +45,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
   const [recentArtVisible, setRecentArtVisible] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
-  const [showTasksModal, setShowTasksModal] = React.useState(false);
+  // const [showTasksModal, setShowTasksModal] = React.useState(false);
 
-  const { tasks } = useTasksStore();
-  const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+  // const { tasks } = useTasksStore();
+  // const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+  // const activeTasksCount = 0;
 
   useEffect(() => {
     fetchSongs();
@@ -187,22 +188,22 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     },
   ];
 
-  const topSongs = songs.slice(0, 2);
-  const otherSongs = songs.slice(2);
+  // const topSongs = songs.slice(0, 2);
+  // const otherSongs = songs.slice(2);
 
-  const renderSong = ({ item, index }: { item: Song; index: number }) => (
-    <View style={[styles.cardWrapper, index % 2 === 0 && styles.cardLeft]}>
-      <SongCard
-        id={item.id}
-        title={item.title}
-        artist={item.artist}
-        album={item.album}
-        gradientId={item.gradientId}
-        coverImageUri={item.coverImageUri}
-        onPress={() => handleSongPress(item)}
-      />
-    </View>
-  );
+  // const renderSong = ({ item, index }: { item: Song; index: number }) => (
+  //   <View style={[styles.cardWrapper, index % 2 === 0 && styles.cardLeft]}>
+  //     <SongCard
+  //       id={item.id}
+  //       title={item.title}
+  //       artist={item.artist}
+  //       album={item.album}
+  //       gradientId={item.gradientId}
+  //       coverImageUri={item.coverImageUri}
+  //       onPress={() => handleSongPress(item)}
+  //     />
+  //   </View>
+  // );
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
@@ -235,6 +236,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
             >
               <Ionicons name="search" size={24} color="#fff" />
             </Pressable>
+            {/* 
             <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
               <View>
                 <Ionicons name="notifications-outline" size={24} color="#fff" />
@@ -244,7 +246,8 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                   </View>
                 )}
               </View>
-            </Pressable>
+            </Pressable> 
+            */}
             <Pressable 
               style={styles.headerButton}
               onPress={handleAddPress}
@@ -390,10 +393,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         </Pressable>
       </Modal>
       
-      <TasksModal
-        visible={showTasksModal}
-        onClose={() => setShowTasksModal(false)}
-      />
+
       
       <MiniPlayer />
     </View>

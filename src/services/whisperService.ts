@@ -193,8 +193,9 @@ export class WhisperService {
         // We'll set it to 60 for better phrase grouping
         maxLen: options?.maxLen || 60,
         tokenTimestamps: options?.tokenTimestamps !== false,
-        // Add a prompt to encourage capitalization and punctuation, and help with noise
-        prompt: "Lyrics of a song. Proper capitalization and punctuation. No background noise descriptions like [music] or (noise).",
+        // Add a strong prompt to "Teacher Force" the model into focusing on lyrics
+        // This helps prevent hallucinations like the "COVID" error by setting context.
+        prompt: "These are the lyrics of the current song. Please use the following text as a guide and assign precise word-level timestamps. Proper capitalization and punctuation: " + (options?.language === 'en' ? "Lyric text follows." : ""),
       };
       
       console.log('[WhisperService] Whisper options:', whisperOptions);
@@ -320,7 +321,7 @@ export class WhisperService {
       
       // 1. Temporarily protect valid structural tags
       let processed = text.replace(/\[(instrumental|verse|chorus|bridge|intro|outro|solo|hook|break).*?\]/gi, (match) => {
-          return `__KEEP_${match.replace(/[\[\]\s]/g, '')}__`; 
+          return `__KEEP_${match.replace(/[[\]\s]/g, '')}__`; 
       });
 
       // 2. Remove ALL other brackets/parens and non-word chars

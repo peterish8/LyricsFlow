@@ -26,14 +26,11 @@ export interface Song {
   coverImageUri?: string; // URI to custom cover art
   lyricsAlign?: 'left' | 'center' | 'right'; // Default alignment for all lyrics
   textCase?: 'normal' | 'uppercase' | 'titlecase' | 'sentencecase'; // Text case transformation
+  lyricSource?: 'LRCLIB' | 'Genius' | 'Manual'; // Where lyrics came from
   audioUri?: string; // URI to local audio file
   isLiked?: boolean; // Whether song is liked
   
-  // AI Karaoke: Stem storage
-  vocalStemUri?: string;          // Path to isolated vocals WAV
-  instrumentalStemUri?: string;  // Path to isolated instruments WAV
-  separationStatus: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
-  separationProgress: number;      // 0-100%
+  // AI Karaoke fields removed
 }
 
 // Karaoke playback mix settings

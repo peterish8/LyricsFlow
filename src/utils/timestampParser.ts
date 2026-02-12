@@ -14,8 +14,8 @@ import { LyricLine } from '../types/song';
 // Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
 // Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
 // Now permissive for 1-digit seconds to handle "dirty" lyrics like [0:3.75]
-const TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\]\)]?/g;
-const SINGLE_TIMESTAMP_REGEX = /[\[\(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\]\)]?/;
+const TIMESTAMP_REGEX = /[[(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\])]?/g;
+const SINGLE_TIMESTAMP_REGEX = /[[(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\])]?/;
 
 /**
  * Parse a timestamp string into seconds
@@ -79,7 +79,7 @@ export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
       // Clean the line text by removing ALL timestamps and common separators
       let cleanedText = line.replace(TIMESTAMP_REGEX, '').trim();
       // Remove leading/trailing symbols commonly used as separators (-, :, |, .)
-      cleanedText = cleanedText.replace(/^[ \-:\.\|]+|[ \-:\.\|]+$/g, '').trim();
+      cleanedText = cleanedText.replace(/^[ -:.|]+|[ -:.|]+$/g, '').trim();
 
       if (cleanedText.length > 0) {
         // Inline timestamp with text

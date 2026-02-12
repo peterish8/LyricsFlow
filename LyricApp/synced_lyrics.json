@@ -1,0 +1,1634 @@
+[
+  {
+    "word": "TWO",
+    "start": 1.06,
+    "end": 1.481,
+    "match": true
+  },
+  {
+    "word": "AUGUSTS",
+    "start": 1.681,
+    "end": 2.161,
+    "match": true
+  },
+  {
+    "word": "AGO",
+    "start": 2.362,
+    "end": 2.862,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 3.663,
+    "end": 3.803,
+    "match": true
+  },
+  {
+    "word": "TOLD",
+    "start": 3.883,
+    "end": 4.164,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 4.184,
+    "end": 4.324,
+    "match": true
+  },
+  {
+    "word": "TRUTH,",
+    "start": 4.424,
+    "end": 4.845,
+    "match": true
+  },
+  {
+    "word": "OH,",
+    "start": 5.065,
+    "end": 5.265,
+    "match": true
+  },
+  {
+    "word": "BUT",
+    "start": 5.305,
+    "end": 5.445,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 5.505,
+    "end": 5.926,
+    "match": true
+  },
+  {
+    "word": "DIDN'T",
+    "start": 5.986,
+    "end": 6.366,
+    "match": true
+  },
+  {
+    "word": "LIKE",
+    "start": 6.487,
+    "end": 7.027,
+    "match": true
+  },
+  {
+    "word": "IT,",
+    "start": 7.167,
+    "end": 7.328,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 7.348,
+    "end": 7.528,
+    "match": true
+  },
+  {
+    "word": "WENT",
+    "start": 7.748,
+    "end": 8.008,
+    "match": true
+  },
+  {
+    "word": "HOME",
+    "start": 8.249,
+    "end": 8.529,
+    "match": true
+  },
+  {
+    "word": "YOU'RE",
+    "start": 9.711,
+    "end": 10.211,
+    "match": true
+  },
+  {
+    "word": "IN",
+    "start": 10.331,
+    "end": 10.491,
+    "match": true
+  },
+  {
+    "word": "YOUR",
+    "start": 10.512,
+    "end": 10.612,
+    "match": true
+  },
+  {
+    "word": "BENZ,",
+    "start": 11.282,
+    "end": 11.818,
+    "match": false
+  },
+  {
+    "word": "I'M",
+    "start": 11.953,
+    "end": 12.133,
+    "match": true
+  },
+  {
+    "word": "BY",
+    "start": 12.234,
+    "end": 12.514,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 12.534,
+    "end": 12.634,
+    "match": true
+  },
+  {
+    "word": "GATE",
+    "start": 12.714,
+    "end": 13.175,
+    "match": true
+  },
+  {
+    "word": "[Instrumental]",
+    "start": 15.457,
+    "end": 17.283,
+    "match": false
+  },
+  {
+    "word": "NOW",
+    "start": 17.74,
+    "end": 18.101,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 18.181,
+    "end": 18.401,
+    "match": true
+  },
+  {
+    "word": "GO",
+    "start": 18.461,
+    "end": 18.902,
+    "match": true
+  },
+  {
+    "word": "ALONE",
+    "start": 18.922,
+    "end": 19.482,
+    "match": true
+  },
+  {
+    "word": "CHARM",
+    "start": 20.063,
+    "end": 20.604,
+    "match": true
+  },
+  {
+    "word": "ALL",
+    "start": 20.624,
+    "end": 20.804,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 20.824,
+    "end": 20.884,
+    "match": true
+  },
+  {
+    "word": "PEOPLE",
+    "start": 20.984,
+    "end": 21.825,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 21.845,
+    "end": 21.905,
+    "match": true
+  },
+  {
+    "word": "TRAIN",
+    "start": 22.226,
+    "end": 22.482,
+    "match": false
+  },
+  {
+    "word": "FOR,",
+    "start": 22.546,
+    "end": 22.887,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 22.907,
+    "end": 23.007,
+    "match": true
+  },
+  {
+    "word": "MEAN",
+    "start": 23.087,
+    "end": 23.507,
+    "match": true
+  },
+  {
+    "word": "WELL",
+    "start": 23.587,
+    "end": 23.928,
+    "match": true
+  },
+  {
+    "word": "BUT",
+    "start": 23.948,
+    "end": 24.168,
+    "match": true
+  },
+  {
+    "word": "AIM",
+    "start": 24.288,
+    "end": 24.509,
+    "match": true
+  },
+  {
+    "word": "LOW",
+    "start": 24.829,
+    "end": 25.049,
+    "match": true
+  },
+  {
+    "word": "AND",
+    "start": 26.211,
+    "end": 26.291,
+    "match": true
+  },
+  {
+    "word": "I'LL",
+    "start": 26.531,
+    "end": 26.711,
+    "match": true
+  },
+  {
+    "word": "MAKE",
+    "start": 26.751,
+    "end": 26.992,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 27.112,
+    "end": 27.192,
+    "match": true
+  },
+  {
+    "word": "KNOWN",
+    "start": 27.272,
+    "end": 27.712,
+    "match": true
+  },
+  {
+    "word": "LIKE",
+    "start": 28.473,
+    "end": 28.553,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 28.573,
+    "end": 28.714,
+    "match": true
+  },
+  {
+    "word": "GETTING",
+    "start": 28.794,
+    "end": 29.194,
+    "match": true
+  },
+  {
+    "word": "PAID",
+    "start": 29.294,
+    "end": 29.835,
+    "match": true
+  },
+  {
+    "word": "THAT'S",
+    "start": 32.465,
+    "end": 32.825,
+    "match": true
+  },
+  {
+    "word": "JUST",
+    "start": 32.906,
+    "end": 33.166,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 33.246,
+    "end": 33.446,
+    "match": true
+  },
+  {
+    "word": "WAY",
+    "start": 33.947,
+    "end": 34.007,
+    "match": true
+  },
+  {
+    "word": "LIFE",
+    "start": 34.868,
+    "end": 35.609,
+    "match": true
+  },
+  {
+    "word": "GOES",
+    "start": 35.629,
+    "end": 36.31,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 36.91,
+    "end": 37.01,
+    "match": true
+  },
+  {
+    "word": "LIKE",
+    "start": 37.07,
+    "end": 37.371,
+    "match": true
+  },
+  {
+    "word": "TO",
+    "start": 37.451,
+    "end": 37.491,
+    "match": true
+  },
+  {
+    "word": "SLAM",
+    "start": 37.511,
+    "end": 38.212,
+    "match": true
+  },
+  {
+    "word": "DOORS",
+    "start": 38.772,
+    "end": 39.373,
+    "match": true
+  },
+  {
+    "word": "CLOSED",
+    "start": 39.774,
+    "end": 40.454,
+    "match": true
+  },
+  {
+    "word": "TRUST",
+    "start": 40.815,
+    "end": 41.135,
+    "match": true
+  },
+  {
+    "word": "ME,",
+    "start": 41.235,
+    "end": 41.976,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 41.996,
+    "end": 42.016,
+    "match": true
+  },
+  {
+    "word": "KNOW",
+    "start": 42.036,
+    "end": 42.277,
+    "match": true
+  },
+  {
+    "word": "IT'S",
+    "start": 43.318,
+    "end": 43.418,
+    "match": true
+  },
+  {
+    "word": "ALWAYS",
+    "start": 44.339,
+    "end": 44.619,
+    "match": true
+  },
+  {
+    "word": "ABOUT",
+    "start": 44.819,
+    "end": 45.32,
+    "match": true
+  },
+  {
+    "word": "ME",
+    "start": 45.42,
+    "end": 46.181,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 47.803,
+    "end": 47.863,
+    "match": true
+  },
+  {
+    "word": "LOVE",
+    "start": 47.923,
+    "end": 48.444,
+    "match": true
+  },
+  {
+    "word": "YOU,",
+    "start": 48.504,
+    "end": 48.704,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 48.724,
+    "end": 48.884,
+    "match": true
+  },
+  {
+    "word": "SORRY",
+    "start": 49.064,
+    "end": 49.725,
+    "match": true
+  },
+  {
+    "word": "TWO",
+    "start": 51.067,
+    "end": 51.127,
+    "match": true
+  },
+  {
+    "word": "SUMMERS",
+    "start": 51.187,
+    "end": 51.828,
+    "match": true
+  },
+  {
+    "word": "FROM",
+    "start": 51.908,
+    "end": 52.048,
+    "match": true
+  },
+  {
+    "word": "NOW",
+    "start": 52.108,
+    "end": 52.589,
+    "match": true
+  },
+  {
+    "word": "WE'LL",
+    "start": 53.209,
+    "end": 53.73,
+    "match": true
+  },
+  {
+    "word": "HAVE",
+    "start": 53.85,
+    "end": 53.946,
+    "match": false
+  },
+  {
+    "word": "BEEN",
+    "start": 53.97,
+    "end": 54.11,
+    "match": true
+  },
+  {
+    "word": "TALKING",
+    "start": 54.17,
+    "end": 54.971,
+    "match": true
+  },
+  {
+    "word": "BUT",
+    "start": 55.011,
+    "end": 55.072,
+    "match": true
+  },
+  {
+    "word": "NOT",
+    "start": 55.212,
+    "end": 55.652,
+    "match": true
+  },
+  {
+    "word": "ALL",
+    "start": 55.792,
+    "end": 55.953,
+    "match": true
+  },
+  {
+    "word": "THAT",
+    "start": 56.013,
+    "end": 56.193,
+    "match": true
+  },
+  {
+    "word": "OFTEN,",
+    "start": 56.393,
+    "end": 56.954,
+    "match": true
+  },
+  {
+    "word": "WE'RE",
+    "start": 59.136,
+    "end": 59.236,
+    "match": true
+  },
+  {
+    "word": "COOL",
+    "start": 59.256,
+    "end": 59.337,
+    "match": true
+  },
+  {
+    "word": "NOW",
+    "start": 59.357,
+    "end": 59.437,
+    "match": true
+  },
+  {
+    "word": "I'LL",
+    "start": 59.537,
+    "end": 59.617,
+    "match": true
+  },
+  {
+    "word": "BE",
+    "start": 59.637,
+    "end": 60.057,
+    "match": true
+  },
+  {
+    "word": "ON",
+    "start": 60.077,
+    "end": 60.218,
+    "match": true
+  },
+  {
+    "word": "A",
+    "start": 60.278,
+    "end": 60.298,
+    "match": true
+  },
+  {
+    "word": "BOAT",
+    "start": 60.318,
+    "end": 61.039,
+    "match": true
+  },
+  {
+    "word": "YOU'RE",
+    "start": 61.499,
+    "end": 61.88,
+    "match": true
+  },
+  {
+    "word": "ON",
+    "start": 62.08,
+    "end": 62.2,
+    "match": true
+  },
+  {
+    "word": "A",
+    "start": 62.3,
+    "end": 62.32,
+    "match": true
+  },
+  {
+    "word": "PLANE",
+    "start": 63.432,
+    "end": 64.322,
+    "match": false
+  },
+  {
+    "word": "GOING",
+    "start": 64.544,
+    "end": 65.547,
+    "match": true
+  },
+  {
+    "word": "SOMEWHERE,",
+    "start": 65.607,
+    "end": 66.59,
+    "match": true
+  },
+  {
+    "word": "SAME",
+    "start": 67.031,
+    "end": 67.384,
+    "match": false
+  },
+  {
+    "word": "AND",
+    "start": 67.472,
+    "end": 67.632,
+    "match": true
+  },
+  {
+    "word": "I'LL",
+    "start": 68.114,
+    "end": 68.194,
+    "match": true
+  },
+  {
+    "word": "HAVE",
+    "start": 68.214,
+    "end": 68.495,
+    "match": true
+  },
+  {
+    "word": "A",
+    "start": 68.816,
+    "end": 68.896,
+    "match": true
+  },
+  {
+    "word": "DRINK",
+    "start": 68.916,
+    "end": 69.197,
+    "match": true
+  },
+  {
+    "word": "WISTFULLY",
+    "start": 69.929,
+    "end": 70.515,
+    "match": false
+  },
+  {
+    "word": "LEAN",
+    "start": 70.661,
+    "end": 71.302,
+    "match": true
+  },
+  {
+    "word": "OUT",
+    "start": 71.322,
+    "end": 71.443,
+    "match": true
+  },
+  {
+    "word": "MY",
+    "start": 71.523,
+    "end": 71.703,
+    "match": true
+  },
+  {
+    "word": "WINDOW",
+    "start": 71.744,
+    "end": 72.466,
+    "match": true
+  },
+  {
+    "word": "AND",
+    "start": 72.566,
+    "end": 72.686,
+    "match": true
+  },
+  {
+    "word": "WATCH",
+    "start": 72.726,
+    "end": 73.228,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 73.248,
+    "end": 73.308,
+    "match": true
+  },
+  {
+    "word": "SUN",
+    "start": 73.689,
+    "end": 73.994,
+    "match": false
+  },
+  {
+    "word": "SET",
+    "start": 74.222,
+    "end": 74.405,
+    "match": false
+  },
+  {
+    "word": "ON",
+    "start": 74.451,
+    "end": 74.571,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 74.631,
+    "end": 74.752,
+    "match": true
+  },
+  {
+    "word": "LAKE",
+    "start": 74.812,
+    "end": 76.697,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 77.222,
+    "end": 77.642,
+    "match": false
+  },
+  {
+    "word": "MIGHT",
+    "start": 78.12,
+    "end": 78.502,
+    "match": false
+  },
+  {
+    "word": "NOT",
+    "start": 78.932,
+    "end": 79.276,
+    "match": false
+  },
+  {
+    "word": "FEEL",
+    "start": 79.657,
+    "end": 79.962,
+    "match": false
+  },
+  {
+    "word": "REAL",
+    "start": 80.292,
+    "end": 80.556,
+    "match": false
+  },
+  {
+    "word": "BUT",
+    "start": 80.833,
+    "end": 81.055,
+    "match": false
+  },
+  {
+    "word": "IT'S",
+    "start": 81.277,
+    "end": 81.454,
+    "match": false
+  },
+  {
+    "word": "OKAY,",
+    "start": 81.617,
+    "end": 81.747,
+    "match": false
+  },
+  {
+    "word": "MM",
+    "start": 81.844,
+    "end": 81.922,
+    "match": false
+  },
+  {
+    "word": "'CAUSE",
+    "start": 81.942,
+    "end": 82.463,
+    "match": true
+  },
+  {
+    "word": "THAT'S",
+    "start": 82.543,
+    "end": 82.784,
+    "match": true
+  },
+  {
+    "word": "JUST",
+    "start": 84.186,
+    "end": 84.968,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 84.988,
+    "end": 85.048,
+    "match": true
+  },
+  {
+    "word": "WAY",
+    "start": 85.068,
+    "end": 85.128,
+    "match": true
+  },
+  {
+    "word": "LIFE",
+    "start": 85.148,
+    "end": 85.228,
+    "match": true
+  },
+  {
+    "word": "GOES",
+    "start": 85.248,
+    "end": 85.93,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 86.471,
+    "end": 86.591,
+    "match": true
+  },
+  {
+    "word": "PUSH",
+    "start": 86.791,
+    "end": 86.971,
+    "match": true
+  },
+  {
+    "word": "MY",
+    "start": 87.232,
+    "end": 87.272,
+    "match": true
+  },
+  {
+    "word": "LUCK,",
+    "start": 87.593,
+    "end": 87.693,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 89.316,
+    "end": 89.356,
+    "match": true
+  },
+  {
+    "word": "SHOWS",
+    "start": 89.376,
+    "end": 90.057,
+    "match": true
+  },
+  {
+    "word": "THANKFUL",
+    "start": 90.672,
+    "end": 91.164,
+    "match": false
+  },
+  {
+    "word": "YOU",
+    "start": 91.532,
+    "end": 91.827,
+    "match": false
+  },
+  {
+    "word": "DON'T",
+    "start": 91.901,
+    "end": 92.462,
+    "match": true
+  },
+  {
+    "word": "SEND",
+    "start": 92.482,
+    "end": 93.063,
+    "match": true
+  },
+  {
+    "word": "SOMEONE",
+    "start": 93.544,
+    "end": 95.908,
+    "match": true
+  },
+  {
+    "word": "TO",
+    "start": 95.928,
+    "end": 95.968,
+    "match": true
+  },
+  {
+    "word": "KILL",
+    "start": 95.988,
+    "end": 96.069,
+    "match": true
+  },
+  {
+    "word": "ME",
+    "start": 96.249,
+    "end": 96.289,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 97.265,
+    "end": 97.786,
+    "match": true
+  },
+  {
+    "word": "LOVE",
+    "start": 97.806,
+    "end": 97.886,
+    "match": true
+  },
+  {
+    "word": "YOU,",
+    "start": 98.187,
+    "end": 98.528,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 98.548,
+    "end": 98.608,
+    "match": true
+  },
+  {
+    "word": "SORRY",
+    "start": 98.748,
+    "end": 99.51,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 99.771,
+    "end": 99.931,
+    "match": true
+  },
+  {
+    "word": "WERE",
+    "start": 99.971,
+    "end": 100.131,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 100.151,
+    "end": 100.212,
+    "match": true
+  },
+  {
+    "word": "BEST",
+    "start": 100.292,
+    "end": 100.612,
+    "match": true
+  },
+  {
+    "word": "BUT",
+    "start": 100.652,
+    "end": 100.813,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 100.833,
+    "end": 100.973,
+    "match": true
+  },
+  {
+    "word": "WERE",
+    "start": 101.033,
+    "end": 101.174,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 101.194,
+    "end": 101.294,
+    "match": true
+  },
+  {
+    "word": "WORST",
+    "start": 101.334,
+    "end": 101.715,
+    "match": true
+  },
+  {
+    "word": "AS",
+    "start": 101.735,
+    "end": 101.775,
+    "match": true
+  },
+  {
+    "word": "SICK",
+    "start": 101.815,
+    "end": 102.036,
+    "match": true
+  },
+  {
+    "word": "AS",
+    "start": 102.096,
+    "end": 102.196,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 102.276,
+    "end": 102.336,
+    "match": true
+  },
+  {
+    "word": "SOUNDS,",
+    "start": 102.356,
+    "end": 102.717,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 102.837,
+    "end": 102.857,
+    "match": true
+  },
+  {
+    "word": "LOVED",
+    "start": 102.877,
+    "end": 103.178,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 103.379,
+    "end": 103.439,
+    "match": true
+  },
+  {
+    "word": "FIRST",
+    "start": 103.639,
+    "end": 104.02,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 104.04,
+    "end": 104.18,
+    "match": true
+  },
+  {
+    "word": "WAS",
+    "start": 104.2,
+    "end": 104.26,
+    "match": true
+  },
+  {
+    "word": "A",
+    "start": 104.722,
+    "end": 104.742,
+    "match": true
+  },
+  {
+    "word": "DICK,",
+    "start": 104.762,
+    "end": 104.862,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 104.882,
+    "end": 104.982,
+    "match": true
+  },
+  {
+    "word": "IS",
+    "start": 105.042,
+    "end": 105.122,
+    "match": true
+  },
+  {
+    "word": "WHAT",
+    "start": 105.162,
+    "end": 105.343,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 105.423,
+    "end": 105.483,
+    "match": true
+  },
+  {
+    "word": "IS",
+    "start": 105.664,
+    "end": 105.784,
+    "match": true
+  },
+  {
+    "word": "A",
+    "start": 105.964,
+    "end": 106.108,
+    "match": false
+  },
+  {
+    "word": "HABIT",
+    "start": 106.216,
+    "end": 106.303,
+    "match": false
+  },
+  {
+    "word": "TO",
+    "start": 106.325,
+    "end": 106.425,
+    "match": true
+  },
+  {
+    "word": "KICK,",
+    "start": 106.706,
+    "end": 106.786,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 106.826,
+    "end": 106.987,
+    "match": true
+  },
+  {
+    "word": "AGE-OLD",
+    "start": 107.107,
+    "end": 107.788,
+    "match": true
+  },
+  {
+    "word": "CURSE",
+    "start": 107.808,
+    "end": 108.049,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 108.149,
+    "end": 108.249,
+    "match": true
+  },
+  {
+    "word": "TEND",
+    "start": 108.309,
+    "end": 108.45,
+    "match": true
+  },
+  {
+    "word": "TO",
+    "start": 108.55,
+    "end": 108.59,
+    "match": true
+  },
+  {
+    "word": "LAUGH",
+    "start": 108.61,
+    "end": 108.891,
+    "match": true
+  },
+  {
+    "word": "WHENEVER",
+    "start": 108.971,
+    "end": 109.392,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 109.492,
+    "end": 109.552,
+    "match": true
+  },
+  {
+    "word": "SAD",
+    "start": 109.612,
+    "end": 110.053,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 110.073,
+    "end": 110.093,
+    "match": true
+  },
+  {
+    "word": "STARE",
+    "start": 110.113,
+    "end": 110.374,
+    "match": true
+  },
+  {
+    "word": "AT",
+    "start": 110.394,
+    "end": 110.434,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 110.534,
+    "end": 110.595,
+    "match": true
+  },
+  {
+    "word": "CRASH,",
+    "start": 110.755,
+    "end": 111.396,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 111.416,
+    "end": 111.456,
+    "match": true
+  },
+  {
+    "word": "ACTUALLY",
+    "start": 111.657,
+    "end": 111.817,
+    "match": true
+  },
+  {
+    "word": "WORKS",
+    "start": 111.917,
+    "end": 112.399,
+    "match": true
+  },
+  {
+    "word": "MAKING",
+    "start": 112.439,
+    "end": 112.599,
+    "match": true
+  },
+  {
+    "word": "AMENDS,",
+    "start": 112.819,
+    "end": 113.04,
+    "match": true
+  },
+  {
+    "word": "THIS",
+    "start": 113.174,
+    "end": 113.281,
+    "match": false
+  },
+  {
+    "word": "SHIT",
+    "start": 113.361,
+    "end": 113.425,
+    "match": false
+  },
+  {
+    "word": "NEVER",
+    "start": 113.441,
+    "end": 113.802,
+    "match": true
+  },
+  {
+    "word": "ENDS",
+    "start": 113.922,
+    "end": 114.082,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 114.182,
+    "end": 114.643,
+    "match": true
+  },
+  {
+    "word": "WRONG",
+    "start": 114.664,
+    "end": 114.764,
+    "match": true
+  },
+  {
+    "word": "AGAIN,",
+    "start": 114.784,
+    "end": 115.285,
+    "match": true
+  },
+  {
+    "word": "WRONG",
+    "start": 115.405,
+    "end": 115.505,
+    "match": true
+  },
+  {
+    "word": "AGAIN",
+    "start": 115.606,
+    "end": 116.608,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 116.635,
+    "end": 116.656,
+    "match": false
+  },
+  {
+    "word": "WAY",
+    "start": 116.672,
+    "end": 116.685,
+    "match": false
+  },
+  {
+    "word": "LIFE",
+    "start": 116.688,
+    "end": 142.151,
+    "match": true
+  },
+  {
+    "word": "GOES",
+    "start": 142.171,
+    "end": 142.251,
+    "match": true
+  },
+  {
+    "word": "JOYRIDING",
+    "start": 142.271,
+    "end": 142.452,
+    "match": true
+  },
+  {
+    "word": "DOWN",
+    "start": 142.472,
+    "end": 142.552,
+    "match": true
+  },
+  {
+    "word": "OUR",
+    "start": 142.572,
+    "end": 142.632,
+    "match": true
+  },
+  {
+    "word": "ROAD",
+    "start": 142.652,
+    "end": 142.732,
+    "match": true
+  },
+  {
+    "word": "LAY",
+    "start": 142.752,
+    "end": 142.812,
+    "match": true
+  },
+  {
+    "word": "ON",
+    "start": 142.832,
+    "end": 142.872,
+    "match": true
+  },
+  {
+    "word": "THE",
+    "start": 142.892,
+    "end": 142.952,
+    "match": true
+  },
+  {
+    "word": "HORN",
+    "start": 142.972,
+    "end": 143.052,
+    "match": true
+  },
+  {
+    "word": "TO",
+    "start": 143.072,
+    "end": 143.112,
+    "match": true
+  },
+  {
+    "word": "PROVE",
+    "start": 143.132,
+    "end": 143.232,
+    "match": true
+  },
+  {
+    "word": "THAT",
+    "start": 143.252,
+    "end": 143.332,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 143.352,
+    "end": 143.392,
+    "match": true
+  },
+  {
+    "word": "HAUNTS",
+    "start": 143.413,
+    "end": 143.533,
+    "match": true
+  },
+  {
+    "word": "ME",
+    "start": 143.553,
+    "end": 143.593,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 143.613,
+    "end": 143.633,
+    "match": true
+  },
+  {
+    "word": "LOVE",
+    "start": 143.653,
+    "end": 143.733,
+    "match": true
+  },
+  {
+    "word": "YOU,",
+    "start": 143.753,
+    "end": 144.213,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 144.233,
+    "end": 144.293,
+    "match": true
+  },
+  {
+    "word": "SORRY",
+    "start": 144.313,
+    "end": 144.413,
+    "match": true
+  },
+  {
+    "word": "YOU",
+    "start": 144.415,
+    "end": 144.417,
+    "match": false
+  },
+  {
+    "word": "WERE",
+    "start": 144.419,
+    "end": 144.42,
+    "match": false
+  },
+  {
+    "word": "THE",
+    "start": 144.422,
+    "end": 144.423,
+    "match": false
+  },
+  {
+    "word": "BEST",
+    "start": 144.424,
+    "end": 144.425,
+    "match": false
+  },
+  {
+    "word": "BUT",
+    "start": 144.426,
+    "end": 144.427,
+    "match": false
+  },
+  {
+    "word": "YOU",
+    "start": 144.428,
+    "end": 144.429,
+    "match": false
+  },
+  {
+    "word": "WERE",
+    "start": 144.43,
+    "end": 144.431,
+    "match": false
+  },
+  {
+    "word": "THE",
+    "start": 144.432,
+    "end": 144.433,
+    "match": false
+  },
+  {
+    "word": "WORST",
+    "start": 144.433,
+    "end": 144.433,
+    "match": false
+  },
+  {
+    "word": "(THE",
+    "start": 144.433,
+    "end": 144.493,
+    "match": true
+  },
+  {
+    "word": "WAY",
+    "start": 144.514,
+    "end": 144.574,
+    "match": true
+  },
+  {
+    "word": "LIFE",
+    "start": 144.694,
+    "end": 144.774,
+    "match": true
+  },
+  {
+    "word": "GOES)",
+    "start": 144.794,
+    "end": 144.874,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 144.894,
+    "end": 144.914,
+    "match": true
+  },
+  {
+    "word": "WANNA",
+    "start": 144.934,
+    "end": 145.034,
+    "match": true
+  },
+  {
+    "word": "SPEAK",
+    "start": 145.054,
+    "end": 145.154,
+    "match": true
+  },
+  {
+    "word": "IN",
+    "start": 145.174,
+    "end": 145.214,
+    "match": true
+  },
+  {
+    "word": "CODE",
+    "start": 145.234,
+    "end": 145.314,
+    "match": true
+  },
+  {
+    "word": "HOPE",
+    "start": 145.334,
+    "end": 145.414,
+    "match": true
+  },
+  {
+    "word": "THAT",
+    "start": 145.434,
+    "end": 145.514,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 145.534,
+    "end": 145.554,
+    "match": true
+  },
+  {
+    "word": "DON'T,",
+    "start": 145.574,
+    "end": 145.695,
+    "match": true
+  },
+  {
+    "word": "WON'T",
+    "start": 145.715,
+    "end": 145.815,
+    "match": true
+  },
+  {
+    "word": "MAKE",
+    "start": 145.835,
+    "end": 145.915,
+    "match": true
+  },
+  {
+    "word": "IT",
+    "start": 145.935,
+    "end": 145.975,
+    "match": true
+  },
+  {
+    "word": "ABOUT",
+    "start": 145.995,
+    "end": 146.095,
+    "match": true
+  },
+  {
+    "word": "ME",
+    "start": 146.115,
+    "end": 146.155,
+    "match": true
+  },
+  {
+    "word": "I",
+    "start": 146.995,
+    "end": 147.258,
+    "match": true
+  },
+  {
+    "word": "LOVE",
+    "start": 147.278,
+    "end": 148.006,
+    "match": true
+  },
+  {
+    "word": "YOU,",
+    "start": 148.128,
+    "end": 148.269,
+    "match": true
+  },
+  {
+    "word": "I'M",
+    "start": 148.289,
+    "end": 148.35,
+    "match": true
+  },
+  {
+    "word": "SORRY",
+    "start": 148.532,
+    "end": 149.361,
+    "match": true
+  }
+]

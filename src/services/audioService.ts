@@ -3,7 +3,7 @@
  * Handles audio playback using expo-audio
  */
 
-import { useAudioPlayer, AudioSource } from 'expo-audio';
+import { useAudioPlayer } from 'expo-audio';
 
 class AudioService {
   private player: ReturnType<typeof useAudioPlayer> | null = null;
@@ -77,7 +77,7 @@ class AudioService {
     if (this.player) {
       try {
         this.player.clearLockScreenControls();
-      } catch (e) {
+      } catch (_e) {
         // ignore
       }
     }
