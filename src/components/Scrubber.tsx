@@ -1,163 +1,95 @@
-/**
- * LyricFlow - Scrubber/Seek Bar Component
- * Timeline progress bar with draggable thumb
- */
-
-import React, { memo, useState, useEffect } from 'react';
-import { StyleSheet, View, Text, Pressable } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  runOnJS,
-  withSpring,
-  withTiming,
-  useDerivedValue,
-} from 'react-native-reanimated';
-import { formatTime } from '../utils/formatters';
-import { usePlayerStore } from '../store/playerStore';
+import { useSharedValue, runOnJS } from 'react-native-reanimated';
 
 interface ScrubberProps {
-  currentTime: number;
-  duration: number;
-  onSeek: (time: number) => void;
+  currentTime: number; // seconds
+  duration: number; // seconds
+  onSeek: (seconds: number) => void;
 }
 
-import { useSettingsStore } from '../store/settingsStore';
-
-export const Scrubber: React.FC<ScrubberProps> = memo(({
-  currentTime,
-  duration,
-  onSeek,
-}) => {
-  const [width, setWidth] = useState(0);
-  const { showTimeRemaining, setShowTimeRemaining } = useSettingsStore();
-  const { setIsScrubbing } = usePlayerStore();
-  const isDragging = useSharedValue(false);
-  const progress = useSharedValue(0); // 0 to 1
-  const thumbScale = useSharedValue(1);
-
-  // Sync progress with currentTime when not dragging
-  useEffect(() => {
-    if (!isDragging.value && duration > 0) {
-      progress.value = currentTime / duration;
-    }
-  }, [currentTime, duration]);
-
-  const handleSeekStart = () => {
-    setIsScrubbing(true);
+const Scrubber: React.FC<ScrubberProps> = ({ currentTime, duration, onSeek }) => {
+  const scrubberWidth = useSharedValue(0);
+  
+  // ✅ Safe progress calculation
+  const progress = duration > 0 && !isNaN(currentTime) && currentTime >= 0
+    ? Math.min(Math.max(currentTime / duration, 0), 1)
+    : 0;
+  
+  const formatTime = (seconds: number): string => {
+    // ✅ Handle invalid values
+    if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-
-  const handleSeekEnd = (value: number) => {
-    const time = value * duration;
-    onSeek(Math.max(0, Math.min(time, duration)));
-    setIsScrubbing(false);
-  };
-
+  
+  // Drag gesture
   const panGesture = Gesture.Pan()
-    .onStart(() => {
-      isDragging.value = true;
-      thumbScale.value = withSpring(1.5);
-      runOnJS(handleSeekStart)();
-    })
     .onUpdate((e) => {
-      if (width > 0) {
-        // Clamp between 0 and 1
-        const newProgress = Math.max(0, Math.min(1, e.x / width));
-        progress.value = newProgress;
-      }
-    })
-    .onEnd(() => {
-      isDragging.value = false;
-      thumbScale.value = withSpring(1);
-      runOnJS(handleSeekEnd)(progress.value);
-    });
-
-  const tapGesture = Gesture.Tap()
-    .onEnd((e) => {
-      if (width > 0) {
-        const newProgress = Math.max(0, Math.min(1, e.x / width));
-        progress.value = withTiming(newProgress, { duration: 100 });
-        runOnJS(handleSeekEnd)(newProgress);
+      if (scrubberWidth.value > 0 && duration > 0) {
+        const position = Math.max(0, Math.min(e.x, scrubberWidth.value));
+        const percentage = position / scrubberWidth.value;
+        const newTime = percentage * duration;
+        // ✅ Validate before calling onSeek
+        if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
+          runOnJS(onSeek)(newTime);
+        }
       }
     });
-
+  
+  // Tap gesture
+  const tapGesture = Gesture.Tap().onEnd((e) => {
+    if (scrubberWidth.value > 0 && duration > 0) {
+      const position = Math.max(0, Math.min(e.x, scrubberWidth.value));
+      const percentage = position / scrubberWidth.value;
+      const newTime = percentage * duration;
+      // ✅ Validate before calling onSeek
+      if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
+        runOnJS(onSeek)(newTime);
+      }
+    }
+  });
+  
   const composedGesture = Gesture.Race(panGesture, tapGesture);
-
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
-  }));
-
-  const thumbStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: (progress.value * width) - 6 }, // Center thumb (width 12 / 2)
-      { scale: thumbScale.value }
-    ],
-  }));
-
-  // Calculate remaining time for display
-  // We can't use derived value easily for text unless we use ReText or similar
-  // So we stick to prop based remaining time for now, might lag during scrub slightly
-  // To make it smooth, we'd need ReText. For now, props update on seek end is standard.
-  // If we want real-time update, we need onSeeking callback.
-  const remaining = Math.max(0, duration - currentTime);
-
+  
+  const handleLayout = (e: LayoutChangeEvent) => {
+    scrubberWidth.value = e.nativeEvent.layout.width;
+  };
+  
   return (
     <View style={styles.container}>
-      {/* Progress Bar Area */}
       <GestureDetector gesture={composedGesture}>
-        <View 
-          style={styles.trackContainer}
-          onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-        >
-          {/* Background Track */}
-          <View style={styles.track} />
-          
-          {/* Active Progress */}
-          <Animated.View style={[styles.progress, progressStyle]} />
-          
-          {/* Thumb */}
-          <Animated.View style={[styles.thumb, thumbStyle]} />
+        <View style={styles.track} onLayout={handleLayout}>
+          <View style={[styles.fill, { width: `${progress * 100}%` }]} />
+          <View style={[styles.thumb, { left: `${progress * 100}%` }]} />
         </View>
       </GestureDetector>
-
-      {/* Time Labels */}
+      
       <View style={styles.timeContainer}>
-        <Text style={styles.time}>{formatTime(currentTime)}</Text>
-        <Pressable onPress={() => setShowTimeRemaining(!showTimeRemaining)}>
-          <Text style={styles.time}>
-            {showTimeRemaining ? `-${formatTime(remaining)}` : formatTime(duration)}
-          </Text>
-        </Pressable>
+        <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+        <Text style={styles.timeText}>{formatTime(duration)}</Text>
       </View>
     </View>
   );
-});
-
-Scrubber.displayName = 'Scrubber';
+};
 
 const styles = StyleSheet.create({
   container: {
-    width: '100%',
-    gap: 8,
-  },
-  trackContainer: {
-    height: 30, // Taller touch target
-    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   track: {
     height: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#333',
     borderRadius: 2,
-    width: '100%',
-    position: 'absolute',
+    position: 'relative',
   },
-  progress: {
-    height: 4,
+  fill: {
+    height: '100%',
     backgroundColor: '#fff',
     borderRadius: 2,
-    position: 'absolute',
-    left: 0,
   },
   thumb: {
     width: 12,
@@ -165,19 +97,17 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#fff',
     position: 'absolute',
-    left: 0,
+    top: -4,
+    marginLeft: -6,
   },
   timeContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: -8, // Pull closer to track
+    marginTop: 8,
   },
-  time: {
+  timeText: {
     fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.5)',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0.5,
+    color: '#888',
   },
 });
 

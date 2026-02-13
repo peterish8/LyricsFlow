@@ -27,11 +27,24 @@ export type AuroraPalette = 'library' | 'search' | 'settings' | 'nowPlaying';
 
 interface AuroraBackgroundProps {
   palette?: AuroraPalette;
+  colors?: string[]; // Custom colors override palette
 }
 
 export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
   palette = 'library',
+  colors,
 }) => {
+  // Use custom colors if provided, otherwise fallback to hardcoded palettes (though currently only constants differ slightly)
+  // For now, if colors provided, map them to COLOR_1, COLOR_2, COLOR_3
+  const activeColors = colors && colors.length >= 2 ? [
+     colors[0],
+     colors[1],
+     colors[2] || colors[0] // Fallback for 3rd color
+  ] : [COLOR_1, COLOR_2, COLOR_3];
+  
+  const c1 = activeColors[0];
+  const c2 = activeColors[1];
+  const c3 = activeColors[2];
   return (
     <View style={styles.container} pointerEvents="none">
       <View style={styles.auroraArea}>
@@ -43,7 +56,7 @@ export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
             y={-AURORA_HEIGHT * 0.2}
             width={SCREEN_WIDTH * 0.8}
             height={AURORA_HEIGHT * 0.8}
-            color={COLOR_2}
+            color={c2}
             transform={[{ rotate: -25 }]}
             opacity={0.65}
           >
@@ -55,7 +68,7 @@ export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
             y={-AURORA_HEIGHT * 0.1}
             width={SCREEN_WIDTH * 0.6}
             height={AURORA_HEIGHT * 0.7}
-            color={COLOR_1}
+            color={c1}
             transform={[{ rotate: 25 }]}
             opacity={0.6}
           >
@@ -67,7 +80,7 @@ export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
             y={AURORA_HEIGHT * 0.2} 
             width={SCREEN_WIDTH * 0.6} 
             height={AURORA_HEIGHT * 0.8} 
-            color={COLOR_3}
+            color={c3}
             opacity={0.8}
           >
             <BlurMask blur={90} style="normal" />

@@ -1,502 +1,340 @@
-/**
- * LyricFlow - Mini Player Component
- * Bottom bar showing current playing song
- */
-
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Pressable, Image, Animated, PanResponder, Easing } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { useSongsStore } from '../store/songsStore';
+import Animated, { 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withRepeat, 
+  withTiming, 
+  withSequence,
+  Easing, 
+  cancelAnimation
+} from 'react-native-reanimated';
+
+import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
-import { getGradientById, GRADIENTS } from '../constants/gradients';
-import { Colors } from '../constants/colors';
-import { Scrubber } from './Scrubber';
-import { calculateOverlayStrength } from '../utils/imageAnalyzer';
+import { useSettingsStore } from '../store/settingsStore';
+import { getGradientColors } from '../constants/gradients';
+import Scrubber from './Scrubber';
+import VinylRecord from './VinylRecord';
+import { getCurrentLineIndex } from '../utils/timestampParser';
 
-export const MiniPlayer: React.FC = () => {
-  // const navigation = useNavigation();
-  const { currentSong } = useSongsStore();
-  const { isPlaying, togglePlay, lyrics, tick } = usePlayerStore();
-  // const duration = usePlayerStore(state => state.duration); // Removed to prevent re-renders
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [showExpandedContent, setShowExpandedContent] = useState(false);
-  const [vignetteOpacity, setVignetteOpacity] = useState(0.6);
-  const [overlayOpacity, setOverlayOpacity] = useState(0.5);
-  const compactOpacity = useRef(new Animated.Value(1)).current;
-  const expandedOpacity = useRef(new Animated.Value(0)).current;
-  const collapseTranslateY = useRef(new Animated.Value(0)).current;
-  const containerWidthAnim = useRef(new Animated.Value(180)).current;
-  const containerHeightAnim = useRef(new Animated.Value(48)).current;
-  const [titleWidth, setTitleWidth] = useState(0);
-  // Fixed container width for scrolling text (180 - padding/icons ~ 120)
-  const containerWidth = 120;
-  const titleScrollAnim = useRef(new Animated.Value(0)).current;
-  const spinValue = useRef(new Animated.Value(0)).current;
-  const vinylSpinValue = useRef(new Animated.Value(0)).current;
-  const animationFrameRef = useRef<number | null>(null);
-  const lastFrameTimeRef = useRef<number | null>(null);
-  const panResponderRef = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return showExpandedContent && Math.abs(gestureState.dy) > 5;
-      },
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderMove: (_, gestureState) => {
-        if (showExpandedContent) {
-          const clampedDy = Math.max(0, gestureState.dy);
-          collapseTranslateY.setValue(clampedDy);
-          expandedOpacity.setValue(Math.max(0, 1 - clampedDy / 150));
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (showExpandedContent && gestureState.dy > 100) {
-          // 1. Fade out expanded content
-          Animated.timing(expandedOpacity, {
-            toValue: 0,
-            duration: 100,
-            useNativeDriver: true,
-          }).start(() => {
-            // 2. Hide content & Reset state
-            setIsExpanded(false);
-            setShowExpandedContent(false);
-            
-            // Reset translateY immediately
-            collapseTranslateY.setValue(0);
-            
-            // 3. Shrink Container
-            Animated.timing(containerWidthAnim, {
-              toValue: 180,
-              duration: 400,
-              easing: Easing.out(Easing.back(0.8)),
-              useNativeDriver: false,
-            }).start();
-            
-            Animated.timing(containerHeightAnim, {
-              toValue: 48,
-              duration: 400,
-              easing: Easing.out(Easing.back(0.8)),
-              useNativeDriver: false,
-            }).start();
-            
-            // 4. Fade in compact
-            Animated.timing(compactOpacity, {
-              toValue: 1,
-              duration: 200,
-              useNativeDriver: true,
-            }).start();
-          });
-        } else if (showExpandedContent) {
-          Animated.spring(collapseTranslateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-          
-          Animated.spring(expandedOpacity, {
-            toValue: 1,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
+const { width } = Dimensions.get('window');
 
-  // Spinning animation for no song state
-  useEffect(() => {
-    if (!currentSong) {
-      Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 3000,
-          useNativeDriver: true,
-        })
-      ).start();
-    }
-  }, [currentSong]);
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
-
-
-  // Animation loop for lyrics without audio
-  useEffect(() => {
-    const hasTimestamps = lyrics.some(l => l.timestamp > 0);
+const MiniPlayer: React.FC = () => {
+  const player = usePlayer();
+  const { currentSong } = usePlayerStore();
+  const { miniPlayerStyle } = useSettingsStore();
+  const navigation = useNavigation();
+  
+  const [expanded, setExpanded] = useState(false);
+  
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [progressBarWidth, setProgressBarWidth] = useState(0);
+  
+  // Animation value for rotation
+  const rotation = useSharedValue(0);
+  
+  const isIsland = miniPlayerStyle === 'island';
+  
+  const gradientColors = currentSong?.gradientId 
+    ? getGradientColors(currentSong.gradientId) 
+    : ['#222', '#111'];
     
-    if (!isPlaying || !hasTimestamps || currentSong?.audioUri) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
+  // Create a "vignette" theme for island: Black -> Color -> Black
+  const mainColor = gradientColors[1] || gradientColors[0];
+
+  // Update time & Rotation Logic
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (player) {
+        setCurrentTime(player.currentTime);
+        setDuration(player.duration);
       }
-      lastFrameTimeRef.current = null;
-      return;
+    }, 250);
+    return () => clearInterval(interval);
+  }, [player]);
+
+  // Handle Rotation
+  useEffect(() => {
+    if (!player) return;
+    
+    if (player.playing) {
+      // Calculate remaining rotation for current cycle
+      // Normalize current rotation to 0-360 range
+      const currentRotation = rotation.value % 360;
+      // Calculate duration needed for the remaining part of the turn (assuming 3000ms per full turn)
+      const remainingDuration = 3000 * ((360 - currentRotation) / 360);
+      
+      rotation.value = withSequence(
+        // 1. Finish the current rotation to 360
+        withTiming(360, { duration: remainingDuration, easing: Easing.linear }),
+        // 2. Loop 0 -> 360 forever
+        withRepeat(
+          withSequence(
+            withTiming(0, { duration: 0 }), // Reset to 0 instantly
+            withTiming(360, { duration: 3000, easing: Easing.linear }) // Full rotation
+          ),
+          -1,
+          false
+        )
+      );
+    } else {
+      // Pause rotation at current angle
+      cancelAnimation(rotation);
     }
+  }, [player?.playing]);
 
-    const animate = (frameTime: number) => {
-      if (lastFrameTimeRef.current === null) {
-        lastFrameTimeRef.current = frameTime;
-      }
-
-      const dt = Math.max(0, (frameTime - lastFrameTimeRef.current) / 1000);
-      lastFrameTimeRef.current = frameTime;
-
-      tick(dt);
-      animationFrameRef.current = requestAnimationFrame(animate);
+  const animatedVinylStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ rotate: `${rotation.value}deg` }],
     };
-
-    animationFrameRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [isPlaying, lyrics, currentSong?.audioUri]);
-
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
   });
-
-  const vinylSpin = vinylSpinValue.interpolate({
-    inputRange: [0, 10000], // Increased range for continuous rotation
-    outputRange: ['0deg', '3600000deg'], // 10,000 rotations
-  });
-
-  const compactVinylSpin = vinylSpinValue.interpolate({
-    inputRange: [0, 10000],
-    outputRange: ['0deg', '3600000deg'],
-  });
-
-  // Reset rotation on song change
-  useEffect(() => {
-    vinylSpinValue.setValue(0);
-  }, [currentSong?.id]);
-
-  // Analyze cover art brightness
-  useEffect(() => {
-    if (currentSong?.coverImageUri) {
-      // Non-blocking brightness detection
-      setTimeout(() => {
-        Image.getSize(
-          currentSong.coverImageUri,
-          (width, height) => {
-            const avgDimension = (width + height) / 2;
-            const estimatedBrightness = avgDimension > 1000 ? 180 : 120;
-            const result = calculateOverlayStrength(estimatedBrightness);
-            setVignetteOpacity(result.vignetteOpacity);
-            setOverlayOpacity(result.overlayOpacity);
-          },
-          () => {
-            setVignetteOpacity(0.6);
-            setOverlayOpacity(0.5);
-          }
-        );
-      }, 0);
-    } else {
-      setVignetteOpacity(0.6);
-      setOverlayOpacity(0.5);
-    }
-  }, [currentSong?.coverImageUri]);
-
-  // Handle play/pause rotation without resetting
-  useEffect(() => {
-    if (isPlaying) {
-      Animated.timing(vinylSpinValue, {
-        toValue: 10000, // Very large value
-        duration: 60000000, // ~16 hours (constant speed)
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      vinylSpinValue.stopAnimation();
-      // Do NOT reset to 0 here to allow resuming
-    }
-  }, [isPlaying]);
-
-  // Title scrolling animation
-  useEffect(() => {
-    const shouldScroll = isPlaying && titleWidth > 0 && containerWidth > 0 && titleWidth > containerWidth;
-    
-    if (shouldScroll) {
-      titleScrollAnim.setValue(0);
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(1000),
-          Animated.timing(titleScrollAnim, {
-            toValue: -(titleWidth - containerWidth + 20),
-            duration: (titleWidth - containerWidth + 20) * 30,
-            useNativeDriver: true,
-          }),
-          Animated.delay(1000),
-          Animated.timing(titleScrollAnim, {
-            toValue: 0,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else {
-      titleScrollAnim.stopAnimation();
-      titleScrollAnim.setValue(0);
-    }
-  }, [isPlaying, titleWidth, currentSong?.title]);
-
-  // Show spinning vinyl when no song
-  if (!currentSong) {
-    return (
-      <Animated.View style={[styles.emptyContainer, { transform: [{ rotate: spin }] }]}>
-        <Ionicons name="disc" size={28} color="rgba(255,255,255,0.4)" />
-      </Animated.View>
-    );
-  }
-
-  // const gradient = getGradientById(currentSong.gradientId) || GRADIENTS[0];
   
+  // Safe progress calculation
+  const progress = duration > 0 && !isNaN(currentTime) 
+    ? Math.min(currentTime / duration, 1) 
+    : 0;
   
-  const hasTimestamps = lyrics.some(l => l.timestamp > 0);
+  const formatTime = (seconds: number): string => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
   
-  // currentLyric moved to ConnectedLyricText
+  // Get Current Lyric
+  const currentLyricIndex = currentSong?.lyrics 
+    ? getCurrentLineIndex(currentSong.lyrics, currentTime) 
+    : -1;
+  const currentLyricText = (currentLyricIndex !== -1 && currentSong?.lyrics?.[currentLyricIndex]) 
+    ? currentSong.lyrics[currentLyricIndex].text 
+    : '';
 
-  const handleLongPress = () => {
-    const targetHeight = hasTimestamps ? 240 : 140;
-    setIsExpanded(true);
-    // Don't render heavy content immediately - let animation start first
-    // This prevents the "frame skip" or "instant jump" glitch
-    setTimeout(() => {
-      setShowExpandedContent(true);
-      
-      // Fade in expanded view after it mounts
-      Animated.timing(expandedOpacity, {
-        toValue: 1,
-        duration: 250,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    }, 100); // Increased delay to 100ms for safer render
-
-    // Smooth apple-style bounce using standard back easing
-    // This is mathematically smoother than custom bezier
-    Animated.timing(containerWidthAnim, {
-      toValue: 380,
-      duration: 400,
-      easing: Easing.out(Easing.back(0.8)),
-      useNativeDriver: false, // Layout props must be false
-    }).start();
-    
-    Animated.timing(containerHeightAnim, {
-      toValue: targetHeight,
-      duration: 400,
-      easing: Easing.out(Easing.back(0.8)),
-      useNativeDriver: false,
-    }).start();
-    
-    // Quick fade out compact view
-    Animated.timing(compactOpacity, {
-      toValue: 0,
-      duration: 100,
-      useNativeDriver: true,
-    }).start();
+  const togglePlay = (e?: any) => {
+    e?.stopPropagation();
+    if (!player) return;
+    player.playing ? player.pause() : player.play();
+  };
+  
+  const skipForward = (e?: any) => {
+    e?.stopPropagation();
+    if (!player) return;
+    const newTime = Math.min(player.currentTime + 10, duration);
+    player.seekTo(newTime);
+  };
+  
+  const skipBackward = (e?: any) => {
+    e?.stopPropagation();
+    if (!player) return;
+    const newTime = Math.max(0, player.currentTime - 10);
+    player.seekTo(newTime);
   };
 
-  const handleCollapse = () => {
-    // 1. Fade out expanded content FIRST
-    Animated.timing(expandedOpacity, {
-      toValue: 0,
-      duration: 100,
-      useNativeDriver: true,
-    }).start(() => {
-      // 2. Hide content & Reset state (prevents layout thrashing)
-      setShowExpandedContent(false);
-      setIsExpanded(false);
-      
-      // Reset translateY
-      collapseTranslateY.setValue(0);
-      
-      // 3. Shrink Container
-      Animated.timing(containerWidthAnim, {
-        toValue: 180,
-        duration: 400,
-        easing: Easing.out(Easing.back(0.8)),
-        useNativeDriver: false,
-      }).start();
-      
-      Animated.timing(containerHeightAnim, {
-        toValue: 48,
-        duration: 400,
-        easing: Easing.out(Easing.back(0.8)),
-        useNativeDriver: false,
-      }).start();
-
-      // 4. Fade in compact
-      Animated.timing(compactOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    });
+  const handleSeekPress = (e: any) => {
+      e.stopPropagation();
+      if (!player || duration <= 0 || progressBarWidth <= 0) return;
+      const { locationX } = e.nativeEvent;
+      const percentage = locationX / progressBarWidth;
+      const seekTime = percentage * duration;
+      player.seekTo(seekTime);
   };
 
-  const handleSeek = (time: number) => {
-    const player = usePlayerStore.getState();
-    player.seek(time);
+  const toggleExpand = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded(!expanded);
   };
 
-  const handlePress = () => {
-    if (showExpandedContent) {
-      // Currently expanded, collapse it
-      handleCollapse();
-    } else if (isExpanded && !showExpandedContent) {
-      // In transition or stuck state, reset and expand
-      setIsExpanded(false);
-      setShowExpandedContent(false);
-      setTimeout(() => handleLongPress(), 50);
-    } else {
-      // Fully collapsed, expand it
-      handleLongPress();
+  const openNowPlaying = () => {
+    if (currentSong) {
+      (navigation as any).navigate('NowPlaying', { songId: currentSong.id });
+      setExpanded(false); // Collapse on navigate
     }
   };
-
-  // const expandedHeight = hasTimestamps ? 240 : 140;
-
-  // Determine lyric font size based on length
-  // Moved to ConnectedLyricText
-
+  
+  if (!currentSong) return null;
+  
   return (
-    <View 
-      style={[
-        styles.container,
-      ]}
-    >
-      <Animated.View
-        style={{
-          width: containerWidthAnim,
-          height: containerHeightAnim,
-        }}
-      >
-      <Animated.View
-        style={{
-          flex: 1,
-          transform: [{ translateY: collapseTranslateY }, { rotate: '0deg' }]
-        }}
-        {...panResponderRef.panHandlers}
-      >
-      <Pressable 
-        style={styles.pressable} 
-        onPress={handlePress}
-      >
-      {currentSong.coverImageUri ? (
-        <>
-          <Image 
-            source={{ uri: currentSong.coverImageUri }} 
-            style={StyleSheet.absoluteFill} 
-            blurRadius={20}
-          />
-          <LinearGradient
-            colors={[
-              `rgba(0,0,0,${vignetteOpacity})`,
-              `rgba(0,0,0,${overlayOpacity * 0.3})`,
-              `rgba(0,0,0,${vignetteOpacity})`
-            ]}
-            style={StyleSheet.absoluteFill}
-          />
-          <LinearGradient
-            colors={[
-              `rgba(0,0,0,${vignetteOpacity})`,
-              'transparent',
-              `rgba(0,0,0,${vignetteOpacity})`
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </>
-      ) : null}
-        <Animated.View style={[styles.compactContent, { opacity: compactOpacity }]}>
-          <View style={styles.vinylContainer}>
-            <Animated.View style={[styles.thumbnail, { transform: [{ rotate: compactVinylSpin }] }]}>
-              {currentSong.coverImageUri ? (
-                <Image source={{ uri: currentSong.coverImageUri }} style={styles.image} />
-              ) : (
-                <View style={styles.defaultThumbnail}>
-                  <Ionicons name="disc" size={18} color="rgba(255,255,255,0.3)" />
-                </View>
-              )}
-            </Animated.View>
-            <Pressable style={styles.compactPlayButton} onPress={togglePlay}>
-              <Ionicons 
-                name={isPlaying ? 'pause' : 'play'} 
-                size={16} 
-                color="#fff" 
-              />
-            </Pressable>
-          </View>
-          
-          <View style={styles.info}>
-            <View style={{ overflow: 'hidden', flex: 1, width: '100%' }}>
-              <Animated.Text
-                style={[
-                  styles.title,
-                  { transform: [{ translateX: titleScrollAnim }] }
-                ]}
-                numberOfLines={1}
-                onTextLayout={(e) => {
-                  // Only update if significantly different to prevent micro-fluctuation loops
-                  if (e.nativeEvent.lines[0]) {
-                    const width = e.nativeEvent.lines[0].width;
-                    if (Math.abs(width - titleWidth) > 1) {
-                      setTitleWidth(width);
-                    }
-                  }
-                }}
-              >
-                {currentSong.title}
-              </Animated.Text>
+    <View style={[
+      styles.container, 
+      isIsland ? styles.islandContainer : styles.barContainer,
+      isIsland && { marginHorizontal: expanded ? 10 : 40 } // Dynamic Width
+    ]}>
+      {/* ... (Progress Bar for Classic Mode Only) ... */}
+      {!isIsland && (
+        <View style={styles.progressBarContainer}>
+          <Pressable 
+            style={styles.progressBarTouchable}
+            onLayout={(e) => setProgressBarWidth(e.nativeEvent.layout.width)}
+            onPress={handleSeekPress}
+            hitSlop={{ top: 15, bottom: 15 }}
+          >
+            <View style={styles.progressBarTrack}>
+               <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
             </View>
-            <Text style={styles.artist} numberOfLines={1}>
-              {currentSong.artist || 'Unknown Artist'}
-            </Text>
-          </View>
-        </Animated.View>
+          </Pressable>
+        </View>
+      )}
+      
+      <Pressable 
+        onPress={isIsland ? toggleExpand : openNowPlaying} 
+        style={({ pressed }) => [
+          styles.content, 
+          isIsland && styles.islandContent,
+          isIsland && expanded && styles.islandExpanded,
+          pressed && { opacity: 0.95 }
+        ]}
+      >
+        {isIsland && (
+           <View style={[StyleSheet.absoluteFill, { borderRadius: expanded ? 40 : 30, overflow: 'hidden' }]}>
+              {/* 1. Blurred Background Image */}
+               {currentSong.coverImageUri ? (
+                  <Image 
+                    source={{ uri: currentSong.coverImageUri }} 
+                    style={StyleSheet.absoluteFill}
+                    blurRadius={40} // Heavy blur
+                  />
+               ) : (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#222' }]} />
+               )}
 
-        {showExpandedContent && (
-          <Animated.View style={[styles.expandedContent, { opacity: expandedOpacity }]}>
-            <View style={styles.expandedHeader}>
-              <Animated.View style={[styles.expandedThumbnail, { transform: [{ rotate: vinylSpin }] }]}>
+              {/* 2. Vignette / Dark Overlay to make text pop */}
+              <LinearGradient
+                colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
+                start={{x: 0, y: 0}}
+                end={{x: 0, y: 1}}
+                style={StyleSheet.absoluteFill}
+              />
+              
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+           </View>
+        )}
+        
+        {/* Expanded View Content */}
+        {isIsland && expanded ? (
+            <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
+                {/* Top Row: Vinyl + Info + Controls */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15 }}>
+                    {/* Rotating Vinyl */}
+                    <Animated.View style={[animatedVinylStyle, { marginRight: 12 }]}>
+                        <Pressable onPress={openNowPlaying}>
+                             <VinylRecord imageUri={currentSong.coverImageUri} size={64} />
+                        </Pressable>
+                    </Animated.View>
+
+                    {/* Info */}
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={[styles.title, { fontSize: 16, marginBottom: 2 }]} numberOfLines={1}>
+                            {currentSong.title}
+                        </Text>
+                        <Text style={styles.artist} numberOfLines={1}>
+                            {currentSong.artist}
+                        </Text>
+                    </View>
+
+                    {/* Controls Grouped */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                         <Pressable onPress={skipBackward} hitSlop={10}>
+                             <Ionicons name="play-skip-back" size={24} color="#fff" />
+                         </Pressable>
+                         <Pressable onPress={togglePlay} hitSlop={10}>
+                             <Ionicons name={player?.playing ? 'pause' : 'play'} size={32} color="#fff" />
+                         </Pressable>
+                         <Pressable onPress={skipForward} hitSlop={10}>
+                             <Ionicons name="play-skip-forward" size={24} color="#fff" />
+                         </Pressable>
+                    </View>
+                </View>
+                
+                {/* Bottom Row: Lyrics */}
+                <View style={{ 
+                    flex: 1, 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    minHeight: 40,
+                    paddingHorizontal: 8 
+                }}>
+                    <Text 
+                        style={{ 
+                            color: '#fff', 
+                            fontSize: 18, 
+                            fontWeight: '700', 
+                            textAlign: 'center',
+                            textShadowColor: 'rgba(0,0,0,0.5)',
+                            textShadowOffset: { width: 0, height: 1 },
+                            textShadowRadius: 2
+                        }}
+                        numberOfLines={2}
+                    >
+                        {currentLyricText || ''}
+                    </Text>
+                </View>
+                
+                {/* Tiny progress bar at very bottom (optional, but good for visual anchoring if user wants "timings" implicit) -> User said remove timelines. Keeping meaningful silence here. */}
+            </View>
+        ) : (
+            // COLLAPSED / CLASSIC VIEW
+            <>
+                {/* Cover Art (Rotating or Static?) - User asked for rotating in expanded. Collapsed usually static or small. */}
                 {currentSong.coverImageUri ? (
-                  <Image source={{ uri: currentSong.coverImageUri }} style={styles.image} />
+                  <Animated.Image 
+                    source={{ uri: currentSong.coverImageUri }} 
+                    style={[styles.coverThumbnail, isIsland && styles.islandCover]}
+                  />
                 ) : (
-                  <View style={styles.defaultThumbnail}>
-                    <Ionicons name="disc" size={32} color="rgba(255,255,255,0.3)" />
+                  <View style={[styles.placeholderThumbnail, isIsland && styles.islandCover]}>
+                    <Ionicons name="musical-notes" size={20} color="#666" />
                   </View>
                 )}
-              </Animated.View>
-              <View style={styles.expandedInfo}>
-                <Text style={styles.expandedTitle} numberOfLines={1}>
-                  {currentSong.title}
-                </Text>
-                <Text style={styles.expandedArtist} numberOfLines={1}>
-                  {currentSong.artist || 'Unknown Artist'}
-                </Text>
-              </View>
-              <Pressable style={styles.expandedPlayButton} onPress={togglePlay}>
-                <Ionicons 
-                  name={isPlaying ? 'pause' : 'play'} 
-                  size={24} 
-                  color="#fff" 
-                />
-              </Pressable>
-            </View>
-            {isExpanded && hasTimestamps && (
-              <ConnectedLyricText />
-            )}
-            <View style={styles.scrubberContainer}>
-              <ConnectedMiniScrubber onSeek={handleSeek} />
-            </View>
-          </Animated.View>
+                
+                {/* Song Info */}
+                <View style={styles.info}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {currentSong.title}
+                  </Text>
+                  <Text style={[styles.artist, isIsland && { display: 'none' }]} numberOfLines={1}>
+                    {currentSong.artist || 'Unknown Artist'}
+                  </Text>
+                </View>
+                
+                {/* Controls */}
+                {isIsland ? (
+                   <View style={[styles.islandControls, { zIndex: 10 }]}>
+                      <Pressable onPress={togglePlay} hitSlop={10}>
+                        <Ionicons 
+                          name={player?.playing ? 'pause' : 'play'} 
+                          size={24} 
+                          color="#fff" 
+                        />
+                      </Pressable>
+                   </View>
+                ) : (
+                  /* Bar Mode Controls */
+                  <>
+                    <Text style={styles.time}>
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </Text>
+                    <Pressable onPress={skipBackward} style={styles.controlButton}>
+                      <Ionicons name="play-back" size={20} color="#fff" />
+                    </Pressable>
+                    <Pressable onPress={togglePlay} style={styles.playButton}>
+                      <Ionicons name={player?.playing ? 'pause' : 'play'} size={24} color="#fff" />
+                    </Pressable>
+                    <Pressable onPress={skipForward} style={styles.controlButton}>
+                      <Ionicons name="play-forward" size={20} color="#fff" />
+                    </Pressable>
+                  </>
+                )}
+            </>
         )}
       </Pressable>
-      </Animated.View>
-      </Animated.View>
     </View>
   );
 };
@@ -504,215 +342,118 @@ export const MiniPlayer: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 32,
-    left: 16,
-    backgroundColor: '#000',
-    borderRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    overflow: 'hidden',
-  },
-  pressable: {
-    flex: 1,
-  },
-  compactContent: {
-    position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 4, // Reduced horizontal padding
-    paddingVertical: 3,   // 48 - 42 = 6 / 2 = 3px padding
-    gap: 8,
+    zIndex: 100,
   },
-  thumbnail: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    overflow: 'hidden',
-    backgroundColor: '#2C2C2E',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  defaultThumbnail: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2C2C2E',
-  },
-  info: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  vinylContainer: {
-    position: 'relative',
-    width: 42,
-    height: 42,
-  },
-  compactPlayButton: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 21,
-  },
-  title: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-    lineHeight: 16,
-  },
-  artist: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-    lineHeight: 13,
-  },
-  playButton: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  expandedContent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 12,
-    justifyContent: 'flex-start',
-    gap: 8,
-  },
-  expandedHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  expandedThumbnail: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    overflow: 'hidden',
-    backgroundColor: '#2C2C2E',
-  },
-  expandedInfo: {
-    flex: 1,
-  },
-  expandedTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  expandedArtist: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  expandedPlayButton: {
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  lyricContainer: {
-    marginTop: 8,
-    paddingTop: 8,
+  barContainer: {
+    bottom: 0, 
+    backgroundColor: '#111',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    minHeight: 66,
-    justifyContent: 'center',
+    borderTopColor: '#333',
   },
-  currentLyric: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  scrubberContainer: {
-    marginTop: 8,
-  },
-  emptyContainer: {
-    position: 'absolute',
-    top: 32,
-    left: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#000',
+  islandContainer: {
+    top: Platform.OS === 'ios' ? 48 : 30, 
+    marginHorizontal: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
+  },
+  islandContent: {
+    backgroundColor: 'transparent', 
+    borderRadius: 30,
+    height: 50, 
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    overflow: 'hidden',
   },
-});
-
-const ConnectedMiniScrubber = React.memo(({ onSeek }: { onSeek: (time: number) => void }) => {
-  const currentTime = usePlayerStore(state => state.currentTime);
-  const duration = usePlayerStore(state => state.duration);
-  
-  return (
-    <Scrubber
-      currentTime={currentTime}
-      duration={duration > 0 ? duration : 1}
-      onSeek={onSeek}
-    />
-  );
-});
-
-const ConnectedLyricText = React.memo(() => {
-  const currentTime = usePlayerStore(state => state.currentTime);
-  const lyrics = usePlayerStore(state => state.lyrics);
-  
-  const currentLyric = lyrics.length > 0
-    ? lyrics.find((l, i) => {
-        const nextLyric = lyrics[i + 1];
-        return l.timestamp <= currentTime && (!nextLyric || currentTime < nextLyric.timestamp);
-      }) || lyrics[0]
-    : null;
-
-  if (!currentLyric) return null;
-
-  const getLyricFontSize = () => {
-    const len = currentLyric.text.length;
-    if (len < 40) return 17;
-    if (len < 80) return 15;
-    return 14;
-  };
-
-  return (
-    <View style={styles.lyricContainer}>
-      <Text style={[styles.currentLyric, { fontSize: getLyricFontSize() }]} numberOfLines={3}>
-        {currentLyric.text}
-      </Text>
-    </View>
-  );
+  islandExpanded: {
+    height: 180, // Increased height for lyrics
+    marginTop: 10,
+    paddingVertical: 0, // Padding handled in inner view
+    borderRadius: 40,
+  },
+  progressBarContainer: {
+    height: 4,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+  },
+  progressBarTouchable: {
+    height: 20,
+    marginTop: -10,
+    justifyContent: 'center',
+  },
+  progressBarTrack: {
+    height: 3,
+    backgroundColor: '#333',
+    width: '100%',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#fff',
+  },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  coverThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  islandCover: {
+    width: 34,
+    height: 34,
+    borderRadius: 17, // Circle in collapsed
+    marginRight: 10,
+  },
+  placeholderThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    backgroundColor: '#222',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  info: {
+    flex: 1,
+    marginRight: 12,
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  artist: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  time: {
+    fontSize: 11,
+    color: '#666',
+    marginRight: 8,
+  },
+  controlButton: {
+    padding: 8,
+  },
+  playButton: {
+    padding: 8,
+    marginHorizontal: 4,
+  },
+  islandControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  }
 });
 
 export default MiniPlayer;
-// Fixed syntax errors

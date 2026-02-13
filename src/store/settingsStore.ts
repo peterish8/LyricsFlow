@@ -26,6 +26,7 @@ interface SettingsState {
   keepScreenOn: boolean;
   showTimeRemaining: boolean;
   playInMiniPlayerOnly: boolean;
+  miniPlayerStyle: 'bar' | 'island'; // New setting
   
   // Library
   defaultView: ViewMode;
@@ -42,6 +43,7 @@ interface SettingsState {
   setKeepScreenOn: (enabled: boolean) => void;
   setShowTimeRemaining: (show: boolean) => void;
   setPlayInMiniPlayerOnly: (enabled: boolean) => void;
+  setMiniPlayerStyle: (style: 'bar' | 'island') => void; // New action
   setDefaultView: (view: ViewMode) => void;
   setDefaultSort: (sort: SortOption) => void;
   setShowThumbnails: (show: boolean) => void;
@@ -58,6 +60,7 @@ const DEFAULT_SETTINGS = {
   keepScreenOn: true,
   showTimeRemaining: true,
   playInMiniPlayerOnly: false,
+  miniPlayerStyle: 'island' as const, // Default to island as requested "like it was before"
   defaultView: 'grid' as ViewMode,
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
@@ -81,6 +84,7 @@ export const useSettingsStore = create<SettingsState>()(
       setKeepScreenOn: (keepScreenOn) => set({ keepScreenOn }),
       setShowTimeRemaining: (showTimeRemaining) => set({ showTimeRemaining }),
       setPlayInMiniPlayerOnly: (playInMiniPlayerOnly) => set({ playInMiniPlayerOnly }),
+      setMiniPlayerStyle: (miniPlayerStyle) => set({ miniPlayerStyle }),
       
       // Library actions
       setDefaultView: (defaultView) => set({ defaultView }),

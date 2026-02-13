@@ -12,7 +12,7 @@ import { RootNavigator } from './navigation';
 import { initDatabase } from './database/db';
 import { useSongsStore } from './store/songsStore';
 import { Colors } from './constants/colors';
-import { PlayerProvider } from './providers/PlayerProvider';
+import { PlayerProvider } from './contexts/PlayerContext';
 
 const App: React.FC = () => {
   const [isReady, setIsReady] = useState(false);

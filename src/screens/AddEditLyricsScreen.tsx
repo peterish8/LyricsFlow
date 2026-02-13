@@ -101,7 +101,11 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   }, [songId, isEditing, getSong]);
 
   const handleCancel = () => {
-    navigation.goBack();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('Main' as never);
+    }
   };
 
   const handlePaste = async () => {
@@ -118,6 +122,39 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   // ============================================================================
   // SMART SEARCH HANDLER
   // ============================================================================
+
+  // Helper to shift all timestamps
+  const shiftTimestamps = (offsetSeconds: number) => {
+      if (!lyricsText) return;
+      
+      const lines = lyricsText.split('\n');
+      const shiftedLines = lines.map(line => {
+          const match = line.match(/^\[(\d+):(\d+(\.\d+)?)\](.*)/);
+          if (match) {
+              const min = parseInt(match[1]);
+              const sec = parseFloat(match[2]);
+              const content = match[4];
+              
+              let totalSeconds = min * 60 + sec + offsetSeconds;
+              if (totalSeconds < 0) totalSeconds = 0; // Prevent negative time
+              
+              const newMin = Math.floor(totalSeconds / 60);
+              const newSec = (totalSeconds % 60).toFixed(2);
+              const newSecFormatted = parseFloat(newSec) < 10 ? `0${newSec}` : newSec;
+              
+              return `[${newMin}:${newSecFormatted}]${content}`;
+          }
+          return line;
+      });
+      
+      setLyricsText(shiftedLines.join('\n'));
+      setLyricsText(shiftedLines.join('\n'));
+      Toast.show({
+        type: 'success',
+        text1: 'Timestamps Adjusted',
+        text2: `Shifted by ${offsetSeconds > 0 ? '+' : ''}${offsetSeconds}s`,
+      });
+  };
 
   const handleSearchResult = async (result: SearchResult) => {
     setShowSearchModal(false);
@@ -200,10 +237,12 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       if (isEditing) {
         await updateSong(songData);
         // Reload lyrics in player if this song is currently playing
-        const { currentSong: playingSong } = useSongsStore.getState();
-        const { setLyrics: setPlayerLyrics } = usePlayerStore.getState();
+        const { currentSong: playingSong } = usePlayerStore.getState();
+        const { updateCurrentSong } = usePlayerStore.getState();
+        
         if (playingSong?.id === songData.id) {
-          setPlayerLyrics(songData.lyrics, songData.duration);
+           // ✅ Use the new update action
+           updateCurrentSong({ lyrics: songData.lyrics, duration: songData.duration });
         }
         // Update current song in songs store
         const { setCurrentSong } = useSongsStore.getState();
@@ -214,7 +253,11 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
 
       setShowToast(true);
       setTimeout(() => {
-        navigation.goBack();
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        } else {
+          navigation.navigate('Main' as never);
+        }
       }, 500);
     } catch (error) {
       console.error('Save failed:', error);
@@ -257,11 +300,27 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         >
           {/* Input Fields */}
           <View style={styles.inputSection}>
-            <FloatingInput
-              label="Song Title"
-              value={title}
-              onChangeText={setTitle}
-            />
+            <View>
+                {/* Title Input with Magic Button */}
+                <View style={{flexDirection: 'row', alignItems: 'flex-end', gap: 10}}>
+                   <View style={{flex: 1}}>
+                      <FloatingInput
+                        label="Song Title"
+                        value={title}
+                        onChangeText={setTitle}
+                      />
+                   </View>
+                   {/* ✨ Magic Search Button */}
+                   <Pressable 
+                      style={styles.magicButtonSmall} 
+                      onPress={() => setShowSearchModal(true)}
+                   >
+                     <Ionicons name="sparkles" size={16} color="#fff" />
+                     <Text style={styles.magicButtonText}>Magic</Text>
+                   </Pressable>
+                </View>
+            </View>
+
             <FloatingInput
               label="Artist"
               value={artist}
@@ -326,6 +385,23 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
                 <Text style={[styles.alignButtonText, lyricsAlign === 'right' && styles.alignButtonTextActive]}>Right</Text>
               </Pressable>
             </View>
+          </View>
+
+
+
+          {/* Global Sync Adjustment */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Global Sync Adjustment (Offset)</Text>
+            <Text style={styles.hintText}>Shift all timestamps forward or backward</Text>
+            
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.syncScrollContainer}>
+                  <Pressable onPress={() => shiftTimestamps(-5)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-5s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(-1)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-1s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(-0.5)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-0.5s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(0.5)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+0.5s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(1)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+1s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(5)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+5s</Text></Pressable>
+            </ScrollView>
           </View>
 
           {/* Gradient Picker */}
@@ -712,6 +788,35 @@ const styles = StyleSheet.create({
     color: '#7C3AED',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+
+  // Sync Styles
+  syncScrollContainer: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 10,
+    paddingRight: 20, // Padding for last item
+  },
+  syncBtn: {
+    backgroundColor: '#331111', // Darker Red background
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FF4444',
+    minWidth: 70,
+  },
+  syncBtnPos: {
+    backgroundColor: '#113311', // Darker Green background
+    borderColor: '#44FF44',
+  },
+  syncBtnText: {
+    color: '#FFFFFF', // Explicit White
+    fontWeight: 'bold',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
 

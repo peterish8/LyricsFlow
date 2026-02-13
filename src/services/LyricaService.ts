@@ -77,15 +77,40 @@ class LyricaService {
           const data = await response.json();
           console.log(`[Lyrica] ${strategy.label} response:`, JSON.stringify(data));
           
-          if (data.status === 'success' && data.data?.lyrics) {
-            console.log(`[Lyrica] ✓ Found via ${data.data.source || strategy.label}`);
-            return {
-              lyrics: data.data.lyrics,
-              source: data.data.source || 'Lyrica',
-              metadata: data.metadata,
-            };
+          if (data.status === 'success') {
+            let finalLyrics = data.data?.lyrics;
+
+            // Handle structured timed lyrics if plaintext is missing
+            if (!finalLyrics && data.data?.timestamped) {
+               console.log(`[Lyrica] Found 'timestamped' field, using as lyrics`);
+               finalLyrics = data.data.timestamped;
+            }
+
+            // Handle structured timed lyrics array if plaintext is missing
+            if (!finalLyrics && Array.isArray(data.data?.timed_lyrics)) {
+              console.log(`[Lyrica] Converting ${data.data.timed_lyrics.length} timed lines to LRC`);
+              finalLyrics = data.data.timed_lyrics
+                .map((line: any) => {
+                  const ms = line.start_time || 0;
+                  const minutes = Math.floor(ms / 60000);
+                  const seconds = Math.floor((ms % 60000) / 1000);
+                  const hundredths = Math.floor((ms % 1000) / 10);
+                  const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
+                  return `${timestamp} ${line.text || ''}`;
+                })
+                .join('\n');
+            }
+
+            if (finalLyrics) {
+              console.log(`[Lyrica] ✓ Found via ${data.data.source || strategy.label}`);
+              return {
+                lyrics: finalLyrics,
+                source: data.data.source || 'Lyrica',
+                metadata: data.metadata,
+              };
+            }
           }
-        } catch (err) {
+        } catch (err: any) {
           clearTimeout(timeoutId);
           console.log(`[Lyrica] ${strategy.label} failed:`, err.message);
         }
@@ -111,7 +136,10 @@ class LyricaService {
       if (match) {
         const minutes = parseInt(match[1], 10);
         const seconds = parseInt(match[2], 10);
-        const milliseconds = parseInt(match[3].padEnd(3, '0'), 10);
+        // Normalize milliseconds: if 2 digits (e.g. 54) -> 540ms, if 3 digits (e.g. 540) -> 540ms
+        const millisecondsStr = match[3].padEnd(3, '0'); 
+        const milliseconds = parseInt(millisecondsStr, 10);
+        
         const timestamp = minutes * 60 + seconds + milliseconds / 1000;
         let text = line.replace(timeRegex, '').trim();
 

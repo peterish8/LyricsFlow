@@ -19,6 +19,7 @@ export interface SearchResult {
   matchReason: string;
   duration?: number;
   albumArt?: string;
+  url?: string;
 }
 
 export const LyricsRepository = {

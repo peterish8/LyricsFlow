@@ -167,3 +167,43 @@ export const lyricsToRawText = (lyrics: LyricLine[]): string => {
 export const hasValidTimestamps = (rawText: string): boolean => {
   return TIMESTAMP_REGEX.test(rawText);
 };
+
+/**
+ * Normalize lyrics timestamps to ensure they are in seconds.
+ * Detects if timestamps are likely in milliseconds (e.g. > 1000s avg) and converts them.
+ * Also sorts lyrics by timestamp to ensure timeline integrity.
+ */
+export const normalizeLyrics = (lyrics: LyricLine[]): LyricLine[] => {
+  if (!lyrics || lyrics.length === 0) return [];
+
+  // 1. Check if we need to convert from MS to Seconds
+  // Heuristic: If the first non-zero timestamp is > 600 (10 mins) and we have multiple lines, 
+  // it's extremely likely to be in milliseconds (unless it's a podcast/long mix, but 10m start is rare for songs)
+  // A safer heuristic: If ANY timestamp exceeds 3600 (1 hour) it's suspicious for a normal song, 
+  // but let's look at the average magnitude of the first few timestamps.
+  
+  const sample = lyrics.filter(l => l.timestamp > 0).slice(0, 5);
+  let isMilliseconds = false;
+  
+  if (sample.length > 0) {
+    const avg = sample.reduce((sum, l) => sum + l.timestamp, 0) / sample.length;
+    // If average is > 1000, it's definitely milliseconds (1000s = 16 mins)
+    if (avg > 1000) {
+      isMilliseconds = true;
+    }
+  }
+
+  let normalized = lyrics.map(line => ({
+    ...line,
+    timestamp: isMilliseconds ? line.timestamp / 1000 : line.timestamp
+  }));
+
+  // 2. Ensure sorted by timestamp
+  normalized.sort((a, b) => a.timestamp - b.timestamp);
+
+  // 3. Re-assign line orders
+  return normalized.map((line, index) => ({
+    ...line,
+    lineOrder: index
+  }));
+};

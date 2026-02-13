@@ -399,6 +399,14 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.playInMiniPlayerOnly}
               onToggle={settings.setPlayInMiniPlayerOnly}
             />
+            <SettingsRow
+              icon="layers-outline"
+              label="Mini Player Style"
+              value={settings.miniPlayerStyle === 'island' ? 'Dynamic Island' : 'Classic Bar'}
+              onPress={() => settings.setMiniPlayerStyle(
+                settings.miniPlayerStyle === 'island' ? 'bar' : 'island'
+              )}
+            />
             <SettingsRowSwitch
               icon="sunny-outline"
               label="Keep Screen On"

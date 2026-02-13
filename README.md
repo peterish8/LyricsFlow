@@ -46,11 +46,11 @@ Traditional lyrics apps often use `setInterval` for auto-scrolling, which leads 
 - **Auto-hide Controls**: Player controls auto-hide after 3.5s when playing, stay visible when paused. Reappear on scroll-down gesture or tap.
 
 ### Robust Database Singleton
-Expo SQLite can throw `NullPointerException` (NativeDatabase.prepareAsync) if multiple parts of the app try to open or query the database simultaneously during startup.
-- **Solution**: Implemented in `db.ts` using a `dbPromise` singleton pattern. All database calls await the same initialization promise.
-- **Recovery Path**: If the database file is ever corrupted or in a locked state, the app includes an automatic recovery mechanism that attempts to close, delete, and re-initialize the native state to prevent terminal crashes.
-- **Retry Mechanism**: Every database query is wrapped in a `withDbRetry` helper (`src/database/queries.ts`) that detects NullPointer errors and automatically restarts the DB connection.
-- **Migration System**: Automatic column additions (e.g., `lyrics_align`, `text_case`) via PRAGMA table_info checks.
+Expo SQLite with WAL mode for concurrent access.
+- **Solution**: Promise-based singleton in `db.ts` prevents multiple simultaneous connections
+- **WAL Mode**: `PRAGMA journal_mode = WAL` enables concurrent reads/writes
+- **Simplified**: Removed complex retry/queue logic that caused empty lyrics bug
+- **Migration System**: Automatic column additions via PRAGMA table_info checks
 
 ### Smart Timestamp Engine
 The app handles "messy" data intelligently.
@@ -58,13 +58,14 @@ The app handles "messy" data intelligently.
 - **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
-### Smart Lyric Search Engine (Waterfall Strategy) 🪄
-High-precision lyric fetching with a tiered fallback approach.
-- **Tier 1: LRCLIB (Synced)**: Attempts to fetch perfectly synced LRC lyrics with sub-millisecond precision.
-- **Tier 2: Genius (Fallback)**: If no synced lyrics exist, scrapes Genius.com for high-quality plain text.
-- **Robust Scraping**: `GeniusService.ts` includes advanced sanitization to remove "contributors," "metadata," and "you might also like" injections often found in web-scraped lyrics.
-- **Lyric Preview Mode**: Users can preview and scroll through fetched lyrics before applying them to verify quality and timestamps.
-- **Smart Scoring**: `SmartLyricMatcher.ts` ranks results based on title, artist, and duration similarity.
+### Smart Lyric Search Engine (Lyrica API) 🪄
+Unified lyrics fetching with intelligent fallback strategy.
+- **Lyrica API**: Single endpoint aggregating 6+ lyrics sources (LRCLIB, Genius, Musixmatch, etc.)
+- **Waterfall Strategy**: synced-fast → synced-slow → plain text fallback
+- **Response Parsing**: Handles nested `data.data.lyrics` structure
+- **Instrumental Detection**: Converts empty timestamped lines to `[INSTRUMENTAL]`
+- **Lyric Preview Mode**: Full-screen preview with ScrollView before applying
+- **Service**: `src/services/LyricaService.ts`
 
 ### Dynamic Theme Engine 🎨
 - **Magic Button**: The "Sparkle" button now dynamically shifts its background gradient based on the current song's `gradientId`, creating a unified, premium appearance.
@@ -96,11 +97,11 @@ High-precision lyric fetching with a tiered fallback approach.
 - **`SettingsScreen.tsx`**: iOS-style configuration with clear data option.
 
 ### `src/services/` (The Core Engine)
-- **`LyricsRepository.ts`**: Orchestrates the multi-source search (LRCLIB → Genius).
-- **`LrcLibService.ts`**: LRCLIB API client for synced lyrics.
-- **`GeniusService.ts`**: Robust scraper with metadata scrubbing.
-- **`SmartLyricMatcher.ts`**: Result scoring and verification logic.
-- **`whisperService.ts`**: (Legacy) Whisper.cpp transcription support.
+- **`LyricaService.ts`**: Unified Lyrica API client with waterfall strategy
+- **`LrcLibService.ts`**: (Legacy) LRCLIB API client for synced lyrics
+- **`GeniusService.ts`**: (Legacy) Robust scraper with metadata scrubbing
+- **`audioService.ts`**: Audio playback management with expo-audio
+- **`whisperService.ts`**: (Legacy) Whisper.cpp transcription support
 
 ### `src/store/` (Reactive State - Zustand)
 - **`songsStore.ts`**: Master song list and metadata state.
@@ -170,9 +171,10 @@ Located in `src/constants/`:
 
 ### UI/UX Enhancements
 - **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused
+- **Dynamic Island**: Adaptive vignette based on cover art brightness (light vs dark)
+- **Vinyl Record**: 60% cover art, 3% center hole for better proportions
 - **Toast notifications**: Success feedback on song save (auto-dismisses after 2s)
-- **Submenu system**: Text format options in nested menu (tap "Text Format" → opens submenu at same position)
-- **Clear data**: Settings option to wipe all songs/lyrics with confirmation dialog
+- **Navigation**: Fallback to Main screen if goBack() fails
 
 ---
 

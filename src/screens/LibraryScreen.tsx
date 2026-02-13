@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 // import { LinearGradient } from 'expo-linear-gradient';
 import { TabScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
-// import { usePlayerStore } from '../store/playerStore';
+import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { AuroraHeader, SongCard, CustomMenu, MiniPlayer } from '../components';
@@ -62,7 +62,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
-  const playInMiniPlayerOnly = useSettingsStore((state) => state.playInMiniPlayerOnly);
+  const { playInMiniPlayerOnly, miniPlayerStyle } = useSettingsStore((state) => state);
+  const isIsland = miniPlayerStyle === 'island';
+
+  // Removed Scrollable Header - User prefers icons in "All Songs" section
+
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -81,6 +85,8 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
       }
     } else {
       // Default: Always navigate to NowPlayingScreen
+      // Sync with playerStore for MiniPlayer visibility
+      usePlayerStore.getState().loadSong(song.id);
       setCurrentSong(song);
       navigation.navigate('NowPlaying', { songId: song.id });
     }
@@ -226,36 +232,27 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         <AuroraHeader palette="library" />
       </Animated.View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft} />
-          <View style={styles.headerRight}>
-            <Pressable 
-              style={styles.headerButton}
-              onPress={() => navigation.navigate('Search')}
-            >
-              <Ionicons name="search" size={24} color="#fff" />
-            </Pressable>
-            {/* 
-            <Pressable style={styles.headerButton} onPress={() => setShowTasksModal(true)}>
-              <View>
-                <Ionicons name="notifications-outline" size={24} color="#fff" />
-                {activeTasksCount > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{activeTasksCount}</Text>
-                  </View>
-                )}
-              </View>
-            </Pressable> 
-            */}
-            <Pressable 
-              style={styles.headerButton}
-              onPress={handleAddPress}
-            >
-              <Ionicons name="add" size={24} color="#fff" />
-            </Pressable>
+        {/* Fixed Header - Only show if NOT Island mode */}
+        {!isIsland && (
+          <View style={styles.header}>
+            <View style={styles.headerLeft} />
+            <View style={styles.headerRight}>
+              <Pressable 
+                style={styles.headerButton}
+                onPress={() => navigation.navigate('Search')}
+              >
+                <Ionicons name="search" size={24} color="#fff" />
+              </Pressable>
+              
+              <Pressable 
+                style={styles.headerButton}
+                onPress={handleAddPress}
+              >
+                <Ionicons name="add" size={24} color="#fff" />
+              </Pressable>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Content */}
         <FlatList<Song>
@@ -263,82 +260,103 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           data={[] as Song[]}
           keyExtractor={(item) => item.id}
           renderItem={() => null}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+             styles.listContent,
+             isIsland && { paddingTop: 55 } // Just a bit more gap
+          ]}
           ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
           ListHeaderComponent={
-            songs.length > 0 ? (
-              <>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Recently Played</Text>
-                </View>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalScroll}
-                >
-                  {songs
-                    .filter(song => song.lastPlayed)
-                    .sort((a, b) => {
-                      const dateA = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
-                      const dateB = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
-                      return dateB - dateA;
-                    })
-                    .slice(0, 10)
-                    .map((song) => (
-                      <View key={song.id} style={styles.horizontalCard}>
-                        <SongCard
-                          id={song.id}
-                          title={song.title}
-                          artist={song.artist}
-                          album={song.album}
-                          gradientId={song.gradientId}
-                          coverImageUri={song.coverImageUri}
-                          duration={song.duration}
-                          onPress={() => handleSongPress(song)}
-                          onLongPress={() => handleSongLongPress(song, {} as any)}
-                        />
+            <View>
+              {songs.length > 0 ? (
+                <>
+                  {/* Recently Played Cards (Header Removed) */}
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.horizontalScroll}
+                  >
+                    {songs
+                      .filter(song => song.lastPlayed)
+                      .sort((a, b) => {
+                        const dateA = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
+                        const dateB = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
+                        return dateB - dateA;
+                      })
+                      .slice(0, 10)
+                      .map((song) => (
+                        <View key={song.id} style={styles.horizontalCard}>
+                          <SongCard
+                            id={song.id}
+                            title={song.title}
+                            artist={song.artist}
+                            album={song.album}
+                            gradientId={song.gradientId}
+                            coverImageUri={song.coverImageUri}
+                            duration={song.duration}
+                            onPress={() => handleSongPress(song)}
+                            onLongPress={() => handleSongLongPress(song, {} as any)}
+                          />
+                        </View>
+                      ))}
+                  </ScrollView>
+
+                  {/* All Songs Header & List */}
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>All Songs</Text>
+                    {isIsland && (
+                      <View style={styles.headerActions}>
+                        <Pressable 
+                          style={styles.actionButton}
+                          onPress={() => navigation.navigate('Search')}
+                        >
+                          <Ionicons name="search" size={20} color={Colors.textSecondary} />
+                        </Pressable>
+                        <Pressable 
+                          style={styles.actionButton}
+                          onPress={handleAddPress}
+                        >
+                          <Ionicons name="add" size={24} color={Colors.textSecondary} />
+                        </Pressable>
                       </View>
-                    ))}
-                </ScrollView>
-                {songs.length > 2 && (
-                  <>
-                    <View style={styles.sectionHeader}>
-                      <Text style={styles.sectionTitle}>All Songs</Text>
-                    </View>
-                    {songs.map((song) => (
-                      <Pressable
-                        key={song.id}
-                        style={styles.listItem}
-                        onPress={() => handleSongPress(song)}
-                        onLongPress={(e: any) => handleSongLongPress(song, e)}
-                      >
-                        <View style={styles.listItemThumbnail}>
-                          {song.coverImageUri ? (
-                            <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
-                          ) : (
-                            <View style={styles.defaultListThumbnail}>
-                              <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
-                            </View>
-                          )}
-                        </View>
-                        <View style={styles.listItemContent}>
-                          <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
-                          <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
-                        </View>
-                        <Text style={styles.listItemDuration}>{Math.floor(song.duration / 60)}:{String(Math.floor(song.duration % 60)).padStart(2, '0')}</Text>
-                        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-                      </Pressable>
-                    ))}
-                  </>
-                )}
-              </>
-            ) : null
+                    )}
+                  </View>
+
+                  {songs.map((song) => (
+                    <Pressable
+                      key={song.id}
+                      style={styles.listItem}
+                      onPress={() => handleSongPress(song)}
+                      onLongPress={(e: any) => handleSongLongPress(song, e)}
+                    >
+                      <View style={styles.listItemThumbnail}>
+                        {song.coverImageUri ? (
+                          <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
+                        ) : (
+                          <View style={styles.defaultListThumbnail}>
+                            <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.listItemContent}>
+                        <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
+                        <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
+                      </View>
+                      <Text style={styles.listItemDuration}>
+                        {Math.floor(song.duration / 60)}:{String(Math.floor(song.duration % 60)).padStart(2, '0')}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+                    </Pressable>
+                  ))}
+                </>
+              ) : null}
+            </View>
           }
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
               tintColor={Colors.textSecondary}
+              progressViewOffset={isIsland ? 160 : 0} 
             />
           }
           onScroll={(e) => {
@@ -407,6 +425,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  // scrollHeader & screenTitle removed
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -625,6 +644,14 @@ const styles = StyleSheet.create({
   recentArtImage: {
     width: '100%',
     height: '100%',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 16,
+    paddingRight: 16,
+  },
+  actionButton: {
+    padding: 4,
   },
 });
 

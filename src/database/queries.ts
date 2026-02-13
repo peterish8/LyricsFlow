@@ -4,6 +4,7 @@
 
 import { closeDatabase, getDatabase, initDatabase } from './db';
 import { Song, LyricLine } from '../types/song';
+import { normalizeLyrics } from '../utils/timestampParser';
 
 const LOG_PREFIX = '[QUERIES]';
 
@@ -96,62 +97,62 @@ export const getAllSongs = async (): Promise<Song[]> => {
 };
 
 export const getSongById = async (id: string): Promise<Song | null> => {
-  return withDbSafe(async (db) => {
-    const songRow = await db.getFirstAsync<{
-      id: string;
-      title: string;
-      artist: string | null;
-      album: string | null;
-      gradient_id: string;
-      duration: number;
-      date_created: string;
-      date_modified: string;
-      play_count: number;
-      last_played: string | null;
-      scroll_speed: number;
-      cover_image_uri: string | null;
-      lyrics_align: string | null;
-      text_case: string | null;
-      audio_uri: string | null;
-      is_liked: number | null;
-      separation_status: string | null;
-      separation_progress: number | null;
-    }>('SELECT * FROM songs WHERE id = ?', [id]);
-    
-    if (!songRow) return null;
-    
-    const lyricsRows = await db.getAllAsync<{
-      id: number;
-      timestamp: number;
-      text: string;
-      line_order: number;
-    }>('SELECT * FROM lyrics WHERE song_id = ? ORDER BY line_order', [id]);
-    
-    return {
-      id: songRow.id,
-      title: songRow.title,
-      artist: songRow.artist ?? undefined,
-      album: songRow.album ?? undefined,
-      gradientId: songRow.gradient_id,
-      duration: songRow.duration,
-      dateCreated: songRow.date_created,
-      dateModified: songRow.date_modified,
-      playCount: songRow.play_count,
-      lastPlayed: songRow.last_played ?? undefined,
-      scrollSpeed: songRow.scroll_speed ?? 50,
-      coverImageUri: songRow.cover_image_uri ?? undefined,
-      lyricsAlign: (songRow.lyrics_align as 'left' | 'center' | 'right') ?? 'left',
-      textCase: (songRow.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
-      audioUri: songRow.audio_uri ?? undefined,
-      isLiked: songRow.is_liked === 1,
-      lyrics: lyricsRows.map((row) => ({
-        id: row.id,
-        timestamp: row.timestamp,
-        text: row.text,
-        lineOrder: row.line_order,
-      })),
-    };
-  });
+  const db = await getDatabase();
+  
+  const songRow = await db.getFirstAsync<{
+    id: string;
+    title: string;
+    artist: string | null;
+    album: string | null;
+    gradient_id: string;
+    duration: number;
+    date_created: string;
+    date_modified: string;
+    play_count: number;
+    last_played: string | null;
+    scroll_speed: number;
+    cover_image_uri: string | null;
+    lyrics_align: string | null;
+    text_case: string | null;
+    audio_uri: string | null;
+    is_liked: number | null;
+    separation_status: string | null;
+    separation_progress: number | null;
+  }>('SELECT * FROM songs WHERE id = ?', [id]);
+  
+  if (!songRow) return null;
+  
+  const lyricsRows = await db.getAllAsync<{
+    id: number;
+    timestamp: number;
+    text: string;
+    line_order: number;
+  }>('SELECT * FROM lyrics WHERE song_id = ? ORDER BY line_order', [id]);
+  
+  return {
+    id: songRow.id,
+    title: songRow.title,
+    artist: songRow.artist ?? undefined,
+    album: songRow.album ?? undefined,
+    gradientId: songRow.gradient_id,
+    duration: songRow.duration,
+    dateCreated: songRow.date_created,
+    dateModified: songRow.date_modified,
+    playCount: songRow.play_count,
+    lastPlayed: songRow.last_played ?? undefined,
+    scrollSpeed: songRow.scroll_speed ?? 50,
+    coverImageUri: songRow.cover_image_uri ?? undefined,
+    lyricsAlign: (songRow.lyrics_align as 'left' | 'center' | 'right') ?? 'left',
+    textCase: (songRow.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
+    audioUri: songRow.audio_uri ?? undefined,
+    isLiked: songRow.is_liked === 1,
+    lyrics: normalizeLyrics(lyricsRows.map((row) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      text: row.text,
+      lineOrder: row.line_order,
+    }))),
+  };
 };
 
 export const insertSong = async (song: Song): Promise<void> => {
@@ -167,9 +168,10 @@ export const insertSong = async (song: Song): Promise<void> => {
     
     await db.execAsync(sql);
     
-    log(`Inserting ${song.lyrics.length} lyrics...`);
+    const normalizedLyrics = normalizeLyrics(song.lyrics);
+    log(`Inserting ${normalizedLyrics.length} lyrics...`);
     
-    for (const lyric of song.lyrics) {
+    for (const lyric of normalizedLyrics) {
       await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
     }
     
@@ -192,8 +194,9 @@ export const updateSong = async (song: Song): Promise<void> => {
       await db.execAsync(`DELETE FROM lyrics WHERE song_id = '${song.id}';`);
       
       log(`Inserting ${song.lyrics.length} lyrics...`);
+      const normalizedLyrics = normalizeLyrics(song.lyrics);
       
-      for (const lyric of song.lyrics) {
+      for (const lyric of normalizedLyrics) {
         await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
       }
     }
