@@ -29,7 +29,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MiniPlayer: React.FC = () => {
   const player = usePlayer();
-  const { currentSong } = usePlayerStore();
+  const { currentSong, showTransliteration } = usePlayerStore();
   const { miniPlayerStyle } = useSettingsStore();
   const navigation = useNavigation();
   
@@ -111,11 +111,15 @@ const MiniPlayer: React.FC = () => {
   };
   
   // Get Current Lyric
-  const currentLyricIndex = currentSong?.lyrics 
-    ? getCurrentLineIndex(currentSong.lyrics, currentTime) 
+  const lyricsToUse = (showTransliteration && currentSong?.transliteratedLyrics)
+    ? currentSong.transliteratedLyrics
+    : currentSong?.lyrics;
+
+  const currentLyricIndex = lyricsToUse
+    ? getCurrentLineIndex(lyricsToUse, currentTime) 
     : -1;
-  const currentLyricText = (currentLyricIndex !== -1 && currentSong?.lyrics?.[currentLyricIndex]) 
-    ? currentSong.lyrics[currentLyricIndex].text 
+  const currentLyricText = (currentLyricIndex !== -1 && lyricsToUse?.[currentLyricIndex]) 
+    ? lyricsToUse[currentLyricIndex].text 
     : '';
 
   const togglePlay = (e?: any) => {

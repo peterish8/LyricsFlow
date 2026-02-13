@@ -7,6 +7,13 @@ import { Gradient } from '../types/gradient';
 
 export const GRADIENTS: Gradient[] = [
   {
+    id: 'dynamic',
+    name: 'Dynamic (Cover Art)',
+    colors: ['#333', '#000'], // Placeholder, will be replaced by image
+    type: 'linear',
+    angle: 0,
+  },
+  {
     id: 'midnight',
     name: 'Midnight Dreams',
     colors: ['#0F0C29', '#302B63', '#24243E'],
@@ -176,7 +183,7 @@ export const GRADIENTS: Gradient[] = [
 ];
 
 // Default gradient for new songs
-export const DEFAULT_GRADIENT_ID = 'aurora';
+export const DEFAULT_GRADIENT_ID = 'dynamic';
 
 // Helper to get gradient by ID
 export const getGradientById = (id: string): Gradient | undefined => {

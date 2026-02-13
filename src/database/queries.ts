@@ -258,3 +258,13 @@ export const clearAllData = async (): Promise<void> => {
   const db = await getDatabase();
   await db.execAsync('DELETE FROM lyrics; DELETE FROM songs;');
 };
+
+export const getLastPlayedSong = async (): Promise<Song | null> => {
+  const db = await getDatabase();
+  const songRow = await db.getFirstAsync<{ id: string }>('SELECT id FROM songs WHERE last_played IS NOT NULL ORDER BY last_played DESC LIMIT 1');
+  
+  if (songRow) {
+      return getSongById(songRow.id);
+  }
+  return null;
+};

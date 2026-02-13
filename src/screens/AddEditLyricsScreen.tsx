@@ -26,7 +26,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useSongsStore } from '../store/songsStore';
 import { usePlayerStore } from '../store/playerStore';
 import { GradientPicker, AIGeneratorModal } from '../components';
-import { ToastNotification, Toast } from '../components/Toast';
+import { Toast } from '../components/Toast';
 import { Colors } from '../constants/colors';
 import { DEFAULT_GRADIENT_ID } from '../constants/gradients';
 import { parseTimestampedLyrics, calculateDuration, lyricsToRawText } from '../utils/timestampParser';
@@ -38,6 +38,7 @@ import { LrcSearchModal } from '../components/LrcSearchModal';
 import { SearchResult } from '../services/LyricsRepository';
 import { LrcLibService } from '../services/LrcLibService';
 import { GeniusService } from '../services/GeniusService';
+import { TransliterationService } from '../services/TransliterationService';
 // import { SmartLyricMatcher } from '../services/SmartLyricMatcher';
 
 // Helper to parse duration string (mm:ss or seconds)
@@ -68,11 +69,16 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const [album, setAlbum] = useState('');
   const [gradientId, setGradientId] = useState(DEFAULT_GRADIENT_ID);
   const [lyricsText, setLyricsText] = useState('');
+  const [transliteratedText, setTransliteratedText] = useState('');
+  const [isShowingTransliteration, setIsShowingTransliteration] = useState(false);
+  
   const [scrollSpeed, setScrollSpeed] = useState(50); // pixels per second
   const [durationText, setDurationText] = useState('');
   const [lyricsAlign, setLyricsAlign] = useState<'left' | 'center' | 'right'>('left');
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   
@@ -88,8 +94,10 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
           setTitle(song.title);
           setArtist(song.artist ?? '');
           setAlbum(song.album ?? '');
-          setGradientId(song.gradientId);
+          // Default to dynamic if it was set, otherwise keep existing
+          setGradientId(song.gradientId || (song.coverImageUri ? 'dynamic' : DEFAULT_GRADIENT_ID));
           setLyricsText(lyricsToRawText(song.lyrics));
+          setTransliteratedText(song.transliteratedLyrics ? lyricsToRawText(song.transliteratedLyrics) : '');
           setScrollSpeed(song.scrollSpeed ?? 50);
           setDurationText(formatTime(song.duration));
           setLyricsAlign(song.lyricsAlign ?? 'left');
@@ -97,6 +105,10 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         }
       };
       loadSong();
+    } else {
+        // New Song: Default to Dynamic if we can detect it? 
+        // Logic for auto-detecting cover art from audio file would go here if we had it.
+        // For now, user sets it manually or it defaults to Aurora.
     }
   }, [songId, isEditing, getSong]);
 
@@ -149,11 +161,10 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       
       setLyricsText(shiftedLines.join('\n'));
       setLyricsText(shiftedLines.join('\n'));
-      Toast.show({
-        type: 'success',
-        text1: 'Timestamps Adjusted',
-        text2: `Shifted by ${offsetSeconds > 0 ? '+' : ''}${offsetSeconds}s`,
-      });
+      
+      setToastMessage(`Timestamps Shifted ${offsetSeconds > 0 ? '+' : ''}${offsetSeconds}s`);
+      setToastType('success');
+      setShowToast(true);
   };
 
   const handleSearchResult = async (result: SearchResult) => {
@@ -195,11 +206,9 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
     // but main save happens on "Save" button. 
     // However, user expects lyrics to be "applied".
     
-    Toast.show({
-      type: 'success',
-      text1: 'Lyrics Loaded',
-      text2: `Fetched from ${result.source}`,
-    });
+    setToastMessage(`Lyrics Loaded from ${result.source}`);
+    setToastType('success');
+    setShowToast(true);
   };
 
   const handleSave = async () => {
@@ -217,6 +226,9 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       const duration = manualDuration > 0 ? manualDuration : calculatedDuration;
       const now = new Date().toISOString();
 
+      // Fetch original song to preserve fields not edited here (coverArt, etc.)
+      const originalSong = isEditing && songId ? await getSong(songId) : null;
+
       const songData = {
         id: isEditing && songId ? songId : generateId(),
         title: title.trim(),
@@ -224,14 +236,20 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         album: album.trim() || undefined,
         gradientId,
         lyrics: parsedLyrics,
+        transliteratedLyrics: transliteratedText.trim() ? parseTimestampedLyrics(transliteratedText) : undefined,
         duration,
-        dateCreated: isEditing ? (await getSong(songId!))?.dateCreated ?? now : now,
+        dateCreated: originalSong?.dateCreated ?? now,
         dateModified: now,
-        playCount: 0,
-        lastPlayed: undefined,
+        playCount: originalSong?.playCount ?? 0,
+        lastPlayed: originalSong?.lastPlayed,
         scrollSpeed,
         lyricsAlign,
         audioUri: audioUri ?? undefined,
+        // PRESERVE VISUALS & METADATA
+        coverImageUri: originalSong?.coverImageUri, 
+        lyricSource: originalSong?.lyricSource,
+        textCase: originalSong?.textCase,
+        isLiked: originalSong?.isLiked
       } as Song;
 
       if (isEditing) {
@@ -242,7 +260,14 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         
         if (playingSong?.id === songData.id) {
            // ✅ Use the new update action
-           updateCurrentSong({ lyrics: songData.lyrics, duration: songData.duration });
+           // Also update transliterated lyrics in player if needed
+           updateCurrentSong({ 
+              lyrics: songData.lyrics, 
+              transliteratedLyrics: songData.transliteratedLyrics, 
+              duration: songData.duration,
+              gradientId: songData.gradientId,
+              coverImageUri: songData.coverImageUri 
+           });
         }
         // Update current song in songs store
         const { setCurrentSong } = useSongsStore.getState();
@@ -251,6 +276,8 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
         await addSong(songData);
       }
 
+      setToastMessage('Saved successfully!');
+      setToastType('success');
       setShowToast(true);
       setTimeout(() => {
         if (navigation.canGoBack()) {
@@ -398,6 +425,8 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
                   <Pressable onPress={() => shiftTimestamps(-5)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-5s</Text></Pressable>
                   <Pressable onPress={() => shiftTimestamps(-1)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-1s</Text></Pressable>
                   <Pressable onPress={() => shiftTimestamps(-0.5)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-0.5s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(-0.1)} style={styles.syncBtn}><Text style={styles.syncBtnText}>-0.1s</Text></Pressable>
+                  <Pressable onPress={() => shiftTimestamps(0.1)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+0.1s</Text></Pressable>
                   <Pressable onPress={() => shiftTimestamps(0.5)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+0.5s</Text></Pressable>
                   <Pressable onPress={() => shiftTimestamps(1)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+1s</Text></Pressable>
                   <Pressable onPress={() => shiftTimestamps(5)} style={[styles.syncBtn, styles.syncBtnPos]}><Text style={styles.syncBtnText}>+5s</Text></Pressable>
@@ -416,23 +445,48 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
           {/* Lyrics Input */}
           <View style={styles.lyricsSection}>
             <View style={styles.lyricsHeader}>
-              <Text style={styles.lyricsLabel}>LYRICS</Text>
+              <Text style={styles.lyricsLabel}>
+                  {isShowingTransliteration ? 'TRANSLITERATION (VIBE MODE)' : 'LYRICS (ORIGINAL)'}
+              </Text>
               <View style={{ flexDirection: 'row', gap: 16 }}>
-                <Pressable onPress={() => setShowSearchModal(true)}>
-                  <Text style={styles.aiButton}>FETCH LYRICS</Text>
+                 <Pressable onPress={() => {
+                        const nextState = !isShowingTransliteration;
+                        setIsShowingTransliteration(nextState);
+                        // Auto-generate if switching to view and it's empty
+                        if (nextState && !transliteratedText && lyricsText) {
+                            console.log('[AddEdit] Auto-generating transliteration...');
+                            const parsed = parseTimestampedLyrics(lyricsText);
+                            const converted = TransliterationService.transliterate(parsed);
+                            const resText = lyricsToRawText(converted);
+                            console.log('[AddEdit] Generated text length:', resText.length);
+                            setTransliteratedText(resText);
+                            setToastMessage('Auto-Transliterated Tanglish vibes');
+                            setToastType('success');
+                            setShowToast(true);
+                        }
+                 }}>
+                  <Text style={[styles.aiButton, { color: isShowingTransliteration ? '#3EA6FF' : '#A78BFA' }]}>
+                      {isShowingTransliteration ? 'Show Original' : 'Transliterate'}
+                  </Text>
                 </Pressable>
+                
+                { !isShowingTransliteration && (
+                    <Pressable onPress={() => setShowSearchModal(true)}>
+                      <Text style={styles.aiButton}>FETCH</Text>
+                    </Pressable>
+                )}
                 <Pressable onPress={handlePaste}>
                   <Text style={styles.pasteButton}>Paste</Text>
                 </Pressable>
               </View>
             </View>
             <TextInput
-              style={styles.lyricsInput}
+              style={[styles.lyricsInput, isShowingTransliteration && { borderColor: '#A78BFA', borderWidth: 1 }]}
               multiline
-              placeholder="Type or paste lyrics here..."
+              placeholder={isShowingTransliteration ? "Transliterated text will appear here..." : "Type or paste lyrics here..."}
               placeholderTextColor={Colors.textMuted}
-              value={lyricsText}
-              onChangeText={setLyricsText}
+              value={isShowingTransliteration ? transliteratedText : lyricsText}
+              onChangeText={isShowingTransliteration ? setTransliteratedText : setLyricsText}
               textAlignVertical="top"
             />
           </View>
@@ -457,10 +511,11 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
           onApply={(text) => setLyricsText(text)}
         />
 
-        <ToastNotification
-          message="Saved successfully!"
+        <Toast
+          message={toastMessage}
+          type={toastType}
           visible={showToast}
-          onHide={() => setShowToast(false)}
+          onDismiss={() => setShowToast(false)}
         />
 
         {/* Bottom Toolbar */}

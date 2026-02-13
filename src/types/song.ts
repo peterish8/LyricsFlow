@@ -29,6 +29,7 @@ export interface Song {
   lyricSource?: 'LRCLIB' | 'Genius' | 'Manual'; // Where lyrics came from
   audioUri?: string; // URI to local audio file
   isLiked?: boolean; // Whether song is liked
+  transliteratedLyrics?: LyricLine[]; // Romanized/Colloquial lyrics
   
   // AI Karaoke fields removed
 }
@@ -56,3 +57,18 @@ export interface SongUpdateInput extends Partial<SongCreateInput> {
 
 export type SortOption = 'recent' | 'title' | 'artist' | 'dateAdded';
 export type ViewMode = 'grid' | 'list';
+
+/**
+ * Unified Song Interface for Parallel Race Engine
+ * Both SoundCloud and Audiomack must map to this exact structure
+ */
+export interface UnifiedSong {
+  id: string;
+  title: string;
+  artist: string;
+  highResArt: string;
+  downloadUrl: string;
+  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack';
+  duration?: number; // in seconds
+  hasLyrics?: boolean;
+}

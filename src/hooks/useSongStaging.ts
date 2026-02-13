@@ -1,0 +1,298 @@
+import { useState, useCallback, useEffect } from 'react';
+import { Audio } from 'expo-av';
+import { NativeSearchService } from '../services/NativeSearchService';
+import { downloadManager } from '../services/DownloadManager';
+import { useSongsStore } from '../store/songsStore';
+import { LyricaResult, lyricaService } from '../services/LyricaService';
+import { ImageSearchService } from '../services/ImageSearchService';
+import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
+import { UnifiedSong } from '../types/song';
+
+// AudioOption interface (was previously from AudioExtractorService)
+export interface AudioOption {
+  label: string;
+  bitrate: number;
+  format: string;
+  size: string | number;
+  url: string;
+}
+
+export interface StagingSong {
+  id: string; 
+  title: string;
+  artist: string;
+  duration: number;
+  qualityOptions: AudioOption[];
+  selectedQuality?: AudioOption; 
+  coverOptions: string[]; 
+  lyricOptions: LyricaResult[];
+  selectedCoverUri?: string;
+  selectedLyrics?: string;
+  status: 'idle' | 'searching' | 'ready' | 'downloading' | 'completed' | 'error';
+  progress: number;
+  error?: string;
+}
+
+export const useSongStaging = () => {
+  const [staging, setStaging] = useState<StagingSong | null>(null);
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const { addSong, fetchSongs } = useSongsStore(); 
+  
+  // Cleanup sound
+  useEffect(() => {
+    return () => {
+      if (sound) {
+        sound.unloadAsync();
+      }
+    };
+  }, [sound]);
+
+  const togglePreview = useCallback(async () => {
+      if (!staging?.selectedQuality) return;
+
+      // YTDL returns direct URLs, so we don't need to block youtube.com anymore
+      // unless it failed and returned raw URL.
+      // But let's assume AudioExtractor always returns playable streams.
+      
+      try {
+          if (sound) {
+              if (isPlaying) {
+                  await sound.pauseAsync();
+                  setIsPlaying(false);
+              } else {
+                  await sound.playAsync();
+                  setIsPlaying(true);
+              }
+          } else {
+              // For Cobalt, the URL is direct and ready
+              const { sound: newSound } = await Audio.Sound.createAsync(
+                  { uri: staging.selectedQuality.url },
+                  { shouldPlay: true }
+              );
+              setSound(newSound);
+              setIsPlaying(true);
+              
+              newSound.setOnPlaybackStatusUpdate((status) => {
+                  if (status.isLoaded && status.didJustFinish) {
+                      setIsPlaying(false);
+                      newSound.setPositionAsync(0);
+                  }
+              });
+          }
+      } catch (e) {
+          console.warn('Preview failed', e);
+      }
+  }, [staging, sound, isPlaying]);
+
+  /* 
+   * "Zero-Friction" Async Staging 
+   * Shows cover art INSTANTLY, then fetches lyrics in background
+   */
+  const stageSong = useCallback(async (song: UnifiedSong) => {
+    // 1. Reset Sound State
+    if (sound) {
+        await sound.unloadAsync();
+        setSound(null);
+        setIsPlaying(false);
+    }
+
+    const tempId = Date.now().toString(); 
+    
+    console.log(`[Staging] 🎨 Fetching iTunes cover art for: ${song.title} - ${song.artist}`);
+    
+    // 2. Fetch iTunes Cover Art (fast, professional quality)
+    let coverArtUrls: string[] = [];
+    
+    // Helper to clean search terms
+    const cleanTerm = (text: string) => text
+        .replace(/\([^)]*\)/g, '') // Remove (...)
+        .replace(/\[[^\]]*\]/g, '') // Remove [...]
+        .replace(/\b(ft|feat|featuring|official|video|audio|lyrics)\b.*/gi, '') // Remove "ft. X" etc
+        .trim();
+
+    try {
+        // Strategy 1: Full raw search
+        let query = `${song.title} ${song.artist}`;
+        coverArtUrls = await ImageSearchService.searchItunes(query);
+        
+        // Strategy 2: Cleaned search if raw failed
+        if (coverArtUrls.length === 0) {
+            const cleanTitle = cleanTerm(song.title);
+            const cleanArtist = cleanTerm(song.artist);
+            const cleanQuery = `${cleanTitle} ${cleanArtist}`;
+            
+            console.log(`[Staging] Raw search failed. Retrying with: ${cleanQuery}`);
+            if (cleanQuery !== query) {
+                 coverArtUrls = await ImageSearchService.searchItunes(cleanQuery);
+            }
+        }
+        
+        console.log(`[Staging] ✓ Got ${coverArtUrls.length} iTunes cover options`);
+    } catch (e) {
+        console.warn('[Staging] iTunes fetch failed, using source artwork', e);
+    }
+    
+    // Use first iTunes result or fallback to source art (Saavn/SC)
+    // IMPORTANT: Source art is often low-res or 404, so iTunes is critical.
+    if (coverArtUrls.length === 0 && song.highResArt) {
+        coverArtUrls = [song.highResArt];
+    }
+    
+    const selectedCover = coverArtUrls[0] || song.highResArt;
+    
+    // 3. Set Staging State IMMEDIATELY with iTunes cover art
+    setStaging({
+        id: tempId,
+        title: song.title,
+        artist: song.artist,
+        duration: (song.duration || 180), // Keep in seconds, default 3min
+        
+        // Direct download URL from race engine
+        qualityOptions: [{
+            label: `${song.source} (High Quality)`,
+            bitrate: 320,
+            format: 'mp3',
+            size: '~8MB',
+            url: song.downloadUrl
+        }],
+        selectedQuality: {
+            label: `${song.source} (High Quality)`,
+            bitrate: 320,
+            format: 'mp3',
+            size: '~8MB',
+            url: song.downloadUrl
+        },
+        
+        // iTunes High Res Art - INSTANT!
+        coverOptions: coverArtUrls.length > 0 ? coverArtUrls : [song.highResArt],
+        selectedCoverUri: selectedCover,
+
+        // Lyrics - empty initially, will load async
+        lyricOptions: [],
+        selectedLyrics: undefined,
+
+        status: 'ready', // INSTANTLY READY
+        progress: 0,
+    });
+    
+    console.log(`[Staging] ✓ Staged instantly with iTunes art: ${song.title}`);
+
+    // 4. Fetch lyrics in background (async, non-blocking)
+    let isCancelled = false;
+    const timeoutId = setTimeout(async () => {
+        if (isCancelled) return;
+        
+        try {
+            console.log('[Staging] 🔄 Fetching lyrics in background...');
+            const lyricData = await lyricaService.fetchLyrics(song.title, song.artist);
+            
+            console.log('[Staging] Lyrics result:', lyricData ? 'Found' : 'Not found');
+            
+            if (isCancelled) return;
+            
+            if (lyricData && lyricData.lyrics) {
+                setStaging(prev => {
+                    if (!prev || isCancelled) {
+                        console.log('[Staging] Skipping lyrics update - staging cleared');
+                        return prev;
+                    }
+                    console.log('[Staging] ✓ Updating staging with lyrics');
+                    return {
+                        ...prev,
+                        lyricOptions: [lyricData],
+                        selectedLyrics: lyricData.lyrics
+                    };
+                });
+                console.log('[Staging] ✓ Lyrics loaded and applied!');
+            } else {
+                console.log('[Staging] ⚠️ No lyrics found for this song');
+                // Update staging to clear loading state even if no lyrics
+                setStaging(prev => {
+                    if (!prev || isCancelled) return prev;
+                    return {
+                        ...prev,
+                        lyricOptions: [],
+                        selectedLyrics: undefined
+                    };
+                });
+            }
+        } catch(e) {
+            if (!isCancelled) {
+                console.error('[Staging] ❌ Lyrics fetch failed:', e);
+                // Clear loading state on error
+                setStaging(prev => {
+                    if (!prev) return prev;
+                    return {
+                        ...prev,
+                        lyricOptions: [],
+                        selectedLyrics: undefined
+                    };
+                });
+            }
+        }
+    }, 100);
+
+    // Return cleanup function
+    return () => {
+        isCancelled = true;
+        clearTimeout(timeoutId);
+        console.log('[Staging] Cleanup called - cancelling lyrics fetch');
+    };
+
+  }, [sound]);
+
+  // Deprecated: Kept for legacy support if needed
+  const initFromBrowser = useCallback(async () => {}, []);
+
+  const updateSelection = useCallback(async (updates: Partial<StagingSong>) => {
+      console.log('[StagingHook] updateSelection called with:', updates);
+      console.log('[StagingHook] Current staging:', staging);
+      
+      setStaging(prev => {
+        const newStaging = prev ? ({ ...prev, ...updates }) : null;
+        console.log('[StagingHook] New staging after update:', newStaging);
+        return newStaging;
+      });
+
+      if (updates.selectedQuality) {
+           if (sound) {
+              await sound.unloadAsync();
+              setSound(null);
+              setIsPlaying(false);
+          }
+      }
+  }, [sound, staging]);
+
+  const finalizeDownload = useCallback(async () => {
+    if (!staging || !staging.selectedQuality) return;
+
+    try {
+      setStaging(prev => prev ? ({ ...prev, status: 'downloading', progress: 0.1 }) : null);
+
+      // DELEGATE TO MANAGER
+      const newSong = await downloadManager.finalizeDownload(staging, (progress) => {
+          setStaging(prev => prev ? ({ ...prev, progress }) : null);
+      });
+
+      await addSong(newSong);
+      await fetchSongs(); 
+      
+      setStaging(prev => prev ? ({ ...prev, status: 'completed', progress: 1.0 }) : null);
+
+    } catch (error: any) {
+       console.error('Download Failed:', error);
+       setStaging(prev => prev ? ({ ...prev, status: 'error', error: error.message }) : null);
+    }
+  }, [staging, addSong, fetchSongs]);
+
+  return {
+    staging,
+    stageSong,
+    initFromBrowser,
+    updateSelection,
+    finalizeDownload,
+    togglePreview,
+    isPlaying
+  };
+};

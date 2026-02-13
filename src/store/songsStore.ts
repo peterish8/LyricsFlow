@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { Song, SortOption } from '../types/song';
 import * as queries from '../database/queries';
+import { useDailyStatsStore } from './dailyStatsStore';
 
 interface SongsState {
   // State
@@ -128,6 +129,7 @@ export const useSongsStore = create<SongsState>((set, get) => ({
     // Update play stats if song is selected
     if (song) {
       queries.updatePlayStats(song.id).catch(console.error);
+      useDailyStatsStore.getState().incrementDailyPlay(song.id);
     }
   },
   

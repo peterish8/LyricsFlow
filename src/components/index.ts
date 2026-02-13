@@ -11,3 +11,4 @@ export { default as MiniPlayer } from './MiniPlayer';
 export { CustomTabBar } from './CustomTabBar';
 export { default as VinylRecord } from './VinylRecord';
 export { LrcSearchModal } from './LrcSearchModal';
+export { Toast } from './Toast';

@@ -25,8 +25,11 @@ import { useSongsStore } from '../store/songsStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
-import { AuroraHeader, SongCard, CustomMenu, MiniPlayer } from '../components';
+import { useDailyStatsStore } from '../store/dailyStatsStore';
+import { AuroraHeader, SongCard, CustomMenu, MiniPlayer, Toast } from '../components';
+import { CoverArtSearchScreen } from './CoverArtSearchScreen';
 import { Colors } from '../constants/colors';
+import { getGradientColors } from '../constants/gradients';
 // import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Song } from '../types/song';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,15 +39,26 @@ import * as ImagePicker from 'expo-image-picker';
 type Props = TabScreenProps<'Library'>;
 
 const LibraryScreen: React.FC<Props> = ({ navigation }) => {
-  const { songs, fetchSongs, setCurrentSong, updateSong, currentSong } = useSongsStore();
+  const { songs, fetchSongs, setCurrentSong, updateSong, currentSong: libraryCurrentSong, getSong, deleteSong } = useSongsStore();
+  const { currentSong: playerCurrentSong } = usePlayerStore(); // Get live player song
   const { recentArts, addRecentArt } = useArtHistoryStore();
+  const { libraryBackgroundMode } = useSettingsStore();
+  
+  // Bottom Sheet State
+  const [showBottomSheet, setShowBottomSheet] = React.useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const gradientOpacity = React.useRef(new Animated.Value(1)).current;
+  
+  const [activeThemeColors, setActiveThemeColors] = React.useState<string[] | undefined>(undefined);
+  const [activeImageUri, setActiveImageUri] = React.useState<string | null>(null);
   
   const [artMenuVisible, setArtMenuVisible] = React.useState(false);
   const [artMenuAnchor, setArtMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
   const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
   const [recentArtVisible, setRecentArtVisible] = React.useState(false);
+  const [showCoverSearch, setShowCoverSearch] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
   // const [showTasksModal, setShowTasksModal] = React.useState(false);
 
   // const { tasks } = useTasksStore();
@@ -54,6 +68,65 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     fetchSongs();
   }, []);
+
+  // Dynamic Background Logic
+  useEffect(() => {
+    const updateTheme = async () => {
+      let colors: string[] | undefined = undefined;
+      let image: string | null = null;
+
+      if (libraryBackgroundMode === 'current') {
+         // USE PLAYER STORE for "Current" mode to be responsive
+         if (playerCurrentSong) {
+             image = playerCurrentSong.coverImageUri || null;
+             // Only fallback to colors if no image
+             if (!image && playerCurrentSong.gradientId) {
+                 if (playerCurrentSong.gradientId === 'dynamic') {
+                      colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                 } else {
+                      colors = getGradientColors(playerCurrentSong.gradientId);
+                 }
+             }
+         }
+      } else if (libraryBackgroundMode === 'daily') {
+         const topSongId = useDailyStatsStore.getState().getTopSongOfYesterday();
+         if (topSongId) {
+            const song = songs.find(s => s.id === topSongId) || await getSong(topSongId);
+            if (song) {
+                 image = song.coverImageUri || null;
+                 if (!image && song.gradientId) {
+                     if (song.gradientId === 'dynamic') {
+                          colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                     } else {
+                          colors = getGradientColors(song.gradientId);
+                     }
+                 }
+            }
+         }
+         // Fallback to Today's Top
+         if (!colors && !image) {
+             const todayTopId = useDailyStatsStore.getState().getTopSongOfToday();
+             if (todayTopId) {
+                const song = songs.find(s => s.id === todayTopId) || await getSong(todayTopId);
+                if (song) {
+                    image = song.coverImageUri || null;
+                    if (!image && song.gradientId) {
+                        if (song.gradientId === 'dynamic') {
+                            colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                        } else {
+                            colors = getGradientColors(song.gradientId);
+                        }
+                    }
+                }
+             }
+         }
+      }
+      
+      setActiveThemeColors(colors);
+      setActiveImageUri(image);
+    };
+    updateTheme();
+  }, [libraryBackgroundMode, playerCurrentSong?.id, playerCurrentSong?.coverImageUri, songs.length]);
   
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -68,16 +141,31 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   // Removed Scrollable Header - User prefers icons in "All Songs" section
 
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchSongs();
     setRefreshing(false);
+  }, [fetchSongs]);
+  
+  const handleDeleteSong = async () => {
+    if (!selectedSongForArt) return;
+    
+    try {
+        console.log('[Library] Deleting song:', selectedSongForArt.title);
+        await deleteSong(selectedSongForArt.id);
+        setShowDeleteConfirm(false);
+        setShowBottomSheet(false);
+        setToast({ visible: true, message: 'Song deleted', type: 'success' });
+    } catch (error) {
+        console.error('[Library] Delete failed:', error);
+        setToast({ visible: true, message: 'Failed to delete song', type: 'error' });
+    }
   };
 
   const handleSongPress = useCallback((song: Song) => {
     if (playInMiniPlayerOnly) {
       // If tapping the currently playing song, open NowPlayingScreen
-      if (currentSong?.id === song.id) {
+      if (libraryCurrentSong?.id === song.id) {
         navigation.navigate('NowPlaying', { songId: song.id });
       } else {
         // First tap or different song: Play in mini player (just set current)
@@ -86,22 +174,16 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     } else {
       // Default: Always navigate to NowPlayingScreen
       // Sync with playerStore for MiniPlayer visibility
-      usePlayerStore.getState().loadSong(song.id);
-      setCurrentSong(song);
+      setCurrentSong(song); // Instant UI update (Fixes flash)
       navigation.navigate('NowPlaying', { songId: song.id });
+      usePlayerStore.getState().loadSong(song.id); // Load audio in background
     }
-  }, [navigation, setCurrentSong, playInMiniPlayerOnly, currentSong]);
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly, libraryCurrentSong]);
 
-  const handleSongLongPress = useCallback((song: Song, event: any) => {
-    if (!event?.nativeEvent) {
-      setSelectedSongForArt(song);
-      setArtMenuVisible(true);
-      return;
-    }
-    const { pageX, pageY } = event.nativeEvent;
+  const handleSongLongPress = useCallback((song: Song, event?: any) => {
+    // Show bottom sheet for cover art options
     setSelectedSongForArt(song);
-    setArtMenuAnchor({ x: pageX, y: pageY });
-    setArtMenuVisible(true);
+    setShowBottomSheet(true);
   }, []);
 
   const handleAddPress = useCallback(() => {
@@ -126,12 +208,12 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         };
         await updateSong(updatedSong);
         addRecentArt(uri);
-        setArtMenuVisible(false);
+        setShowBottomSheet(false);
         fetchSongs();
       }
     } catch (error) {
       console.error('Cover art save failed:', error);
-      Alert.alert('Save failed', 'Failed to save cover art.');
+      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
     }
   };
 
@@ -144,11 +226,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           dateModified: new Date().toISOString(),
         };
         await updateSong(updatedSong);
-        setArtMenuVisible(false);
+        setShowBottomSheet(false);
         fetchSongs();
       } catch (error) {
         console.error('Recent art apply failed:', error);
-        Alert.alert('Save failed', 'Failed to save cover art.');
+        setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
       }
     }
   };
@@ -158,6 +240,14 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
       label: 'Choose from Gallery',
       icon: 'image-outline' as const,
       onPress: pickImage,
+    },
+    {
+       label: 'Search Web',
+       icon: 'globe-outline' as const,
+       onPress: () => {
+           setArtMenuVisible(false);
+           setShowCoverSearch(true);
+       }
     },
     ...(recentArts.length > 0 ? [{
       label: 'Recent Art',
@@ -229,30 +319,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.container}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: gradientOpacity }]}>
-        <AuroraHeader palette="library" />
+        <AuroraHeader palette="library" colors={activeThemeColors} imageUri={activeImageUri} />
       </Animated.View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Fixed Header - Only show if NOT Island mode */}
-        {!isIsland && (
-          <View style={styles.header}>
-            <View style={styles.headerLeft} />
-            <View style={styles.headerRight}>
-              <Pressable 
-                style={styles.headerButton}
-                onPress={() => navigation.navigate('Search')}
-              >
-                <Ionicons name="search" size={24} color="#fff" />
-              </Pressable>
-              
-              <Pressable 
-                style={styles.headerButton}
-                onPress={handleAddPress}
-              >
-                <Ionicons name="add" size={24} color="#fff" />
-              </Pressable>
-            </View>
-          </View>
-        )}
+        {/* Fixed Header - Removed as icons are moved to section header for all modes */}
 
         {/* Content */}
         <FlatList<Song>
@@ -303,22 +373,26 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                   {/* All Songs Header & List */}
                   <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>All Songs</Text>
-                    {isIsland && (
-                      <View style={styles.headerActions}>
-                        <Pressable 
-                          style={styles.actionButton}
-                          onPress={() => navigation.navigate('Search')}
-                        >
-                          <Ionicons name="search" size={20} color={Colors.textSecondary} />
-                        </Pressable>
-                        <Pressable 
-                          style={styles.actionButton}
-                          onPress={handleAddPress}
-                        >
-                          <Ionicons name="add" size={24} color={Colors.textSecondary} />
-                        </Pressable>
-                      </View>
-                    )}
+                    <View style={styles.headerActions}>
+                      <Pressable 
+                        style={styles.actionButton}
+                        onPress={() => navigation.navigate('Search')}
+                      >
+                        <Ionicons name="search" size={20} color={Colors.textSecondary} />
+                      </Pressable>
+                      <Pressable 
+                        style={styles.actionButton}
+                        onPress={() => (navigation as any).navigate('AudioDownloader')}
+                      >
+                        <Ionicons name="cloud-download-outline" size={22} color={Colors.textSecondary} />
+                      </Pressable>
+                      <Pressable 
+                        style={styles.actionButton}
+                        onPress={handleAddPress}
+                      >
+                        <Ionicons name="add" size={24} color={Colors.textSecondary} />
+                      </Pressable>
+                    </View>
                   </View>
 
                   {songs.map((song) => (
@@ -410,10 +484,191 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </Pressable>
       </Modal>
+
+      {/* Bottom Sheet for Cover Art Options */}
+      <Modal
+        visible={showBottomSheet}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowBottomSheet(false)}
+      >
+        <Pressable 
+          style={styles.bottomSheetOverlay}
+          onPress={() => setShowBottomSheet(false)}
+        >
+          <Pressable 
+            style={styles.bottomSheetContainer}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.bottomSheetHandle} />
+            <Text style={styles.bottomSheetTitle}>
+              {selectedSongForArt?.title}
+            </Text>
+            <Text style={styles.bottomSheetSubtitle}>
+              {selectedSongForArt?.artist}
+            </Text>
+
+            {/* Options */}
+            <Pressable
+              style={styles.bottomSheetOption}
+              onPress={pickImage}
+            >
+              <Ionicons name="image-outline" size={24} color={Colors.primary} />
+              <Text style={styles.bottomSheetOptionText}>Choose from Gallery</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.bottomSheetOption}
+              onPress={() => {
+                setShowBottomSheet(false);
+                setShowCoverSearch(true);
+              }}
+            >
+              <Ionicons name="globe-outline" size={24} color={Colors.primary} />
+              <Text style={styles.bottomSheetOptionText}>Search Web</Text>
+            </Pressable>
+
+            {/* Recent Art Section */}
+            {recentArts.length > 0 && (
+              <View style={{ marginTop: 16 }}>
+                <Text style={[styles.bottomSheetSubtitle, { textAlign: 'left', marginBottom: 12 }]}>
+                  Recent Cover Art
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                  {recentArts.map((uri, index) => (
+                    <Pressable 
+                      key={index}
+                      onPress={() => selectRecentArt(uri)}
+                      style={{ marginRight: 12 }}
+                    >
+                      <Image 
+                        source={{ uri }} 
+                        style={{ width: 80, height: 80, borderRadius: 8, backgroundColor: '#333' }} 
+                      />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            <Pressable
+              style={styles.bottomSheetOption}
+              onPress={async () => {
+                setShowBottomSheet(false);
+                if (selectedSongForArt) {
+                  const updatedSong = {
+                    ...selectedSongForArt,
+                    coverImageUri: undefined,
+                    dateModified: new Date().toISOString()
+                  };
+                  await updateSong(updatedSong);
+                  await fetchSongs();
+                  setToast({ visible: true, message: 'Cover art removed', type: 'success' });
+                }
+              }}
+            >
+              <Ionicons name="trash-outline" size={24} color="#FF4444" />
+              <Text style={[styles.bottomSheetOptionText, { color: '#FF4444' }]}>Remove Cover Art</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.bottomSheetOption, styles.bottomSheetCancel, { borderBottomWidth: 0, marginTop: 12, backgroundColor: '#2A2A2A' }]}
+              onPress={() => {
+                setShowBottomSheet(false);
+                setTimeout(() => setShowDeleteConfirm(true), 300);
+              }}
+            >
+              <Ionicons name="trash" size={20} color="#FF4444" style={{ marginRight: 8 }} />
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#FF4444', marginLeft: 0 }}>Delete Song</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#1A1A1A', borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center' }}>
+            <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255, 68, 68, 0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+              <Ionicons name="trash" size={24} color="#FF4444" />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 8, textAlign: 'center' }}>
+              Delete Song?
+            </Text>
+            <Text style={{ fontSize: 16, color: '#aaa', marginBottom: 24, textAlign: 'center' }}>
+              Are you sure you want to delete "{selectedSongForArt?.title}"? This action cannot be undone.
+            </Text>
+            
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+              <Pressable 
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#333', alignItems: 'center' }}
+                onPress={() => setShowDeleteConfirm(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Cancel</Text>
+              </Pressable>
+              
+              <Pressable 
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#FF4444', alignItems: 'center' }}
+                onPress={handleDeleteSong}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Delete</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+          <CoverArtSearchScreen 
+          visible={showCoverSearch}
+          initialQuery={selectedSongForArt ? `${selectedSongForArt.title} ${selectedSongForArt.artist}` : ''}
+          onClose={() => setShowCoverSearch(false)}
+          onSelect={async (uri) => {
+              console.log('[LibraryScreen] Cover art selected:', uri);
+              setShowCoverSearch(false);
+              if (selectedSongForArt) {
+                  try {
+                      console.log('[LibraryScreen] Updating song:', selectedSongForArt.id);
+                      // Update the song's cover art in the database
+                      const updatedSong = {
+                          ...selectedSongForArt,
+                          coverImageUri: uri,
+                          dateModified: new Date().toISOString()
+                      };
+                      await updateSong(updatedSong);
+                      console.log('[LibraryScreen] Cover art updated successfully');
+                      
+                      // Refresh the songs list to show the new cover
+                      await fetchSongs();
+                      
+                      setToast({ visible: true, message: 'Cover art updated!', type: 'success' });
+                      setSelectedSongForArt(null);
+                  } catch (e) {
+                      console.error('[LibraryScreen] Failed to save cover:', e);
+                      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
+                  }
+              }
+          }}
+       />
+      
+       {/* Floating Action Bar for Download (Temporary Placement or use Header) */}
+       {/* Actually, let's add it to the header actions we just unified */}
       
 
       
       <MiniPlayer />
+       {toast && (
+           <Toast 
+               visible={toast.visible} 
+               message={toast.message} 
+               type={toast.type} 
+               onDismiss={() => setToast(null)} 
+           />
+       )}
     </View>
   );
 };
@@ -652,6 +907,63 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 4,
+  },
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetContainer: {
+    backgroundColor: '#1E1E1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 40,
+  },
+  bottomSheetHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#333',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  bottomSheetTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  bottomSheetSubtitle: {
+    fontSize: 14,
+    color: '#aaa',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  bottomSheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  bottomSheetOptionText: {
+    fontSize: 16,
+    color: '#fff',
+    marginLeft: 12,
+  },
+  bottomSheetCancel: {
+    borderBottomWidth: 0,
+    marginTop: 10,
+    justifyContent: 'center',
+    backgroundColor: '#333',
+    borderRadius: 12,
+  },
+  bottomSheetCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

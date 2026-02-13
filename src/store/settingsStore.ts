@@ -27,6 +27,9 @@ interface SettingsState {
   showTimeRemaining: boolean;
   playInMiniPlayerOnly: boolean;
   miniPlayerStyle: 'bar' | 'island'; // New setting
+  autoHideControls: boolean; // Toggle for hiding controls after 3.5s
+  libraryBackgroundMode: 'daily' | 'aurora' | 'current'; // New setting for dynamic background
+  animateBackground: boolean; // Toggle for background movement
   
   // Library
   defaultView: ViewMode;
@@ -44,6 +47,9 @@ interface SettingsState {
   setShowTimeRemaining: (show: boolean) => void;
   setPlayInMiniPlayerOnly: (enabled: boolean) => void;
   setMiniPlayerStyle: (style: 'bar' | 'island') => void; // New action
+  setAutoHideControls: (enabled: boolean) => void;
+  setLibraryBackgroundMode: (mode: 'daily' | 'aurora' | 'current') => void;
+  setAnimateBackground: (enabled: boolean) => void;
   setDefaultView: (view: ViewMode) => void;
   setDefaultSort: (sort: SortOption) => void;
   setShowThumbnails: (show: boolean) => void;
@@ -61,6 +67,9 @@ const DEFAULT_SETTINGS = {
   showTimeRemaining: true,
   playInMiniPlayerOnly: false,
   miniPlayerStyle: 'island' as const, // Default to island as requested "like it was before"
+  autoHideControls: true, // Default enabled
+  libraryBackgroundMode: 'daily' as const, // Default to daily top
+  animateBackground: true, // Default enable animation
   defaultView: 'grid' as ViewMode,
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
@@ -85,6 +94,9 @@ export const useSettingsStore = create<SettingsState>()(
       setShowTimeRemaining: (showTimeRemaining) => set({ showTimeRemaining }),
       setPlayInMiniPlayerOnly: (playInMiniPlayerOnly) => set({ playInMiniPlayerOnly }),
       setMiniPlayerStyle: (miniPlayerStyle) => set({ miniPlayerStyle }),
+      setAutoHideControls: (autoHideControls) => set({ autoHideControls }),
+      setLibraryBackgroundMode: (libraryBackgroundMode) => set({ libraryBackgroundMode }),
+      setAnimateBackground: (animateBackground: boolean) => set({ animateBackground }),
       
       // Library actions
       setDefaultView: (defaultView) => set({ defaultView }),

@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, Image, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
 import Scrubber from '../components/Scrubber';
@@ -10,20 +14,129 @@ import { RootStackScreenProps } from '../types/navigation';
 import * as queries from '../database/queries';
 import { getGradientColors } from '../constants/gradients';
 import { AuroraHeader } from '../components/AuroraHeader';
+import { CoverArtSearchScreen } from './CoverArtSearchScreen'; // Import the new screen (as a component/modal)
+import { Toast } from '../components/Toast';
+import { useSettingsStore } from '../store/settingsStore';
+import VinylRecord from '../components/VinylRecord';
+
+const { width } = Dimensions.get('window');
 
 type Props = RootStackScreenProps<'NowPlaying'>;
 
 const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const player = usePlayer();
-  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId } = usePlayerStore();
+  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong } = usePlayerStore();
+  const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
   const { songId } = route.params;
   
   const flatListRef = useRef<FlatList>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number, y: number } | undefined>(undefined);
+  const [showCoverSearch, setShowCoverSearch] = useState(false); // State for Cover Search Modal
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [showLyrics, setShowLyrics] = useState(true); // Issue  5: Lyrics toggle state
   
-  // Load song on mount
+  // Issue 6: Vinyl rotation
+  const vinylRotation = useSharedValue(0);
+  
+  // Issue 1: Swipe-Down Gesture to Reveal Controls
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      // If swiping down significantly (>50) and controls are hidden, show them
+      if (e.translationY > 50 && controlsOpacity.value < 0.5) {
+        runOnJS(resetHideTimer)();
+      }
+    });
+  
+  // Animation for Auto-Hide
+  const controlsOpacity = useSharedValue(1);
+  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetHideTimer = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    controlsOpacity.value = withTiming(1, { duration: 200 });
+    // Ensure controls are interactive immediately when showing
+    setControlsVisible(true);
+    
+    if (autoHideControls && player?.playing) {
+      hideTimerRef.current = setTimeout(() => {
+        controlsOpacity.value = withTiming(0, { duration: 500 }); // Fade out
+      }, 3500);
+    }
+  };
+
+  // Monitor opacity to disable interactions when hidden
+  useAnimatedReaction(
+    () => controlsOpacity.value,
+    (opacity) => {
+      if (opacity < 0.1 && controlsVisible) {
+        runOnJS(setControlsVisible)(false);
+      } else if (opacity > 0.1 && !controlsVisible) {
+        runOnJS(setControlsVisible)(true);
+      }
+    },
+    [controlsVisible]
+  );
+
+  useEffect(() => {
+     resetHideTimer();
+     return () => {
+         if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+     };
+  }, [player?.playing, autoHideControls]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: controlsOpacity.value,
+  }));
+
+  const handleMenuPress = (event: any) => {
+    const { nativeEvent } = event;
+    const anchor = { x: nativeEvent.pageX, y: nativeEvent.pageY };
+    setMenuAnchor(anchor);
+    setMenuVisible(true);
+  };
+
+  const bgRotation = useSharedValue(0);
+  const bgScale = useSharedValue(1.2); 
+
+  useEffect(() => {
+    if (animateBackground) {
+        // Slowing down significantly: 20s -> 60s
+        bgRotation.value = withRepeat(withTiming(10, { duration: 60000, easing: Easing.inOut(Easing.ease) }), -1, true); 
+        // 15s -> 45s for scale breathing
+        bgScale.value = withRepeat(withTiming(1.5, { duration: 45000, easing: Easing.inOut(Easing.ease) }), -1, true); 
+    } else {
+        bgRotation.value = withTiming(0);
+        bgScale.value = withTiming(1.2);
+    }
+  }, [animateBackground]);
+
+  const bgAnimatedStyle = useAnimatedStyle(() => ({
+       transform: [{ scale: bgScale.value }, { rotate: `${bgRotation.value}deg` }]
+  }));
+  
+  // Issue 6: Vinyl rotation animation (spins when playing, stops when paused)
+  useEffect(() => {
+    if (player?.playing) {
+      vinylRotation.value = withRepeat(
+        withTiming(360, { duration: 8000, easing: Easing.linear }),
+        -1, // infinite
+        false // no reverse
+      );
+    } else {
+      // Pause rotation at current position
+      // We grab the current value and set it to stop animation
+      const currentRotation = vinylRotation.value % 360;
+      vinylRotation.value = currentRotation; 
+    }
+  }, [player?.playing]);
+  
+  const vinylAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${vinylRotation.value}deg` }]
+  }));
   useEffect(() => {
     const load = async () => {
       try {
@@ -101,6 +214,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // ✅ Playback Controls
   const togglePlay = async () => {
+    resetHideTimer();
     if (!player) return;
     if (player.playing) {
       await player.pause();
@@ -110,23 +224,27 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const skipForward = async () => {
+    resetHideTimer();
     if (!player || !player.duration) return;
     const newTime = Math.min(player.currentTime + 10000, player.duration);
     await player.seekTo(newTime);
   };
 
   const skipBackward = async () => {
+    resetHideTimer();
     if (!player) return;
     const newTime = Math.max(0, player.currentTime - 10000);
     await player.seekTo(newTime);
   };
 
   const handleScrub = async (value: number) => {
+    resetHideTimer();
     if (!player) return;
     await player.seekTo(value); // Scrubber returns seconds, player likely needs seconds too? 
   };
 
   const handleLyricTap = async (timestamp: number) => {
+      resetHideTimer();
       if (!player) return;
       await player.seekTo(timestamp); // Timestamp is in seconds. If seekTo takes seconds, this is correct.
       player.play(); // Ensure playback continues
@@ -137,58 +255,166 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     // Already implemented in previous step, ensuring it persists
   }, []);
 
-  const gradientColors = currentSong?.gradientId 
-    ? getGradientColors(currentSong.gradientId) 
+  // Dynamic Theme Logic
+  // Dynamic Theme Logic
+  const isDynamicTheme = currentSong?.gradientId === 'dynamic';
+  
+  // If dynamic but NO cover art, fallback to a default gradient (e.g. Aurora)
+  const effectiveGradientId = (isDynamicTheme && !currentSong?.coverImageUri) 
+      ? 'aurora' 
+      : (currentSong?.gradientId || 'aurora');
+
+  const gradientColors = !isDynamicTheme || !currentSong?.coverImageUri
+    ? getGradientColors(effectiveGradientId) 
     : ['#000', '#000'];
 
   // ... imports moved to top
 
   return (
-    <View style={styles.container}>
-       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-       <AuroraHeader colors={gradientColors} />
+    <GestureDetector gesture={panGesture}>
+      <View style={styles.container}>
+         {/* Background: Dynamic Blur or Black */}
+         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
        
-       {/* Background Image (Optional, for now just black) */}
+       {isDynamicTheme && currentSong?.coverImageUri ? (
+          <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}>
+            {/* Animated.View wrapper - Animated.Image with blurRadius doesn't animate on Android */}
+            <Animated.View style={[{ position: 'absolute', top: '-25%', left: '-25%', width: '150%', height: '150%' }, bgAnimatedStyle]}>
+               <Image 
+                 source={{ uri: currentSong.coverImageUri }} 
+                 style={{ width: '100%', height: '100%', opacity: 0.6 }} 
+                 blurRadius={100} 
+                 resizeMode="cover"
+               />
+               <Image 
+                 source={{ uri: currentSong.coverImageUri }} 
+                 style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.3 }} 
+                 blurRadius={50} 
+                 resizeMode="cover"
+               />
+            </Animated.View>
+            <LinearGradient
+                colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.5)', '#000']}
+                locations={[0.2, 0.7, 1.0]}
+                style={StyleSheet.absoluteFill}
+            />
+          </View>
+       ) : (
+          <AuroraHeader colors={gradientColors} animated={animateBackground} />
+       )}
        
-       {/* Header */}
-       <View style={styles.header}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.headerButton}>
-             <Ionicons name="chevron-down" size={30} color="#fff" />
-          </Pressable>
-          
-          {/* Collapsed view text could go here */}
-          <Text style={styles.headerTitle} numberOfLines={1}>{currentSong?.title}</Text>
+       {/* Ensure AuroraHeader is NOT shown if dynamic to avoid clashing, or maybe show it with low opacity? 
+           User wants "Dynamic Theme", usually means the blur IS the theme. 
+           So we replace AuroraHeader with the blur. 
+       */}
+       
 
-          <Pressable onPress={() => setMenuVisible(true)} style={styles.headerButton}>
-             <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-          </Pressable>
-       </View>
 
-       <CustomMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        title="Options"
-        options={[
-          {
-            label: 'Edit Lyrics',
-            icon: 'create-outline',
-            onPress: () => {
-              setMenuVisible(false);
-              navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
-            }
-          }
-        ]}
-      />
+      {/* Header with Blur for "Opaque" look that matches theme */}
+      <Animated.View style={[styles.headerContainer, animatedStyle]} pointerEvents={controlsVisible ? 'auto' : 'none'}>
+        <BlurView intensity={80} tint="dark" style={styles.blurContainer}>
+          <SafeAreaView edges={['top']} style={styles.headerContent}>
+             <Pressable onPress={() => navigation.goBack()} style={styles.headerButton}>
+               <Ionicons name="chevron-down" size={28} color="#fff" />
+             </Pressable>
+             
+             <View style={{ alignItems: 'center', flex: 1 }}>
+               <Text style={styles.headerTitle} numberOfLines={1}>NOW PLAYING</Text>
+               <Text style={styles.headerSubtitle} numberOfLines={1}>{currentSong?.title}</Text>
+             </View>
+             
+             <View style={styles.headerRight}>
+               <CustomMenu 
+                 visible={menuVisible}
+                 onClose={() => setMenuVisible(false)}
+                 anchorPosition={menuAnchor}
+                 options={[
+                   {
+                     label: 'Edit Lyrics',
+                     icon: 'create-outline',
+                     onPress: () => {
+                       setMenuVisible(false);
+                       navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
+                     }
+                   },
+                   {
+                     label: 'Sync Lyrics',
+                     icon: 'timer-outline',
+                     onPress: () => {
+                        setMenuVisible(false);
+                        // Is this just edit mode? Or Sync mode? 
+                        // The user has a sync mode in AddEditLyrics.
+                        navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
+                     }
+                   },
+                   {
+                      label: autoHideControls ? 'Disable Auto-Hide' : 'Enable Auto-Hide',
+                      icon: autoHideControls ? 'eye-outline' : 'eye-off-outline',
+                      onPress: () => {
+                          setMenuVisible(false);
+                          setAutoHideControls(!autoHideControls);
+                          setToast({ visible: true, message: `Auto-Hide ${!autoHideControls ? 'Enabled' : 'Disabled'}`, type: 'success' });
+                      }
+                   },
+                   {
+                      label: animateBackground ? 'Disable Animation' : 'Enable Animation',
+                      icon: animateBackground ? 'contrast-outline' : 'contrast',
+                      onPress: () => {
+                          setMenuVisible(false);
+                          setAnimateBackground(!animateBackground);
+                          setToast({ visible: true, message: `Animation ${!animateBackground ? 'Enabled' : 'Disabled'}`, type: 'success' });
+                      }
+                   }
+                 ]}
+               />
+               <Pressable onPress={handleMenuPress} style={styles.headerButton}>
+                 <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+               </Pressable>
+             </View>
+          </SafeAreaView>
+        </BlurView>
+      </Animated.View>
+
+       <CoverArtSearchScreen 
+          visible={showCoverSearch}
+          initialQuery={`${currentSong?.title} ${currentSong?.artist}`}
+          onClose={() => setShowCoverSearch(false)}
+          onSelect={async (uri) => {
+              setShowCoverSearch(false);
+              if (currentSong) {
+                  // Update Store
+                  const updatedSong = { ...currentSong, coverImageUri: uri };
+                  
+                  // Optimistic update
+                  updateCurrentSong({ coverImageUri: uri }); 
+                  
+                  try {
+                       // Corrected: Pass the full updated song object
+                       await queries.updateSong(updatedSong);
+                       setTimeout(() => {
+                           setToast({ visible: true, message: 'Cover Updated', type: 'success' });
+                       }, 1000); // Increased delay to ensure smooth transition
+                  } catch (e) {
+                      console.error('[NowPlaying] Failed to save cover:', e);
+                      // Revert optimistic update if needed, but user just sees error
+                      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
+                  }
+              }
+          }}
+       />
 
       {/* Main Content Area - Lyrics take priority */}
       <View style={styles.contentArea}>
-          {/* Lyrics List */}
-          <FlatList
+          {showLyrics ? (
+            // Lyrics List
+            <FlatList
             ref={flatListRef}
-            data={currentSong?.lyrics || []}
+            data={(showTransliteration && currentSong?.transliteratedLyrics) ? currentSong.transliteratedLyrics : (currentSong?.lyrics || [])}
             keyExtractor={(item, index) => `${item.timestamp}-${index}`}
             contentContainerStyle={styles.lyricsContainer}
             showsVerticalScrollIndicator={false}
+            // Issue 1: Removed scroll triggers so auto-scroll doesn't wake controls
+            scrollEventThrottle={16} 
             renderItem={({ item, index }) => {
               // Calculate active state and distance
               const isActive = currentTime >= item.timestamp && 
@@ -268,59 +494,118 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
             }}
             ListHeaderComponent={
                 <View style={styles.topSpacer}>
-                    {/* Small Cover Art inside List Header for scrolling effect? 
-                        Or keep it sticky top? User wants "Lyrics showing fully". 
-                        Let's keep art separate but small at top. 
-                    */}
+                    {/* Main Cover Art Header - Interactive */}
+                    <Pressable 
+                        onLongPress={() => setShowCoverSearch(true)}
+                        style={({ pressed }) => [
+                            styles.mainCoverContainer,
+                            pressed && { opacity: 0.8 }
+                        ]}
+                    >
+                        {currentSong?.coverImageUri ? (
+                            <Image source={{ uri: currentSong.coverImageUri }} style={styles.mainCover} />
+                        ) : (
+                             <View style={[styles.mainCover, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+                                 <Ionicons name="musical-note" size={60} color="#666" />
+                             </View>
+                        )}
+                    </Pressable>
                 </View>
             }
             ListFooterComponent={<View style={{ height: 200 }} />} // Space at bottom
             onScrollToIndexFailed={() => {}}
           />
+          ) : (
+            // Issue 6: Vinyl Record Display (when lyrics are hidden)
+            <View style={styles.vinylContainer}>
+              <Animated.View style={vinylAnimatedStyle}>
+                <VinylRecord 
+                  imageUri={currentSong?.coverImageUri} 
+                  size={width * 0.75} 
+                />
+              </Animated.View>
+            </View>
+          )}
       </View>
 
-      {/* Bottom Player Controls Section (Sticky Bottom) */}
-      <View style={styles.bottomControls}>
-          {/* Mini Info (Art + Title) */}
-          <View style={styles.miniInfo}>
-             {currentSong?.coverImageUri && (
-                <Image source={{ uri: currentSong.coverImageUri }} style={styles.miniCover} />
-             )}
-             <View style={{flex: 1, marginLeft: 12}}>
-                 <Text style={styles.miniTitle} numberOfLines={1}>{currentSong?.title}</Text>
-                 <Text style={styles.miniArtist} numberOfLines={1}>{currentSong?.artist}</Text>
-             </View>
-          </View>
+      {/* Issue 4: Dynamic Island Bottom Controls */}
+      <Animated.View style={[styles.bottomControlsContainer, animatedStyle]} pointerEvents={controlsVisible ? 'auto' : 'none'}>
+          {/* 3-Layer Background Stack (Dynamic Island Style) */}
+          <View style={styles.bottomControlsPill}>
+            {/* Layer 1: Blurred Cover Art */}
+            {currentSong?.coverImageUri &&  (
+              <Image 
+                source={{ uri: currentSong.coverImageUri }} 
+                style={StyleSheet.absoluteFill}
+                blurRadius={40}
+              />
+            )}
+            
+            {/* Layer 2: Vignette Gradient */}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
+              start={{x: 0, y: 0}}
+              end={{x: 0, y: 1}}
+              style={StyleSheet.absoluteFill}
+            />
+            
+            {/* Layer 3: Dark Overlay */}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+            
+          {/* Content */}
+            <View style={styles.bottomControlsContent}>
+              {/* Mini Info (Art + Title) */}
+              <View style={styles.miniInfo}>
+                 <Pressable onLongPress={() => setShowCoverSearch(true)}>
+                     {currentSong?.coverImageUri ? (
+                        <Image source={{ uri: currentSong.coverImageUri }} style={styles.miniCover} />
+                     ) : (
+                        <View style={[styles.miniCover, { backgroundColor: '#333' }]} />
+                     )}
+                 </Pressable>
+                 <View style={{flex: 1, marginLeft: 12}}>
+                     <Text style={styles.miniTitle} numberOfLines={1}>{currentSong?.title}</Text>
+                     <Text style={styles.miniArtist} numberOfLines={1}>{currentSong?.artist}</Text>
+                 </View>
 
-          {/* Scrubber */}
-          <View style={{ marginVertical: 10 }}>
-             <Scrubber 
-                currentTime={currentTime}
-                duration={player?.duration || 0}
-                onSeek={handleScrub}
-             />
+                 {/* Issue 5: Eye Icon Toggle - Moved here */}
+                 <Pressable onPress={() => setShowLyrics(!showLyrics)} style={{ padding: 8 }}>
+                   <Ionicons name={showLyrics ? 'eye-outline' : 'eye-off-outline'} size={24} color="rgba(255,255,255,0.7)" />
+                 </Pressable>
+              </View>
+    
+              {/* Scrubber */}
+              <View style={{ marginVertical: 10 }}>
+                 <Scrubber 
+                    currentTime={currentTime}
+                    duration={player?.duration || 0}
+                    onSeek={handleScrub}
+                 />
+              </View>
+              
+              {/* Main Controls - Centered */}
+              <View style={styles.controls}>
+                 <Pressable onPress={skipBackward} style={styles.controlBtn}>
+                   <Ionicons name="play-back" size={30} color="#fff" />
+                 </Pressable>
+                 
+                 <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
+                   <Ionicons 
+                     name={player?.playing ? 'pause' : 'play'} 
+                     size={40} 
+                     color="#000"
+                   />
+                 </Pressable>
+                 
+                 <Pressable onPress={skipForward} style={styles.controlBtn}>
+                   <Ionicons name="play-forward" size={30} color="#fff" />
+                 </Pressable>
+              </View>
+            </View>
           </View>
-          
-          {/* Main Controls */}
-          <View style={styles.controls}>
-             <Pressable onPress={skipBackward} style={styles.controlBtn}>
-               <Ionicons name="play-back" size={30} color="#fff" />
-             </Pressable>
-             
-             <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
-               <Ionicons 
-                 name={player?.playing ? 'pause' : 'play'} 
-                 size={40} 
-                 color="#000"
-               />
-             </Pressable>
-             
-             <Pressable onPress={skipForward} style={styles.controlBtn}>
-               <Ionicons name="play-forward" size={30} color="#fff" />
-             </Pressable>
-          </View>
-      </View>
+      </Animated.View>
     </View>
+    </GestureDetector>
   );
 };
 
@@ -329,15 +614,38 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  header: {
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    overflow: 'hidden', // Ensure blur respects bounds
+    // No background color, BlurView handles it
+  },
+  blurContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(10,10,10,0.3)', // Added semi-transparent dark background for "More Solid" look
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 50,
-    backgroundColor: 'transparent',
-    zIndex: 10,
+    paddingVertical: 10,
+    paddingTop: Platform.OS === 'android' ? 20 : 0, 
   },
+  headerSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '500',
+  },
+  headerRight: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     gap: 8
+  },
+
   headerTitle: {
     fontSize: 16,
     fontWeight: '600',
@@ -355,10 +663,29 @@ const styles = StyleSheet.create({
   },
   lyricsContainer: {
     paddingHorizontal: 24,
-    paddingTop: 20,
+    paddingTop: 100, // Adjusted for Header
+    paddingBottom: 250, // Adjusted for Bottom Controls
   },
   topSpacer: {
-    height: 20,
+    height: 300, // Allocate space for cover art
+    justifyContent: 'center', // Center vertically within the spacer if needed
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  mainCoverContainer: {
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  mainCover: {
+    width: 250,
+    height: 250,
+    borderRadius: 12,
   },
   lyricLine: {
     paddingVertical: 10,
@@ -381,13 +708,8 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 10,
   },
-  bottomControls: {
-    backgroundColor: '#121212',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-  },
+
+
   miniInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -411,9 +733,10 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center', // Changed for center alignment
     paddingHorizontal: 20,
     marginTop: 10,
+    gap: 40, // Space out controls
   },
   controlBtn: {
      padding: 10,
@@ -453,6 +776,36 @@ const styles = StyleSheet.create({
   lyricTextContainer: {
     minHeight: 40,
     justifyContent: 'center',
+  },
+  // Issue 4: Dynamic Island-style bottom controls
+  bottomControlsContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+  },
+  bottomControlsPill: {
+    marginHorizontal: 10,
+    marginBottom: 10,
+    borderRadius: 40,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  bottomControlsContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  // Issue 6: Vinyl container
+  vinylContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 240, // Shift center point upwards to avoid overlap with bottom controls
   },
 });
 

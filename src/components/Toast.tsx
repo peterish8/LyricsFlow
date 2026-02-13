@@ -1,93 +1,186 @@
-/**
- * Simple Toast Component
- */
-
-import React, { useEffect } from 'react';
-import { StyleSheet, Text, View, Alert } from 'react-native';
-import Animated, { 
-  useSharedValue, 
-  useAnimatedStyle, 
-  withSpring, 
-  withDelay,
-  runOnJS,
-} from 'react-native-reanimated';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import { Animated, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSettingsStore } from '../store/settingsStore';
 
 interface ToastProps {
-  message: string;
   visible: boolean;
-  onHide: () => void;
+  message: string;
+  type?: 'success' | 'error' | 'info';
+  onDismiss: () => void;
+  duration?: number;
 }
 
-export const ToastNotification: React.FC<ToastProps> = ({ message, visible, onHide }) => {
-  const translateY = useSharedValue(-100);
+export const Toast: React.FC<ToastProps> = ({ 
+  visible, 
+  message, 
+  type = 'success', 
+  onDismiss,
+  duration = 3000 
+}) => {
+  const insets = useSafeAreaInsets();
+  const { miniPlayerStyle } = useSettingsStore();
+  const isIsland = miniPlayerStyle === 'island';
 
-  useEffect(() => {
+  // Animation Values
+  // Initial values set far off-screen
+  const initialY = isIsland ? 200 : -200;
+  const translateY = useRef(new Animated.Value(initialY)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(1)).current;
+
+  // Use useLayoutEffect to prevent initial flash
+  useLayoutEffect(() => {
     if (visible) {
-      // Spring down
-      translateY.value = withSpring(20);
+      // RESET values immediately
+      progress.setValue(1); 
+      translateY.setValue(isIsland ? 200 : -200);
+      opacity.setValue(0);
       
-      // Wait 3s then spring up
-      const timeout = setTimeout(() => {
-        translateY.value = withSpring(-100, {}, (finished) => {
-          if (finished) runOnJS(onHide)();
-        });
-      }, 3000); // Increased to 3s for better readability
+      // Slide In
+      Animated.parallel([
+        Animated.spring(translateY, {
+          toValue: 0, 
+          useNativeDriver: true,
+          tension: 50,
+          friction: 9
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true
+        })
+      ]).start();
 
-      return () => clearTimeout(timeout);
+      // Progress Bar Animation
+      Animated.timing(progress, {
+        toValue: 0,
+        duration: duration,
+        useNativeDriver: false, 
+      }).start();
+
+      // Auto Dismiss
+      const timer = setTimeout(() => {
+        handleDismiss();
+      }, duration);
+
+      return () => clearTimeout(timer);
     }
-  }, [visible]);
+  }, [visible, isIsland]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-  }));
+  const handleDismiss = () => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: isIsland ? 100 : -100, // Exit direction matches entry
+        duration: 300,
+        useNativeDriver: true
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true
+      })
+    ]).start(() => onDismiss());
+  };
 
   if (!visible) return null;
 
+  const backgroundColor = 
+    type === 'success' ? '#1E1E1E' : 
+    type === 'error' ? '#FF3B30' : 
+    '#007AFF';
+  
+  const iconColor = type === 'success' ? '#4CD964' : '#FFF';
+
+  const iconName = 
+    type === 'success' ? 'checkmark-circle' : 
+    type === 'error' ? 'alert-circle' : 
+    'information-circle';
+
+  // Dynamic Styles based on position preference
+  // User requested "want down near tonav bar" - implies minimal offset.
+  const positionStyle = isIsland ? {
+      bottom: insets.bottom + 10, // Very close to bottom safe area
+      right: 20, 
+      minWidth: 200,
+      maxWidth: 300, 
+  } : {
+      top: insets.top + 10,
+      right: 20,
+      minWidth: 200,
+      maxWidth: 300, // Fixed: Use number to satisfy TypeScript
+  };
+
   return (
-    <Animated.View style={[toastStyles.container, animatedStyle]}>
-      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-      <Text style={toastStyles.text}>{message}</Text>
+    <Animated.View style={[
+      styles.container, 
+      positionStyle,
+      { 
+        transform: [{ translateY }],
+        opacity,
+        backgroundColor 
+      }
+    ]}>
+      <TouchableOpacity onPress={handleDismiss} activeOpacity={0.8} style={styles.content}>
+        <Ionicons name={iconName} size={24} color={iconColor} />
+        <Text style={styles.text}>{message}</Text>
+      </TouchableOpacity>
+      
+      {/* Progress Bar */}
+      <View style={styles.progressBarContainer}>
+        <Animated.View 
+            style={[
+                styles.progressBar, 
+                { 
+                    width: progress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0%', '100%']
+                    }),
+                    backgroundColor: iconColor
+                }
+            ]} 
+        />
+      </View>
     </Animated.View>
   );
 };
 
-const toastStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 50, // Below header
-    right: 20,
-    backgroundColor: 'rgba(28, 28, 30, 0.95)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    zIndex: 9999,
     borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.30,
+    shadowRadius: 4.65,
+    elevation: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  content: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    zIndex: 9999,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
   },
   text: {
-    color: '#fff',
-    fontSize: 14,
+    color: '#FFF',
     fontWeight: '600',
+    fontSize: 14,
   },
-});
-
-// Imperative Toast API
-// This is a simple implementation. For production, consider using a Context or a library like react-native-toast-message
-export const Toast = {
-  show: (options: { type: 'success' | 'error'; text1: string; text2?: string }) => {
-    // In a real app, you'd use an event emitter or context to trigger the toast
-    // For now, we'll just log it since we are refactoring and might replace this
-    // But since the code expects Toast.show, let's at least shim it or alert if critical
-    // OR we can export a hook-based component as default and a static object
-    console.log(`[Toast] ${options.type}: ${options.text1} - ${options.text2}`);
-    if (options.type === 'error') {
-       Alert.alert(options.text1, options.text2);
-    }
+  progressBarContainer: {
+    height: 3,
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  progressBar: {
+    height: '100%',
   }
-};
+});

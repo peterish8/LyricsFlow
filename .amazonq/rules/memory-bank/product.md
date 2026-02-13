@@ -19,6 +19,7 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 - **Instrumental indicators**: Animated vertical bars for `[INSTRUMENTAL]` sections
 - **Glow effects**: Active lyrics with white glow (opacity: 0.6, radius: 20px)
 - **Skip controls**: ±10 second seek buttons for precise navigation
+- **Battery Optimization**: Toggleable background animations to save power.
 
 ### Smart Lyric Search (The Magic Button) ✨
 - **Waterfall Strategy**: Tiered fetching from **LRCLIB (Synced)** first, then falling back to **Genius (Plain Text)**.
@@ -45,7 +46,9 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 - **Real-time search**: Cross-field search engine across title, artist, album, lyrics
 
 ### UI/UX Enhancements
-- **Auto-hide controls**: Player controls fade after 3.5s when playing, stay visible when paused
+- **Auto-hide controls**: Player controls fade after 3.5s when playing. Re-appears on interaction.
+- **Dynamic Backgrounds**: Three distinct modes (Daily Top, Aurora, Current Song) for Library view.
+- **Real-time Blur**: "Current Song" mode uses native blurs for a premium frosted glass effect.
 - **Toast notifications**: Success feedback with auto-dismiss after 2s
 - **Submenu system**: Nested menus for text format options
 - **Clear data**: Settings option to wipe all songs/lyrics with confirmation

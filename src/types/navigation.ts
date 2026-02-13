@@ -12,6 +12,18 @@ export type RootStackParamList = {
   NowPlaying: { songId: string };
   AddEditLyrics: { songId?: string }; // undefined = add new, string = edit existing
   Search: undefined;
+  AudioDownloader: {
+    fromBrowser?: boolean;
+    videoTitle?: string;
+    videoAuthor?: string;
+    videoId?: string;
+    audioUrl?: string;
+    audioBitrate?: number;
+    audioFormat?: string;
+    thumbnail?: string;
+    lengthSeconds?: number;
+  } | undefined;
+  YoutubeBrowser: undefined;
 };
 
 // Bottom Tab Navigator

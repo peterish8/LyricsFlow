@@ -18,7 +18,7 @@
 
 ### UI & Animation
 - **@shopify/react-native-skia**: 2.2.12 - High-performance graphics and blur effects
-- **react-native-reanimated**: ~4.1.1 - Smooth 60fps animations
+- **react-native-reanimated**: ~4.1.1 - Smooth 60fps animations (used for Auto-Hide & Dynamic Backgrounds)
 - **react-native-gesture-handler**: ~2.28.0 - Touch gesture handling
 - **expo-linear-gradient**: ^15.0.8 - Gradient backgrounds
 - **expo-blur**: ~15.0.8 - Blur effects
@@ -138,6 +138,8 @@ expo start --web
 - **requestAnimationFrame**: High-precision timing loop
 - **deltaTime Calculations**: Sub-millisecond accuracy
 - **Memoized Components**: React.memo for LyricItem to prevent re-renders
+- **Animated.View Wrapper**: Used for rotating background images to ensure smooth performance on Android (bypassing Animated.Image limitations).
+- **Battery Saver Mode**: Option to disable background animations to reduce GPU usage.
 
 ### Database Optimizations
 - **Singleton Pattern**: Single connection prevents race conditions

@@ -71,6 +71,11 @@ Unified lyrics fetching with intelligent fallback strategy.
 - **Magic Button**: The "Sparkle" button now dynamically shifts its background gradient based on the current song's `gradientId`, creating a unified, premium appearance.
 - **60fps Scroll Engine**: Uses `requestAnimationFrame` for buttery-smooth scrolling on high-refresh-rate displays.
 - **Design System**: 24+ curated vibrant visual presets (Midnight Dreams, Ocean Breeze, Sunset Vibes, etc.).
+- **Smart Backgrounds**: Three distinct modes for the Library view:
+    1. **Daily Top**: Displays the album art of your most played song from yesterday.
+    2. **Aurora**: A calming, animated gradient mesh (default).
+    3. **Current Song**: Real-time blurred artwork of the currently playing track.
+- **Battery Optimization**: Background animations can be toggled off directly from the Now Playing menu to save power.
 
 ---
 
@@ -170,11 +175,12 @@ Located in `src/constants/`:
 - **Integration**: Works alongside existing lyrics display (karaoke + lyrics sync)
 
 ### UI/UX Enhancements
-- **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused
+- **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused. Re-appears on interaction.
 - **Dynamic Island**: Adaptive vignette based on cover art brightness (light vs dark)
 - **Vinyl Record**: 60% cover art, 3% center hole for better proportions
 - **Toast notifications**: Success feedback on song save (auto-dismisses after 2s)
 - **Navigation**: Fallback to Main screen if goBack() fails
+- **Solid Controls**: Now Playing controls feature a semi-transparent dark blurred background for better visibility against vibrant covers.
 
 ---
 

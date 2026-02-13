@@ -38,6 +38,8 @@ LuvLyrics was built on three core pillars:
 Traditional lyrics apps often use `setInterval` for auto-scrolling, which leads to "micro-stuttering" on modern high-refresh-rate displays.
 - **Implementation**: Located in `NowPlayingScreen.tsx`, we use a custom `requestAnimationFrame` loop.
 - **Logic**: It calculates a high-precision `deltaTime` (ms since last frame) to update the scroll offset and playback tick. This ensures that even if a frame is dropped, the lyrics stay perfectly in sync with real-time.
+- **Auto-Hide Logic**: Controls automatically fade out after 3.5 seconds of inactivity during playback. They reappear instantly on any user interaction (tap or scroll drag).
+- **Battery Saver**: Background animations can be disabled via the top-right menu to reduce GPU load on older devices.
 
 ### Robust Database Singleton
 Expo SQLite can throw `NullPointerException` (NativeDatabase.prepareAsync) if multiple parts of the app try to open or query the database simultaneously during startup.
@@ -88,7 +90,10 @@ The app implements a robust, tiered lyric fetching system.
 
 ### `src/store/` (Zustand)
 - **`songsStore.ts`**: Master song list from SQLite.
+- **`songsStore.ts`**: Master song list from SQLite.
 - **`playerStore.ts`**: Playback state and unified queue.
+- **`settingsStore.ts`**: Persists user preferences like `autoHideControls`, `animateBackground`, and `libraryBackgroundMode`.
+- **`dailyStatsStore.ts`**: Tracks daily listening habits to power the "Daily Top" background mode.
 
 ---
 

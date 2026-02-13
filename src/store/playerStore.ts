@@ -6,22 +6,30 @@ interface PlayerState {
   currentSongId: string | null;
   currentSong: Song | null;
   loadedAudioId: string | null; // Tracks what is actually loaded in the player
+  showTransliteration: boolean;
   
   loadSong: (songId: string) => Promise<void>;
+  setInitialSong: (song: Song) => void;
   setLoadedAudioId: (songId: string | null) => void;
   updateCurrentSong: (updates: Partial<Song>) => void;
+  toggleShowTransliteration: () => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
   currentSongId: null,
   currentSong: null,
   loadedAudioId: null,
+  showTransliteration: false,
   
   loadSong: async (songId: string) => {
     // We need to import the query function. The prompt uses 'queries.getSongById'.
     // Assuming getSongById is exported from '../database/queries'
     const song = await queries.getSongById(songId);
     set({ currentSongId: songId, currentSong: song });
+  },
+
+  setInitialSong: (song: Song) => {
+      set({ currentSongId: song.id, currentSong: song });
   },
   
   setLoadedAudioId: (id) => set({ loadedAudioId: id }),
@@ -30,4 +38,6 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   updateCurrentSong: (updates: Partial<Song>) => set((state) => ({
     currentSong: state.currentSong ? { ...state.currentSong, ...updates } : null
   })),
+
+  toggleShowTransliteration: () => set((state) => ({ showTransliteration: !state.showTransliteration })),
 }));

@@ -44,6 +44,19 @@ const SettingsScreen: React.FC<Props> = () => {
   const [selectionModalVisible, setSelectionModalVisible] = React.useState(false);
   const [availableAudioFiles, setAvailableAudioFiles] = React.useState<any[]>([]);
   const [selectedFiles, setSelectedFiles] = React.useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = React.useState('');
+
+  // Filter audio files based on search query
+  const filteredAudioFiles = React.useMemo(() => {
+    if (!searchQuery.trim()) return availableAudioFiles;
+    const q = searchQuery.toLowerCase().trim();
+    return availableAudioFiles.filter(f => {
+      const filename = (f.filename || '').toLowerCase();
+      const artist = (f.artist || '').toLowerCase();
+      const album = (f.album || '').toLowerCase();
+      return filename.includes(q) || artist.includes(q) || album.includes(q);
+    });
+  }, [availableAudioFiles, searchQuery]);
   const [alertConfig, setAlertConfig] = React.useState<{
     visible: boolean;
     title: string;
@@ -274,6 +287,7 @@ const SettingsScreen: React.FC<Props> = () => {
       setIsImporting(false);
       setAvailableAudioFiles(newAudioFiles);
       setSelectedFiles(new Set());
+      setSearchQuery('');
       setSelectionModalVisible(true);
     } catch (error) {
       setIsImporting(false);
@@ -314,6 +328,11 @@ const SettingsScreen: React.FC<Props> = () => {
     } else {
       setSelectedFiles(new Set(availableAudioFiles.map(f => f.uri)));
     }
+  };
+
+  const handleCloseSelectionModal = () => {
+    setSelectionModalVisible(false);
+    setSearchQuery('');
   };
 
   const toggleFileSelection = (uri: string) => {
@@ -435,6 +454,23 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.showThumbnails}
               onToggle={settings.setShowThumbnails}
             />
+            {/* Library Background Mode Selector */}
+             <SettingsRow
+              icon="color-palette-outline"
+              label="Background Theme"
+              value={
+                  settings.libraryBackgroundMode === 'daily' ? 'Most Played Yesterday' :
+                  settings.libraryBackgroundMode === 'current' ? 'Current Song' :
+                  'Standard (Aurora)'
+              }
+              onPress={() => {
+                  // Cycle through modes: daily -> current -> aurora -> daily
+                  const modes: ('daily' | 'current' | 'aurora')[] = ['daily', 'current', 'aurora'];
+                  const currentIndex = modes.indexOf(settings.libraryBackgroundMode);
+                  const nextMode = modes[(currentIndex + 1) % modes.length];
+                  settings.setLibraryBackgroundMode(nextMode);
+              }}
+            />
           </View>
 
           <View style={styles.section}>
@@ -509,11 +545,11 @@ const SettingsScreen: React.FC<Props> = () => {
         visible={selectionModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setSelectionModalVisible(false)}
+        onRequestClose={handleCloseSelectionModal}
       >
         <Pressable 
           style={styles.selectionOverlay}
-          onPress={() => setSelectionModalVisible(false)}
+          onPress={handleCloseSelectionModal}
         >
           <Pressable 
             style={styles.selectionContainer}
@@ -521,9 +557,28 @@ const SettingsScreen: React.FC<Props> = () => {
           >
             <View style={styles.selectionHeader}>
               <Text style={styles.selectionTitle}>Select Songs ({selectedFiles.size}/{availableAudioFiles.length})</Text>
-              <Pressable onPress={() => setSelectionModalVisible(false)}>
+              <Pressable onPress={handleCloseSelectionModal}>
                 <Ionicons name="close" size={24} color={Colors.textPrimary} />
               </Pressable>
+            </View>
+            {/* Search Bar */}
+            <View style={styles.searchBarContainer}>
+              <Ionicons name="search" size={18} color={Colors.textSecondary} />
+              <TextInput
+                style={styles.searchBarInput}
+                placeholder="Search songs..."
+                placeholderTextColor={Colors.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+              />
+              {searchQuery.length > 0 && (
+                <Pressable onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color={Colors.textSecondary} />
+                </Pressable>
+              )}
             </View>
             <Pressable style={styles.selectAllButton} onPress={toggleSelectAll}>
               <Ionicons 
@@ -533,29 +588,36 @@ const SettingsScreen: React.FC<Props> = () => {
               />
               <Text style={styles.selectAllText}>Select All</Text>
             </Pressable>
-            <ScrollView style={styles.selectionList}>
-              {availableAudioFiles.map((file) => (
-                <Pressable
-                  key={file.uri}
-                  style={styles.selectionItem}
-                  onPress={() => toggleFileSelection(file.uri)}
-                >
-                  <Ionicons 
-                    name={selectedFiles.has(file.uri) ? "checkbox" : "square-outline"} 
-                    size={24} 
-                    color={selectedFiles.has(file.uri) ? "#007AFF" : Colors.textSecondary} 
-                  />
-                  <View style={styles.selectionItemInfo}>
-                    <Text style={styles.selectionItemTitle} numberOfLines={1}>{file.filename.replace(/\.[^/.]+$/, '')}</Text>
-                    <Text style={styles.selectionItemArtist} numberOfLines={1}>{file.artist || file.album || 'Unknown'}</Text>
-                  </View>
-                </Pressable>
-              ))}
+            <ScrollView style={styles.selectionList} keyboardShouldPersistTaps="handled">
+              {filteredAudioFiles.length === 0 && searchQuery.trim() !== '' ? (
+                <View style={styles.emptySearchContainer}>
+                  <Ionicons name="search-outline" size={40} color={Colors.textMuted} />
+                  <Text style={styles.emptySearchText}>No songs match "{searchQuery}"</Text>
+                </View>
+              ) : (
+                filteredAudioFiles.map((file) => (
+                  <Pressable
+                    key={file.uri}
+                    style={styles.selectionItem}
+                    onPress={() => toggleFileSelection(file.uri)}
+                  >
+                    <Ionicons 
+                      name={selectedFiles.has(file.uri) ? "checkbox" : "square-outline"} 
+                      size={24} 
+                      color={selectedFiles.has(file.uri) ? "#007AFF" : Colors.textSecondary} 
+                    />
+                    <View style={styles.selectionItemInfo}>
+                      <Text style={styles.selectionItemTitle} numberOfLines={1}>{file.filename.replace(/\.[^/.]+$/, '')}</Text>
+                      <Text style={styles.selectionItemArtist} numberOfLines={1}>{file.artist || file.album || 'Unknown'}</Text>
+                    </View>
+                  </Pressable>
+                ))
+              )}
             </ScrollView>
             <View style={styles.selectionActions}>
               <Pressable 
                 style={[styles.selectionButton, styles.selectionButtonCancel]} 
-                onPress={() => setSelectionModalVisible(false)}
+                onPress={handleCloseSelectionModal}
               >
                 <Text style={styles.selectionButtonText}>Cancel</Text>
               </Pressable>
@@ -822,6 +884,37 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: Colors.textPrimary,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.textPrimary,
+    paddingVertical: 2,
+  },
+  emptySearchContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  emptySearchText: {
+    fontSize: 15,
+    color: Colors.textMuted,
+    textAlign: 'center',
   },
   selectAllButton: {
     flexDirection: 'row',

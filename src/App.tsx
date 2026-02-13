@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './navigation';
 import { initDatabase } from './database/db';
 import { useSongsStore } from './store/songsStore';
+import { usePlayerStore } from './store/playerStore';
 import { Colors } from './constants/colors';
 import { PlayerProvider } from './contexts/PlayerContext';
 
@@ -28,6 +29,12 @@ const App: React.FC = () => {
         // Fetch initial songs
         await fetchSongs();
         
+        // Restore Last Played Song
+        const lastPlayed = await import('./database/queries').then(m => m.getLastPlayedSong());
+        if (lastPlayed) {
+            usePlayerStore.getState().setInitialSong(lastPlayed);
+        }
+
         setIsReady(true);
       } catch (err) {
         console.error('Initialization error:', err);
@@ -59,6 +66,7 @@ const App: React.FC = () => {
     </GestureHandlerRootView>
   );
 };
+// Forced Refresh for Navigation Update
 
 const styles = StyleSheet.create({
   container: {

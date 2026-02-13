@@ -14,6 +14,8 @@ import TabNavigator from './TabNavigator';
 import NowPlayingScreen from '../screens/NowPlayingScreen';
 import AddEditLyricsScreen from '../screens/AddEditLyricsScreen';
 import SearchScreen from '../screens/SearchScreen';
+import { AudioDownloaderScreen } from '../screens/AudioDownloaderScreen';
+import { YoutubeBrowserScreen } from '../screens/YoutubeBrowserScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -50,6 +52,22 @@ export const RootNavigator: React.FC = () => {
           options={{
             presentation: 'fullScreenModal',
             animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="AudioDownloader"
+          component={AudioDownloaderScreen}
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="YoutubeBrowser"
+          component={YoutubeBrowserScreen}
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
           }}
         />
       </Stack.Navigator>
