@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, Image, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Image, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, FlatList } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
+import { useSongsStore } from '../store/songsStore';
 import Scrubber from '../components/Scrubber';
 import CustomMenu from '../components/CustomMenu';
 import { RootStackScreenProps } from '../types/navigation';
@@ -18,6 +19,7 @@ import { CoverArtSearchScreen } from './CoverArtSearchScreen'; // Import the new
 import { Toast } from '../components/Toast';
 import { useSettingsStore } from '../store/settingsStore';
 import VinylRecord from '../components/VinylRecord';
+import InstrumentalWaveform from '../components/InstrumentalWaveform';
 
 const { width } = Dimensions.get('window');
 
@@ -25,11 +27,13 @@ type Props = RootStackScreenProps<'NowPlaying'>;
 
 const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const player = usePlayer();
-  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong } = usePlayerStore();
+  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong, setMiniPlayerHidden } = usePlayerStore();
+  const toggleLike = useSongsStore(state => state.toggleLike);
   const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
   const { songId } = route.params;
   
   const flatListRef = useRef<FlatList>(null);
+  const contentHeightRef = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -39,11 +43,21 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [showLyrics, setShowLyrics] = useState(true); // Issue  5: Lyrics toggle state
   
+  // Visibility Management: Hide MiniPlayer when NowPlaying is open
+  useEffect(() => {
+    setMiniPlayerHidden(true);
+    return () => setMiniPlayerHidden(false);
+  }, [setMiniPlayerHidden]);
+  
   // Issue 6: Vinyl rotation
   const vinylRotation = useSharedValue(0);
   
   // Issue 1: Swipe-Down Gesture to Reveal Controls
+  // Using simultaneousWithExternalGesture() allows this to work even when scrolling the FlatList
   const panGesture = Gesture.Pan()
+    .activeOffsetY(20) // Activate if moved down 20px (swipe down)
+    .failOffsetY(-20)  // Fail if moved up 20px (scrolling down lyrics)
+    .simultaneousWithExternalGesture()
     .onUpdate((e) => {
       // If swiping down significantly (>50) and controls are hidden, show them
       if (e.translationY > 50 && controlsOpacity.value < 0.5) {
@@ -193,24 +207,128 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => clearInterval(interval);
   }, [player]);
 
-  // ✅ Auto-Scroll to Active Lyric
-  useEffect(() => {
-    if (!currentSong?.lyrics || currentSong.lyrics.length === 0) return;
+  // Issue: Intro Instrumental
+  // If the first lyric starts after > 3 seconds, insert a dummy "Instrumental" line at 0:00
+  const processedLyrics = React.useMemo(() => {
+     const rawLyrics = (showTransliteration && currentSong?.transliteratedLyrics) 
+        ? currentSong.transliteratedLyrics 
+        : (currentSong?.lyrics || []);
+     
+     if (rawLyrics.length > 0) {
+         // RUNTIME FALLBACK: Check for "collapsed" timestamps (all 0 or stuck)
+         // If the last line has timestamp 0, it means we failed to parse timestamps originally.
+         const lastTimestamp = rawLyrics[rawLyrics.length - 1].timestamp;
+         const isCollapsed = lastTimestamp === 0 && rawLyrics.length > 1;
 
-    // Find active index
-    const index = currentSong.lyrics.findIndex((line, i) => {
-      const nextLine = currentSong.lyrics[i + 1];
+         if (isCollapsed) {
+             const duration = (player?.duration && player.duration > 0) 
+                ? player.duration 
+                : (currentSong?.duration || 180);
+             
+             console.log(`[NowPlaying] ⚠️ Detected collapsed lyrics. Auto-generating timestamps for ${duration}s`);
+             
+             // Auto-distribute
+             const newLyrics = rawLyrics.map((line, index) => ({
+                 ...line,
+                 timestamp: (index / rawLyrics.length) * duration
+             }));
+             return newLyrics;
+         }
+
+         const firstTimestamp = rawLyrics[0].timestamp;
+         // If start is delayed by > 2s, pretend 0-first is instrumental
+         if (firstTimestamp > 2) {
+             return [{ timestamp: 0, text: '' }, ...rawLyrics];
+         }
+     }
+     return rawLyrics;
+  }, [currentSong?.lyrics, currentSong?.transliteratedLyrics, showTransliteration, player?.duration, currentSong?.duration]);
+
+  // ✅ Determine if lyrics are "Linear" (Plain/Teleprompter)
+  const isLinear = React.useMemo(() => {
+     if (!processedLyrics || processedLyrics.length <= 10) return false;
+     
+     // Check gaps across multiple lines to avoid false positives (e.g. rhythmic intro)
+     const firstGap = processedLyrics[1].timestamp - processedLyrics[0].timestamp;
+     let isConstant = true;
+     
+     // Check first 8 gaps
+     for (let i = 1; i < 9; i++) {
+         const gap = processedLyrics[i+1].timestamp - processedLyrics[i].timestamp;
+         if (Math.abs(gap - firstGap) > 0.05) { // Allow tiny variance
+             isConstant = false;
+             break;
+         }
+     }
+     
+     return isConstant;
+  }, [processedLyrics]);
+
+  const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
+  const isUserScrolling = useRef(false); // ✅ Track user interaction
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // ✅ Track timeout to clear it
+
+  // ✅ Auto-Scroll & Sync Logic
+  useEffect(() => {
+    if (!processedLyrics || processedLyrics.length === 0) return;
+
+    // Standard Time-Based Index Calculation
+    const index = processedLyrics.findIndex((line, i) => {
+      const nextLine = processedLyrics[i + 1];
       return currentTime >= line.timestamp && (!nextLine || currentTime < nextLine.timestamp);
     });
 
-    if (index !== -1 && flatListRef.current) {
+    if (!isLinear) {
+        // For Synced Lyrics, Time determines Highlight
+        if (index !== activeLyricIndex) {
+            setActiveLyricIndex(index);
+        }
+    }
+
+    // SCROLL LOGIC
+    // ✅ Skip auto-scroll if user is interacting
+    if (isLinear && flatListRef.current && contentHeightRef.current > 0 && !isUserScrolling.current) {
+        // SMOOTH SCROLL (Teleprompter Mode)
+        // Calculate offset based on song progress %
+        const duration = (player?.duration && player.duration > 0) 
+            ? player.duration
+            : (currentSong?.duration || 180);
+            
+        // Precise Layout Calculation
+        const HEADER_HEIGHT = 420; // 300 (Spacer) + 20 (Margin) + 100 (PaddingTop)
+        const FOOTER_HEIGHT = 450; // 250 (PaddingBottom) + 200 (ListFooter)
+        const totalContentHeight = contentHeightRef.current;
+        const textHeight = Math.max(0, totalContentHeight - HEADER_HEIGHT - FOOTER_HEIGHT);
+        
+        // Calculate Y position of the "Active Point" within the full content
+        // We assume plain lyrics are distributed evenly across the text height
+        const progress = Math.min(1, Math.max(0, currentTime / duration));
+        const activeY = HEADER_HEIGHT + (textHeight * progress);
+        
+        // Calculate Target Scroll Offset to center activeY on screen
+        const screenHeight = Dimensions.get('window').height;
+        const targetOffset = activeY - (screenHeight * 0.4); // Position at 40% down from top
+        
+        flatListRef.current.scrollToOffset({
+             offset: Math.max(0, targetOffset),
+             animated: true // smooth interpolation
+        });
+        // Note: We do NOT set activeLyricIndex here. 
+        // We let the onScroll event handle the highlighting based on visual position.
+        return;
+    }
+
+    // STANDARD SYNCED SCROLL (Jump to line)
+    if (!isLinear && index !== -1 && flatListRef.current && !isUserScrolling.current) {
+      // Only scroll if significantly changed or user isn't scrolling?
+      // Standard jump
       flatListRef.current.scrollToIndex({
         index,
         animated: true,
         viewPosition: 0.3, // Position in upper third for better reading
       });
     }
-  }, [currentTime, currentSong]);
+  }, [currentTime, currentSong, processedLyrics, isLinear, activeLyricIndex]);
 
   // ✅ Playback Controls
   const togglePlay = async () => {
@@ -250,6 +368,35 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       player.play(); // Ensure playback continues
   };
 
+  // ✅ Scroll Handler for Linear Lyrics (Decouples Highlight from Time)
+  const handleScroll = (event: any) => {
+      if (!isLinear || !processedLyrics || processedLyrics.length === 0) return;
+
+      const offsetY = event.nativeEvent.contentOffset.y;
+      const screenHeight = Dimensions.get('window').height;
+      const HEADER_HEIGHT = 420;
+      
+      // Calculate which line is currently "Centered" (at 40% height)
+      const centerPoint = offsetY + (screenHeight * 0.4);
+      
+      // Map centerPoint back to an index
+      // We know: centerPoint = HEADER + (index / total) * textHeight
+      // So: index = (centerPoint - HEADER) / textHeight * total
+      
+      const totalContentHeight = contentHeightRef.current;
+      const FOOTER_HEIGHT = 450;
+      const textHeight = Math.max(1, totalContentHeight - HEADER_HEIGHT - FOOTER_HEIGHT);
+      
+      let progress = (centerPoint - HEADER_HEIGHT) / textHeight;
+      progress = Math.max(0, Math.min(1, progress));
+      
+      const newIndex = Math.floor(progress * processedLyrics.length);
+      
+      if (newIndex !== activeLyricIndex) {
+          setActiveLyricIndex(newIndex);
+      }
+  };
+
   // ✅ Use Loaded Audio ID
   useEffect(() => {
     // Already implemented in previous step, ensuring it persists
@@ -269,6 +416,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     : ['#000', '#000'];
 
   // ... imports moved to top
+
+
 
   return (
     <GestureDetector gesture={panGesture}>
@@ -309,185 +458,218 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
        */}
        
 
-
-      {/* Header with Blur for "Opaque" look that matches theme */}
-      <Animated.View style={[styles.headerContainer, animatedStyle]} pointerEvents={controlsVisible ? 'auto' : 'none'}>
-        <BlurView intensity={80} tint="dark" style={styles.blurContainer}>
-          <SafeAreaView edges={['top']} style={styles.headerContent}>
-             <Pressable onPress={() => navigation.goBack()} style={styles.headerButton}>
-               <Ionicons name="chevron-down" size={28} color="#fff" />
-             </Pressable>
-             
-             <View style={{ alignItems: 'center', flex: 1 }}>
-               <Text style={styles.headerTitle} numberOfLines={1}>NOW PLAYING</Text>
-               <Text style={styles.headerSubtitle} numberOfLines={1}>{currentSong?.title}</Text>
-             </View>
-             
-             <View style={styles.headerRight}>
-               <CustomMenu 
-                 visible={menuVisible}
-                 onClose={() => setMenuVisible(false)}
-                 anchorPosition={menuAnchor}
-                 options={[
-                   {
-                     label: 'Edit Lyrics',
-                     icon: 'create-outline',
-                     onPress: () => {
-                       setMenuVisible(false);
-                       navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
-                     }
-                   },
-                   {
-                     label: 'Sync Lyrics',
-                     icon: 'timer-outline',
-                     onPress: () => {
+ 
+       {/* Header with Blur for "Opaque" look that matches theme */}
+       <Animated.View style={[styles.headerContainer, animatedStyle]} pointerEvents={controlsVisible ? 'auto' : 'none'}>
+         <BlurView intensity={80} tint="dark" style={styles.blurContainer}>
+           <SafeAreaView edges={['top']} style={styles.headerContent}>
+              <Pressable onPress={() => navigation.goBack()} style={styles.headerButton}>
+                <Ionicons name="chevron-down" size={28} color="#fff" />
+              </Pressable>
+              
+              <View style={{ alignItems: 'center', flex: 1 }}>
+                <Text style={styles.headerTitle} numberOfLines={1}>NOW PLAYING</Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>{currentSong?.title}</Text>
+              </View>
+              
+              <View style={styles.headerRight}>
+                <CustomMenu 
+                  visible={menuVisible}
+                  onClose={() => setMenuVisible(false)}
+                  anchorPosition={menuAnchor}
+                  options={[
+                    {
+                      label: showLyrics ? 'Hide Lyrics' : 'Show Lyrics',
+                      icon: showLyrics ? 'eye-off-outline' : 'eye-outline',
+                      onPress: () => {
                         setMenuVisible(false);
-                        // Is this just edit mode? Or Sync mode? 
-                        // The user has a sync mode in AddEditLyrics.
+                        setShowLyrics(!showLyrics);
+                        setToast({ visible: true, message: `Lyrics ${!showLyrics ? 'Shown' : 'Hidden'}`, type: 'success' });
+                      }
+                    },
+                    {
+                      label: 'Go to Current Lyric',
+                      icon: 'locate-outline',
+                      onPress: () => {
+                        setMenuVisible(false);
+                        if (flatListRef.current && activeLyricIndex !== -1 && !isLinear) {
+                          // Scroll to active lyric for synced lyrics
+                          flatListRef.current.scrollToIndex({
+                            index: activeLyricIndex,
+                            animated: true,
+                            viewPosition: 0.3,
+                          });
+                          setToast({ visible: true, message: 'Jumped to current lyric', type: 'success' });
+                        } else if (isLinear) {
+                          setToast({ visible: true, message: 'Auto-scroll active for teleprompter', type: 'success' });
+                        } else {
+                          setToast({ visible: true, message: 'No active lyric', type: 'success' });
+                        }
+                      }
+                    },
+                    {
+                      label: 'Edit Lyrics',
+                      icon: 'create-outline',
+                      onPress: () => {
+                        setMenuVisible(false);
                         navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
-                     }
-                   },
-                   {
-                      label: autoHideControls ? 'Disable Auto-Hide' : 'Enable Auto-Hide',
-                      icon: autoHideControls ? 'eye-outline' : 'eye-off-outline',
-                      onPress: () => {
-                          setMenuVisible(false);
-                          setAutoHideControls(!autoHideControls);
-                          setToast({ visible: true, message: `Auto-Hide ${!autoHideControls ? 'Enabled' : 'Disabled'}`, type: 'success' });
                       }
-                   },
-                   {
-                      label: animateBackground ? 'Disable Animation' : 'Enable Animation',
-                      icon: animateBackground ? 'contrast-outline' : 'contrast',
+                    },
+                    {
+                      label: 'Sync Lyrics',
+                      icon: 'timer-outline',
                       onPress: () => {
-                          setMenuVisible(false);
-                          setAnimateBackground(!animateBackground);
-                          setToast({ visible: true, message: `Animation ${!animateBackground ? 'Enabled' : 'Disabled'}`, type: 'success' });
+                         setMenuVisible(false);
+                         // Is this just edit mode? Or Sync mode? 
+                         // The user has a sync mode in AddEditLyrics.
+                         navigation.navigate('AddEditLyrics', { songId: currentSong?.id });
                       }
-                   }
-                 ]}
-               />
-               <Pressable onPress={handleMenuPress} style={styles.headerButton}>
-                 <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-               </Pressable>
-             </View>
-          </SafeAreaView>
-        </BlurView>
-      </Animated.View>
-
-       <CoverArtSearchScreen 
-          visible={showCoverSearch}
-          initialQuery={`${currentSong?.title} ${currentSong?.artist}`}
-          onClose={() => setShowCoverSearch(false)}
-          onSelect={async (uri) => {
-              setShowCoverSearch(false);
-              if (currentSong) {
-                  // Update Store
-                  const updatedSong = { ...currentSong, coverImageUri: uri };
-                  
-                  // Optimistic update
-                  updateCurrentSong({ coverImageUri: uri }); 
-                  
-                  try {
-                       // Corrected: Pass the full updated song object
-                       await queries.updateSong(updatedSong);
-                       setTimeout(() => {
-                           setToast({ visible: true, message: 'Cover Updated', type: 'success' });
-                       }, 1000); // Increased delay to ensure smooth transition
-                  } catch (e) {
-                      console.error('[NowPlaying] Failed to save cover:', e);
-                      // Revert optimistic update if needed, but user just sees error
-                      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
-                  }
-              }
-          }}
-       />
-
-      {/* Main Content Area - Lyrics take priority */}
-      <View style={styles.contentArea}>
-          {showLyrics ? (
-            // Lyrics List
-            <FlatList
-            ref={flatListRef}
-            data={(showTransliteration && currentSong?.transliteratedLyrics) ? currentSong.transliteratedLyrics : (currentSong?.lyrics || [])}
-            keyExtractor={(item, index) => `${item.timestamp}-${index}`}
-            contentContainerStyle={styles.lyricsContainer}
-            showsVerticalScrollIndicator={false}
-            // Issue 1: Removed scroll triggers so auto-scroll doesn't wake controls
-            scrollEventThrottle={16} 
-            renderItem={({ item, index }) => {
-              // Calculate active state and distance
-              const isActive = currentTime >= item.timestamp && 
-                              (!currentSong?.lyrics[index + 1] || 
-                               currentTime < currentSong.lyrics[index + 1].timestamp);
-
-              // Find the index of the currently active line (inefficient to do meaningful search in renderItem, 
-              // but list is small. Better optimization: pass activeIndex as extraData).
-              // For now, let's use the layout we know:
-              // We need the *actual* active index to calculate distance.
-              // Let's compute it once in the parent scope or use a simpler heuristics.
-              
-              // Actually, we can use the `activeLyricIndex` state if we add it. 
-              // But let's look at `index` vs `currentSong.lyrics.findIndex(...)`.
-              // We already calculate `index` in the useEffect for auto-scroll. 
-              // Let's store that in a state `activeLyricIndex`.
-              
-              // Wait, I can't easily add state here without re-writing the component.
-              // Let's do a quick find inside here (safe for < 100 items).
-              const activeIndex = currentSong?.lyrics.findIndex((line, i) => {
-                  const nextLine = currentSong?.lyrics[i + 1];
-                  return currentTime >= line.timestamp && (!nextLine || currentTime < nextLine.timestamp);
-              }) ?? -1;
-
-              const distance = Math.abs(index - activeIndex);
-              
-              // Define opacity based on distance
-              // Active: 1.0 (Brightest)
-              // Others: 0.5 (Translucent but visible)
-              // This ensures context is always visible while keeping focus on the active line.
-              let opacity = 1.0;
-              if (activeIndex !== -1) {
-                  if (distance === 0) opacity = 1.0;
-                  else if (distance <= 1) opacity = 0.8; // Smooth transition
-                  else opacity = 0.5; // Minimum visibility for all other lines
-              }
-
-              // Hide completely if opacity is 0 to avoid taps/layout shifts if needed?
-              // No, keep layout but hide text
-              if (opacity === 0) {
-                 // Optimization: Don't render text if invisible, but keep height for scroll consistency?
-                 // Or just opacity 0 is fine.
-              }
-
-              return (
-                <Pressable 
-                  onPress={() => handleLyricTap(item.timestamp)}
-                  style={[
-                      styles.lyricLine, 
-                      isActive && styles.activeLyricLine,
-                      { opacity } // Dynamic Opacity
+                    },
+                    {
+                       label: autoHideControls ? 'Disable Auto-Hide' : 'Enable Auto-Hide',
+                       icon: autoHideControls ? 'eye-outline' : 'eye-off-outline',
+                       onPress: () => {
+                           setMenuVisible(false);
+                           setAutoHideControls(!autoHideControls);
+                           setToast({ visible: true, message: `Auto-Hide ${!autoHideControls ? 'Enabled' : 'Disabled'}`, type: 'success' });
+                       }
+                    },
+                    {
+                       label: animateBackground ? 'Disable Animation' : 'Enable Animation',
+                       icon: animateBackground ? 'contrast-outline' : 'contrast',
+                       onPress: () => {
+                           setMenuVisible(false);
+                           setAnimateBackground(!animateBackground);
+                           setToast({ visible: true, message: `Animation ${!animateBackground ? 'Enabled' : 'Disabled'}`, type: 'success' });
+                       }
+                    }
                   ]}
-                  disabled={isLoading}
-                >
-                  <View style={[
-                      styles.lyricTextContainer, 
-                      !item.text.trim() && styles.instrumentalContainer 
-                  ]}>
-                     {!item.text.trim() ? (
-                        <View style={styles.instrumentalContent}>
-                           <Ionicons name="musical-notes" size={24} color={isActive ? "#FFD700" : "rgba(255,255,255,0.6)"} />
-                           <Text style={[styles.instrumentalText, isActive && styles.activeInstrumentalText]}>
-                              • Instrumental •
-                           </Text>
-                        </View>
-                     ) : (
-                        <Text style={[
-                          styles.lyricText,
-                          isActive && styles.activeLyric
-                        ]}>
-                          {item.text}
-                        </Text>
-                     )}
+                />
+                <Pressable onPress={handleMenuPress} style={styles.headerButton}>
+                  <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+                </Pressable>
+              </View>
+           </SafeAreaView>
+         </BlurView>
+       </Animated.View>
+ 
+        <CoverArtSearchScreen 
+           visible={showCoverSearch}
+           initialQuery={`${currentSong?.title} ${currentSong?.artist}`}
+           onClose={() => setShowCoverSearch(false)}
+           onSelect={async (uri) => {
+               setShowCoverSearch(false);
+               if (currentSong) {
+                   // Update Store
+                   const updatedSong = { ...currentSong, coverImageUri: uri };
+                   
+                   // Optimistic update
+                   updateCurrentSong({ coverImageUri: uri }); 
+                   
+                   try {
+                        // Corrected: Pass the full updated song object
+                        await queries.updateSong(updatedSong);
+                        setTimeout(() => {
+                            setToast({ visible: true, message: 'Cover Updated', type: 'success' });
+                        }, 1000); // Increased delay to ensure smooth transition
+                   } catch (e) {
+                       console.error('[NowPlaying] Failed to save cover:', e);
+                       // Revert optimistic update if needed, but user just sees error
+                       setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
+                   }
+               }
+           }}
+        />
+ 
+       {/* Main Content Area - Lyrics take priority */}
+       <View style={styles.contentArea}>
+           {showLyrics ? (
+             // Lyrics List
+             <FlatList
+             ref={flatListRef}
+             data={processedLyrics}
+             keyExtractor={(item, index) => `${item.timestamp}-${index}`}
+             contentContainerStyle={styles.lyricsContainer}
+             showsVerticalScrollIndicator={false}
+             // Issue 1: Removed scroll triggers so auto-scroll doesn't wake controls
+             scrollEventThrottle={16} 
+             onScroll={handleScroll}
+             // ✅ Handle Manual Scroll Interaction (Pause Auto-Scroll)
+             // Enabled for BOTH Linear and Synced to prevent fighting
+             onScrollBeginDrag={() => { 
+                isUserScrolling.current = true;
+                if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+             }}
+             onScrollEndDrag={() => { 
+                // Only start timer if NO momentum is expected
+                scrollTimeoutRef.current = setTimeout(() => { 
+                    isUserScrolling.current = false; 
+                }, 4000); 
+             }}
+             onMomentumScrollBegin={() => { 
+                isUserScrolling.current = true; 
+                if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+             }}
+             onMomentumScrollEnd={() => { 
+                scrollTimeoutRef.current = setTimeout(() => { 
+                    isUserScrolling.current = false; 
+                }, 4000); 
+             }}
+             renderItem={({ item, index }) => {
+               const activeIndex = activeLyricIndex;
+               const distance = Math.abs(index - activeIndex);
+               const isGlowing = distance === 0;
+               let opacity = 1.0;
+
+               // --- SPLIT LOGIC STATES ---
+               if (isLinear) {
+                  // [LINEAR STATE] - Teleprompter Mode
+                  // Focus purely on the center line
+                  if (activeIndex !== -1) {
+                      if (distance === 0) opacity = 1.0;
+                      else opacity = 0.5; 
+                  }
+               } else {
+                  // [SYNCED STATE] - Karaoke Mode
+                  // Focus on active line, but maybe keep it distinct?
+                  // User requested "only currently active... highlighted" (active=1.0, others=0.5)
+                  if (activeIndex !== -1) {
+                      if (distance === 0) opacity = 1.0;
+                      else opacity = 0.5; // Single line focus
+                  }
+               }
+
+               // Hide completely if opacity is 0 
+               if (opacity === 0) {
+                   // Optimization
+               }
+     
+               return (
+                 <Pressable 
+                   onPress={() => !isLinear && handleLyricTap(item.timestamp)}
+                   style={[
+                       styles.lyricLine, 
+                       isGlowing && styles.activeLyricLine,
+                       { opacity } // Dynamic Opacity
+                      ]}
+                      disabled={isLoading || isLinear}
+                    >
+                      <View style={[
+                          styles.lyricTextContainer, 
+                          !item.text.trim() && styles.instrumentalContainer 
+                      ]}>
+                         {!item.text.trim() ? (
+                            <View style={styles.instrumentalContent}>
+                               <InstrumentalWaveform active={isGlowing} />
+                            </View>
+                         ) : (
+                            <Text style={[
+                              styles.lyricText,
+                              isGlowing && styles.activeLyric
+                            ]}>
+                              {item.text}
+                            </Text>
+                         )}
                   </View>
                 </Pressable>
               );
@@ -513,6 +695,9 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
             }
             ListFooterComponent={<View style={{ height: 200 }} />} // Space at bottom
+            onContentSizeChange={(w, h) => {
+                contentHeightRef.current = h;
+            }}
             onScrollToIndexFailed={() => {}}
           />
           ) : (
@@ -530,78 +715,108 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* Issue 4: Dynamic Island Bottom Controls */}
       <Animated.View style={[styles.bottomControlsContainer, animatedStyle]} pointerEvents={controlsVisible ? 'auto' : 'none'}>
-          {/* 3-Layer Background Stack (Dynamic Island Style) */}
-          <View style={styles.bottomControlsPill}>
-            {/* Layer 1: Blurred Cover Art */}
-            {currentSong?.coverImageUri &&  (
-              <Image 
-                source={{ uri: currentSong.coverImageUri }} 
-                style={StyleSheet.absoluteFill}
-                blurRadius={40}
-              />
-            )}
-            
-            {/* Layer 2: Vignette Gradient */}
-            <LinearGradient
-              colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
-              start={{x: 0, y: 0}}
-              end={{x: 0, y: 1}}
+          {/* 3-Layer Background Stack (Dynamic Island Style) - Replaced with Real BlurView */}
+          <View style={[styles.bottomControlsPill, { backgroundColor: '#181818' }]}>
+
+             
+             {/* Dynamic Island Body - Blurred Album Art Color */}
+             {currentSong?.coverImageUri && (
+                <Image 
+                  source={{ uri: currentSong.coverImageUri }} 
+                  style={[StyleSheet.absoluteFill, { opacity: 0.5 }]} 
+                  blurRadius={50}
+                />
+             )}
+
+             {/* Dark Gradient Overlay for readability & depth */}
+             <LinearGradient
+              colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.7)']}
               style={StyleSheet.absoluteFill}
-            />
-            
-            {/* Layer 3: Dark Overlay */}
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+             />
             
           {/* Content */}
-            <View style={styles.bottomControlsContent}>
-              {/* Mini Info (Art + Title) */}
-              <View style={styles.miniInfo}>
-                 <Pressable onLongPress={() => setShowCoverSearch(true)}>
-                     {currentSong?.coverImageUri ? (
-                        <Image source={{ uri: currentSong.coverImageUri }} style={styles.miniCover} />
-                     ) : (
-                        <View style={[styles.miniCover, { backgroundColor: '#333' }]} />
-                     )}
-                 </Pressable>
-                 <View style={{flex: 1, marginLeft: 12}}>
-                     <Text style={styles.miniTitle} numberOfLines={1}>{currentSong?.title}</Text>
-                     <Text style={styles.miniArtist} numberOfLines={1}>{currentSong?.artist}</Text>
-                 </View>
+             {/* Content */}
+             <View style={styles.bottomControlsContent}>
+               
+               {/* 0. Top Right Menu (Three Dots) - Absolute Positioned */}
+               <View style={{ position: 'absolute', top: 15, right: 20, zIndex: 10 }}>
+                  <Pressable onPress={() => setShowLyrics(!showLyrics)} style={{ padding: 4 }}>
+                    <Ionicons name="ellipsis-horizontal" size={24} color="rgba(255,255,255,0.6)" />
+                  </Pressable>
+               </View>
 
-                 {/* Issue 5: Eye Icon Toggle - Moved here */}
-                 <Pressable onPress={() => setShowLyrics(!showLyrics)} style={{ padding: 8 }}>
-                   <Ionicons name={showLyrics ? 'eye-outline' : 'eye-off-outline'} size={24} color="rgba(255,255,255,0.7)" />
-                 </Pressable>
-              </View>
-    
-              {/* Scrubber */}
-              <View style={{ marginVertical: 10 }}>
-                 <Scrubber 
-                    currentTime={currentTime}
-                    duration={player?.duration || 0}
-                    onSeek={handleScrub}
-                 />
-              </View>
-              
-              {/* Main Controls - Centered */}
-              <View style={styles.controls}>
-                 <Pressable onPress={skipBackward} style={styles.controlBtn}>
-                   <Ionicons name="play-back" size={30} color="#fff" />
-                 </Pressable>
-                 
-                 <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
-                   <Ionicons 
-                     name={player?.playing ? 'pause' : 'play'} 
-                     size={40} 
-                     color="#000"
-                   />
-                 </Pressable>
-                 
-                 <Pressable onPress={skipForward} style={styles.controlBtn}>
-                   <Ionicons name="play-forward" size={30} color="#fff" />
-                 </Pressable>
-              </View>
-            </View>
+               {/* 1. Main Controls - Top */}
+               <View style={styles.controls}>
+                  <Pressable onPress={skipBackward} style={styles.controlBtn}>
+                    <Ionicons name="play-back" size={24} color="#fff" /> 
+                  </Pressable>
+                  
+                  <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
+                    <Ionicons 
+                      name={player?.playing ? 'pause' : 'play'} 
+                      size={40} 
+                      color="#000"
+                    />
+                  </Pressable>
+                  
+                  <Pressable onPress={skipForward} style={styles.controlBtn}>
+                    <Ionicons name="play-forward" size={24} color="#fff" /> 
+                  </Pressable>
+               </View>
+
+               {/* 2. Scrubber - Middle */}
+               <View style={{ marginVertical: 8 }}> 
+                  <Scrubber 
+                     currentTime={currentTime}
+                     duration={player?.duration || 0}
+                     onSeek={handleScrub}
+                  />
+               </View>
+
+               {/* 3. Mini Info (Title + Artist) - Bottom & Centered (No Cover) */}
+                <View style={[styles.miniInfo, { paddingHorizontal: 40 }]}>
+                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', position: 'relative' }}>
+                       <View style={{ flex: 1, alignItems: 'center' }}>
+                           <Text style={styles.miniTitle} numberOfLines={1}>{currentSong?.title}</Text>
+                           <Text style={styles.miniArtist} numberOfLines={1}>{currentSong?.artist}</Text>
+                       </View>
+                       
+                       <Pressable 
+                         onPress={() => currentSong && toggleLike(currentSong.id)}
+                         style={({ pressed }) => [
+                           { position: 'absolute', right: -25 },
+                           pressed && { transform: [{ scale: 1.4 }] }
+                         ]}
+                         hitSlop={15}
+                       >
+                         <View style={[
+                           styles.heartGlow,
+                           {
+                             shadowColor: (isDynamicTheme && currentSong?.coverImageUri) 
+                               ? '#FFD700' // Vibrant Dynamic Fallback (Gold)
+                               : getGradientColors(currentSong?.gradientId || 'aurora')[1],
+                             shadowOpacity: currentSong?.isLiked ? 1 : 0.4,
+                             shadowRadius: currentSong?.isLiked ? 20 : 5,
+                             elevation: currentSong?.isLiked ? 12 : 2,
+                             backgroundColor: currentSong?.isLiked 
+                               ? (isDynamicTheme && currentSong?.coverImageUri ? 'rgba(255, 215, 0, 0.2)' : `${getGradientColors(currentSong?.gradientId || 'aurora')[1]}33`)
+                               : 'transparent',
+                             borderRadius: 22,
+                             padding: 6,
+                           }
+                         ]}>
+                           <Ionicons 
+                             name={currentSong?.isLiked ? "heart" : "heart-outline"} 
+                             size={30} 
+                             color={currentSong?.isLiked 
+                               ? ((isDynamicTheme && currentSong?.coverImageUri) ? '#FFD700' : getGradientColors(currentSong?.gradientId || 'aurora')[1])
+                               : "rgba(255,255,255,0.7)"} 
+                           />
+                         </View>
+                       </Pressable>
+                   </View>
+                </View>
+             </View>
           </View>
       </Animated.View>
     </View>
@@ -704,46 +919,51 @@ const styles = StyleSheet.create({
   activeLyric: {
     color: '#fff',
     fontSize: 28, // Pop out
-    textShadowColor: 'rgba(255, 255, 255, 0.6)',
+    textShadowColor: 'rgba(255, 255, 255, 0.9)', // Stronger glow
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
+    textShadowRadius: 20, // Wider glow
   },
 
 
   miniInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 6, // Lift text up a bit
+    marginTop: 5,    
   },
   miniCover: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
+    width: 40, // Smaller cover
+    height: 40,
+    borderRadius: 6,
     backgroundColor: '#333',
   },
   miniTitle: {
-    fontSize: 18,
+    fontSize: 16, // Smaller text
     fontWeight: '700',
     color: '#fff',
   },
   miniArtist: {
-    fontSize: 14,
+    fontSize: 12, // Smaller text
     color: '#888',
   },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center', // Changed for center alignment
+    justifyContent: 'center', 
     paddingHorizontal: 20,
-    marginTop: 10,
-    gap: 40, // Space out controls
+    marginTop: 5,   // Reduced top margin
+    gap: 25,        // Tighter gap
+  },
+  heartGlow: {
+    padding: 4,
+    shadowOffset: { width: 0, height: 0 },
   },
   controlBtn: {
-     padding: 10,
+     padding: 8,    // Smaller padding
   },
   playBtnLarge: {
-     width: 70,
-     height: 70,
+     width: 65,     // Slightly smaller but still prominent
+     height: 65,
      borderRadius: 35,
      backgroundColor: '#fff',
      justifyContent: 'center',
@@ -751,7 +971,7 @@ const styles = StyleSheet.create({
   },
   instrumentalContainer: {
     paddingVertical: 10,
-    alignItems: 'center',
+    alignItems: 'flex-start', 
     justifyContent: 'center',
   },
   instrumentalContent: {
@@ -767,7 +987,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   activeInstrumentalText: {
-    color: '#FFD700', // Gold for active
+    color: '#FFD700', 
     opacity: 1,
     textShadowColor: 'rgba(255, 215, 0, 0.5)',
     textShadowOffset: { width: 0, height: 0 },
@@ -786,26 +1006,30 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
   bottomControlsPill: {
-    marginHorizontal: 10,
-    marginBottom: 10,
-    borderRadius: 40,
+    marginHorizontal: 0, 
+    marginBottom: 0,     
+    borderTopLeftRadius: 25, // Slightly sharper
+    borderTopRightRadius: 25,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 0, 
   },
   bottomControlsContent: {
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingVertical: 15, // Reduced vertical padding
   },
   // Issue 6: Vinyl container
   vinylContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 240, // Shift center point upwards to avoid overlap with bottom controls
+    paddingBottom: 200, // Adjusted for smaller controls
   },
 });
 

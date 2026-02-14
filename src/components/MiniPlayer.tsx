@@ -29,9 +29,12 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MiniPlayer: React.FC = () => {
   const player = usePlayer();
-  const { currentSong, showTransliteration } = usePlayerStore();
+  const { currentSong, showTransliteration, loadedAudioId, setLoadedAudioId, hideMiniPlayer } = usePlayerStore();
   const { miniPlayerStyle } = useSettingsStore();
   const navigation = useNavigation();
+  
+  // Use store instead of navigation state to avoid root-level crashes
+  const isNowPlaying = hideMiniPlayer;
   
   const [expanded, setExpanded] = useState(false);
   
@@ -61,6 +64,27 @@ const MiniPlayer: React.FC = () => {
     }, 250);
     return () => clearInterval(interval);
   }, [player]);
+
+  // Audio Sync Logic: Auto-load song if it changes in the store
+  useEffect(() => {
+    const syncAudio = async () => {
+      if (!currentSong || !player) return;
+      
+      // If the player doesn't have this audio loaded, load it
+      if (loadedAudioId !== currentSong.id && currentSong.audioUri) {
+        try {
+          console.log('[MiniPlayer] Syncing audio for:', currentSong.title);
+          await player.replace(currentSong.audioUri);
+          setLoadedAudioId(currentSong.id);
+          player.play();
+        } catch (error) {
+          console.error('[MiniPlayer] Failed to sync audio:', error);
+        }
+      }
+    };
+    
+    syncAudio();
+  }, [currentSong?.id, player]);
 
   // Handle Rotation
   useEffect(() => {
@@ -163,7 +187,7 @@ const MiniPlayer: React.FC = () => {
     }
   };
   
-  if (!currentSong) return null;
+  if (!currentSong || isNowPlaying) return null;
   
   return (
     <View style={[

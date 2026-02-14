@@ -38,7 +38,7 @@ export const LrcLibService = {
       console.log('[LrcLibService] Searching LRCLIB:', searchUrl);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
       
       const response = await fetch(searchUrl, {
         signal: controller.signal,
@@ -79,7 +79,7 @@ export const LrcLibService = {
       console.log('[LrcLibService] Getting lyrics from:', url);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
       
       const response = await fetch(url, {
         signal: controller.signal,
@@ -106,32 +106,54 @@ export const LrcLibService = {
   /**
    * Parse LRC format string into LyricLine[]
    */
-  parseLrc: (lrcContent: string): LyricLine[] => {
+  parseLrc: (lrcContent: string, duration: number = 180): LyricLine[] => {
     if (!lrcContent) return [];
     
     const lines = lrcContent.split('\n');
     const result: LyricLine[] = [];
     const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
 
-    lines.forEach((line, index) => {
-      const match = line.match(timeRegex);
-      if (match) {
-        const minutes = parseInt(match[1], 10);
-        const seconds = parseInt(match[2], 10);
-        const milliseconds = parseInt(match[3].padEnd(3, '0'), 10); // Handle 2 or 3 digit ms
-        const timestamp = minutes * 60 + seconds + milliseconds / 1000;
-        const text = line.replace(timeRegex, '').trim();
+    const hasTimestamps = lines.some(line => timeRegex.test(line));
 
-        if (text) {
-          result.push({
-            id: undefined, // Generated later or by DB
-            timestamp,
-            text,
-            lineOrder: index // Temporary order
-          });
+    // Ensure valid duration for estimation (prevent 0 timestamps)
+    const safeDuration = duration > 0 ? duration : 180;
+
+    if (hasTimestamps) {
+        lines.forEach((line, index) => {
+          const match = line.match(timeRegex);
+          if (match) {
+            const minutes = parseInt(match[1], 10);
+            const seconds = parseInt(match[2], 10);
+            const milliseconds = parseInt(match[3].padEnd(3, '0'), 10); // Handle 2 or 3 digit ms
+            const timestamp = minutes * 60 + seconds + milliseconds / 1000;
+            const text = line.replace(timeRegex, '').trim();
+
+            if (text) {
+              result.push({
+                id: undefined, // Generated later or by DB
+                timestamp,
+                text,
+                lineOrder: index // Temporary order
+              });
+            }
+          }
+        });
+    } else {
+        // PLAIN TEXT FALLBACK
+        const meaningfulLines = lines.map(l => l.trim()).filter(l => l.length > 0);
+        const totalLines = meaningfulLines.length;
+        if (totalLines > 0) {
+            const timePerLine = safeDuration / totalLines;
+            meaningfulLines.forEach((text, index) => {
+                result.push({
+                    id: undefined,
+                    timestamp: index * timePerLine,
+                    text,
+                    lineOrder: index
+                });
+            });
         }
-      }
-    });
+    }
     
     // Re-index line orders
     return result.map((line, idx) => ({ ...line, lineOrder: idx }));

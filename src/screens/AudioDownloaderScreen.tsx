@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Toast } from '../components/Toast';
 import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
 import { UnifiedSong } from '../types/song';
+import { usePlayerStore } from '../store/playerStore';
 
 import { QualitySelector } from '../components/QualitySelector';
 import { Audio } from 'expo-av';
@@ -35,7 +36,14 @@ export const AudioDownloaderScreen = ({ navigation, route }: any) => {
     
     // stageSong now accepts UnifiedSong from race engine
     const { staging, stageSong, updateSelection, finalizeDownload, togglePreview, isPlaying } = useSongStaging();
+    const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
     const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
+    
+    // Visibility Management: Hide MiniPlayer when Downloader is open
+    useEffect(() => {
+        setMiniPlayerHidden(true);
+        return () => setMiniPlayerHidden(false);
+    }, [setMiniPlayerHidden]);
     const [showLyricsModal, setShowLyricsModal] = useState(false);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showCoverSearchModal, setShowCoverSearchModal] = useState(false);
@@ -399,7 +407,12 @@ export const AudioDownloaderScreen = ({ navigation, route }: any) => {
 
                 {/* 3. Lyrics Selection */}
                 <Text style={styles.sectionTitle}>Select Lyrics</Text>
-                {staging.lyricOptions.length > 0 ? (
+                {staging.lyricOptions === null ? (
+                    <View style={styles.lyricsLoadingContainer}>
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                        <Text style={styles.lyricsLoadingText}>Fetching lyrics...</Text>
+                    </View>
+                ) : staging.lyricOptions.length > 0 ? (
                     <View style={styles.lyricsCard}>
                         {staging.lyricOptions.map((opt, idx) => (
                             <View key={idx}>
@@ -425,8 +438,8 @@ export const AudioDownloaderScreen = ({ navigation, route }: any) => {
                     </View>
                 ) : (
                     <View style={styles.lyricsLoadingContainer}>
-                        <ActivityIndicator size="small" color={Colors.primary} />
-                        <Text style={styles.lyricsLoadingText}>Fetching lyrics...</Text>
+                        <Ionicons name="document-text-outline" size={24} color={Colors.textSecondary} />
+                        <Text style={[styles.lyricsLoadingText, { marginLeft: 8 }]}>No lyrics found.</Text>
                     </View>
                 )}
                 

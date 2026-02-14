@@ -42,10 +42,11 @@ class LyricaService {
       
       console.log('[Lyrica] Cleaned - Artist:', cleanArtist, 'Song:', cleanSong);
       
-      // Priority: Synced (fast) > Synced (slow) > Plain text
+      // Priority: Synced (slow) > Synced (fast) > Plain text
+      // User request: "synced slow , then synced fats then plain"
       const strategies = [
-        { timestamps: true, fast: true, label: 'synced-fast' },
         { timestamps: true, fast: false, label: 'synced-slow' },
+        { timestamps: true, fast: true, label: 'synced-fast' },
         { timestamps: false, fast: false, label: 'plain' },
       ];
       
@@ -124,37 +125,68 @@ class LyricaService {
     }
   }
 
-  parseLrc(lrcContent: string): LyricLine[] {
+  parseLrc(lrcContent: string, duration: number = 180): LyricLine[] {
     if (!lrcContent) return [];
     
     const lines = lrcContent.split('\n');
     const result: LyricLine[] = [];
     const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
 
-    lines.forEach((line, index) => {
-      const match = line.match(timeRegex);
-      if (match) {
-        const minutes = parseInt(match[1], 10);
-        const seconds = parseInt(match[2], 10);
-        // Normalize milliseconds: if 2 digits (e.g. 54) -> 540ms, if 3 digits (e.g. 540) -> 540ms
-        const millisecondsStr = match[3].padEnd(3, '0'); 
-        const milliseconds = parseInt(millisecondsStr, 10);
-        
-        const timestamp = minutes * 60 + seconds + milliseconds / 1000;
-        let text = line.replace(timeRegex, '').trim();
+    // Check if ANY line has a timestamp first
+    const hasTimestamps = lines.some(line => timeRegex.test(line));
+    
+    // Ensure valid duration for estimation (prevent 0 timestamps)
+    const safeDuration = duration > 0 ? duration : 180;
 
-        // Convert empty lines to [INSTRUMENTAL]
-        if (!text) {
-          text = '[INSTRUMENTAL]';
-        }
+    if (hasTimestamps) {
+        // ... (standard parsing)
+        // Standard LRC Parsing
+        lines.forEach((line, index) => {
+          const match = line.match(timeRegex);
+          if (match) {
+            const minutes = parseInt(match[1], 10);
+            const seconds = parseInt(match[2], 10);
+            // Normalize milliseconds: if 2 digits (e.g. 54) -> 540ms, if 3 digits (e.g. 540) -> 540ms
+            const millisecondsStr = match[3].padEnd(3, '0'); 
+            const milliseconds = parseInt(millisecondsStr, 10);
+            
+            const timestamp = minutes * 60 + seconds + milliseconds / 1000;
+            let text = line.replace(timeRegex, '').trim();
 
-        result.push({
-          timestamp,
-          text,
-          lineOrder: index,
+            // Convert empty lines to [INSTRUMENTAL]
+            if (!text) {
+              text = '[INSTRUMENTAL]';
+            }
+
+            result.push({
+              timestamp,
+              text,
+              lineOrder: index,
+            });
+          }
         });
-      }
-    });
+    } else {
+        // PLAIN TEXT AUTO-SCROLL LOGIC (Teleprompter Mode)
+        // Distribute lines evenly across duration
+        console.log(`[Lyrica] Parsing Plain Text (${lines.length} lines) over ${duration}s`);
+        
+        // Filter out empty lines to avoid gaps
+        const meaningfulLines = lines.map(l => l.trim()).filter(l => l.length > 0);
+        const totalLines = meaningfulLines.length;
+        
+        if (totalLines > 0) {
+            const timePerLine = safeDuration / totalLines;
+            
+            meaningfulLines.forEach((text, index) => {
+                result.push({
+                    timestamp: index * timePerLine,
+                    text: text,
+                    lineOrder: index,
+                    // Mark as 'estimated' if we had a flag, but for now standard format works
+                });
+            });
+        }
+    }
     
     return result.map((line, idx) => ({ ...line, lineOrder: idx }));
   }

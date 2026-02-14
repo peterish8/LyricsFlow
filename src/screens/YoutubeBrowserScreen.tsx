@@ -14,7 +14,7 @@
  * the "api: false" restriction that blocks external API calls.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import {
   StatusBar,
   Alert,
 } from 'react-native';
+import { usePlayerStore } from '../store/playerStore';
 import { WebView, WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -157,6 +158,14 @@ interface VideoInfo {
 
 // ─── Component ──────────────────────────────────────────────────────
 export const YoutubeBrowserScreen = ({ navigation }: any) => {
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  
+  // Visibility Management: Hide MiniPlayer when Youtube Browser is open
+  useEffect(() => {
+    setMiniPlayerHidden(true);
+    return () => setMiniPlayerHidden(false);
+  }, [setMiniPlayerHidden]);
+
   const webViewRef = useRef<WebView>(null);
   const [currentUrl, setCurrentUrl] = useState(YOUTUBE_URL);
   const [isVideoPage, setIsVideoPage] = useState(false);

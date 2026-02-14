@@ -25,6 +25,7 @@ interface SongsState {
   setCurrentSong: (song: Song | null) => void;
   setSortBy: (sort: SortOption) => void;
   searchSongs: (query: string) => Promise<Song[]>;
+  toggleLike: (songId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -148,6 +149,35 @@ export const useSongsStore = create<SongsState>((set, get) => ({
     } catch (error) {
       console.error('Search failed:', error);
       return [];
+    }
+  },
+
+  // Toggle like status
+  toggleLike: async (songId: string) => {
+    try {
+      const song = await queries.getSongById(songId);
+      if (song) {
+        const updatedSong = { ...song, isLiked: !song.isLiked };
+        await queries.updateSong(updatedSong);
+        
+        // Update local state for immediate feedback
+        set((state) => ({
+          songs: state.songs.map(s => s.id === songId ? updatedSong : s),
+          currentSong: state.currentSong?.id === songId ? updatedSong : state.currentSong
+        }));
+
+        // ✅ IMPORTANT: Sync with playerStore so NowPlayingScreen (which uses playerStore) updates immediately
+        const { usePlayerStore } = await import('./playerStore');
+        const playerState = usePlayerStore.getState();
+        if (playerState.currentSong?.id === songId) {
+          playerState.updateCurrentSong({ isLiked: updatedSong.isLiked });
+        }
+        
+        console.log(`[STORE] Toggled like for ${song.title}: ${updatedSong.isLiked}`);
+      }
+    } catch (error) {
+      console.error('[STORE] Toggle like error:', error);
+      set({ error: error instanceof Error ? error.message : 'Failed to toggle like' });
     }
   },
   

@@ -19,8 +19,10 @@ interface SongCardProps {
   gradientId: string;
   coverImageUri?: string;
   duration?: number;
+  isLiked?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
+  onLikePress?: () => void;
 }
 
 export const SongCard: React.FC<SongCardProps> = memo(({
@@ -30,10 +32,13 @@ export const SongCard: React.FC<SongCardProps> = memo(({
   gradientId,
   coverImageUri,
   duration,
+  isLiked,
   onPress,
   onLongPress,
+  onLikePress,
 }) => {
   const gradient = getGradientById(gradientId) ?? GRADIENTS[0];
+  const glowColor = gradient.colors[1] || gradient.colors[0]; // Use a primary color from gradient for glow
   const subtitle = formatSongSubtitle(artist, album);
   const durationText = duration ? `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}` : '';
 
@@ -59,6 +64,34 @@ export const SongCard: React.FC<SongCardProps> = memo(({
           </View>
         )}
         <View style={styles.thumbnailOverlay} />
+        
+        {/* Heart Icon Overlay */}
+        <Pressable 
+          style={({ pressed }) => [
+            styles.heartButton,
+            pressed && { transform: [{ scale: 1.2 }] }
+          ]}
+          onPress={(e) => {
+            e.stopPropagation();
+            onLikePress?.();
+          }}
+        >
+          <View style={[
+            styles.heartGlow,
+            { 
+              shadowColor: glowColor,
+              shadowOpacity: isLiked ? 0.8 : 0.4,
+              shadowRadius: isLiked ? 8 : 2,
+              elevation: isLiked ? 5 : 2,
+            }
+          ]}>
+            <Ionicons 
+              name={isLiked ? "heart" : "heart-outline"} 
+              size={22} 
+              color={isLiked ? "#fff" : "rgba(255,255,255,0.7)"} 
+            />
+          </View>
+        </Pressable>
       </View>
 
       {/* Song Info */}
@@ -124,6 +157,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textSecondary,
     marginTop: 2,
+  },
+  heartButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 5,
+  },
+  heartGlow: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 15,
+    padding: 4,
+    // Glow effect
+    shadowOffset: { width: 0, height: 0 },
   },
 });
 

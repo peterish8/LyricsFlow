@@ -162,8 +162,8 @@ export const insertSong = async (song: Song): Promise<void> => {
     log(`Inserting song: ${song.id}`);
     
     const sql = `
-      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked)
-      VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'titlecase'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, ${song.isLiked ? 1 : 0});
+      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked, cover_image_uri)
+      VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'titlecase'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, ${song.isLiked ? 1 : 0}, ${song.coverImageUri ? `'${esc(song.coverImageUri)}'` : 'NULL'});
     `;
     
     await db.execAsync(sql);

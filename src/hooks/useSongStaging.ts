@@ -7,6 +7,7 @@ import { LyricaResult, lyricaService } from '../services/LyricaService';
 import { ImageSearchService } from '../services/ImageSearchService';
 import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
 import { UnifiedSong } from '../types/song';
+import { MultiSourceLyricsService } from '../services/MultiSourceLyricsService';
 
 // AudioOption interface (was previously from AudioExtractorService)
 export interface AudioOption {
@@ -25,7 +26,7 @@ export interface StagingSong {
   qualityOptions: AudioOption[];
   selectedQuality?: AudioOption; 
   coverOptions: string[]; 
-  lyricOptions: LyricaResult[];
+  lyricOptions: LyricaResult[] | null; // null = loading, [] = empty
   selectedCoverUri?: string;
   selectedLyrics?: string;
   status: 'idle' | 'searching' | 'ready' | 'downloading' | 'completed' | 'error';
@@ -169,7 +170,7 @@ export const useSongStaging = () => {
         selectedCoverUri: selectedCover,
 
         // Lyrics - empty initially, will load async
-        lyricOptions: [],
+        lyricOptions: null, // null indicates "fetching"
         selectedLyrics: undefined,
 
         status: 'ready', // INSTANTLY READY
@@ -178,30 +179,34 @@ export const useSongStaging = () => {
     
     console.log(`[Staging] ✓ Staged instantly with iTunes art: ${song.title}`);
 
-    // 4. Fetch lyrics in background (async, non-blocking)
+    // 4. Fetch lyrics in background (Parallel Sources)
     let isCancelled = false;
     const timeoutId = setTimeout(async () => {
         if (isCancelled) return;
         
         try {
-            console.log('[Staging] 🔄 Fetching lyrics in background...');
-            const lyricData = await lyricaService.fetchLyrics(song.title, song.artist);
+            console.log('[Staging-V2] 🔄 Fetching lyrics in background (Multi-Source)...');
             
-            console.log('[Staging] Lyrics result:', lyricData ? 'Found' : 'Not found');
+            // Using Static Import now
+            const lyricResults = await MultiSourceLyricsService.fetchLyricsParallel(song.title, song.artist, song.duration);
+            
+            console.log(`[Staging-V2] Lyrics found: ${lyricResults.length} options`);
             
             if (isCancelled) return;
             
-            if (lyricData && lyricData.lyrics) {
+            if (lyricResults.length > 0) {
                 setStaging(prev => {
                     if (!prev || isCancelled) {
                         console.log('[Staging] Skipping lyrics update - staging cleared');
                         return prev;
                     }
-                    console.log('[Staging] ✓ Updating staging with lyrics');
+                    console.log('[Staging] ✓ Updating staging with multiple lyric options');
+                    
+                    // Default to first option (usually Lyrica/Synced)
                     return {
                         ...prev,
-                        lyricOptions: [lyricData],
-                        selectedLyrics: lyricData.lyrics
+                        lyricOptions: lyricResults,
+                        selectedLyrics: lyricResults[0].lyrics
                     };
                 });
                 console.log('[Staging] ✓ Lyrics loaded and applied!');

@@ -17,7 +17,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { TabScreenProps } from '../types/navigation';
+import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { AuroraHeader, GradientPicker } from '../components';
@@ -45,6 +47,14 @@ const SettingsScreen: React.FC<Props> = () => {
   const [availableAudioFiles, setAvailableAudioFiles] = React.useState<any[]>([]);
   const [selectedFiles, setSelectedFiles] = React.useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = React.useState('');
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+
+  // Visibility Management: Hide MiniPlayer when Settings is focus
+  useFocusEffect(
+    React.useCallback(() => {
+      setMiniPlayerHidden(true);
+    }, [setMiniPlayerHidden])
+  );
 
   // Filter audio files based on search query
   const filteredAudioFiles = React.useMemo(() => {

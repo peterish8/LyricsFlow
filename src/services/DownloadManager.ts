@@ -92,7 +92,7 @@ class DownloadManager {
                 playCount: 0,
                 dateCreated: new Date().toISOString(),
                 dateModified: new Date().toISOString(),
-                lyrics: staging.selectedLyrics ? lyricaService.parseLrc(staging.selectedLyrics) : [],
+                lyrics: staging.selectedLyrics ? lyricaService.parseLrc(staging.selectedLyrics, staging.duration) : [],
                 gradientId: Math.floor(Math.random() * 5).toString() // Random gradient
             };
 

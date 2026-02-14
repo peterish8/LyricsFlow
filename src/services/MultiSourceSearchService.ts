@@ -65,15 +65,19 @@ async function getSoundCloudClientId(): Promise<string | null> {
  * LAYER 1: JIOSAAVN (The Official Source)
  * ============================================================================
  */
-async function searchSaavn(query: string): Promise<UnifiedSong[]> {
-  for (const baseUrl of SAAVN_MIRRORS) {
+const USER_SAAVN_API = 'https://jiosaavn-api-byprats.vercel.app/api';
+
+/**
+ * Helper: Fetch from a SINGLE Saavn Mirror
+ */
+async function fetchSaavnResults(baseUrl: string, query: string): Promise<UnifiedSong[]> {
     const controller = new AbortController();
-    // Give free Vercel servers 15 seconds to wake from cold start
     const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
     try {
-      console.log(`[Saavn] Pinging ${baseUrl} (Timeout: 15s via AbortController)...`);
-      const response = await fetch(`${baseUrl}/search/songs?query=${encodeURIComponent(query)}`, {
+      console.log(`[Saavn] Pinging ${baseUrl}...`);
+      // Issue: User wants more results (30 instead of 10)
+      const response = await fetch(`${baseUrl}/search/songs?query=${encodeURIComponent(query)}&limit=30&n=30`, {
         headers: BROWSER_HEADERS,
         signal: controller.signal
       });
@@ -82,15 +86,12 @@ async function searchSaavn(query: string): Promise<UnifiedSong[]> {
 
       if (!response.ok) {
         console.warn(`[Saavn] Mirror ${baseUrl} returned status ${response.status}`);
-        continue; 
+        return [];
       }
 
       const json = await response.json();
       const results = json.data?.results || [];
-      if (results.length === 0) {
-          console.warn(`[Saavn] Mirror ${baseUrl} returned 0 results.`);
-          continue;
-      }
+      if (results.length === 0) return [];
 
       return results.map((song: any) => {
         const urlArray = song.downloadUrl || song.media_url || [];
@@ -113,9 +114,48 @@ async function searchSaavn(query: string): Promise<UnifiedSong[]> {
     } catch (error: any) {
       clearTimeout(timeoutId);
       console.warn(`[Saavn] Mirror ${baseUrl} failed: ${error.message}`);
+      return [];
     }
+}
+
+/**
+ * ============================================================================
+ * LAYER 1: JIOSAAVN (The Official Source)
+ * Parallel Strategy: Custom API + Public Mirror Pool
+ * ============================================================================
+ */
+async function searchSaavn(query: string): Promise<UnifiedSong[]> {
+  // 1. Start User's Custom API Search
+  const userApiPromise = fetchSaavnResults(USER_SAAVN_API, query)
+      .then(res => {
+          if (res.length > 0) console.log(`[Saavn] ✅ Custom API found ${res.length} songs`);
+          return res;
+      });
+
+  // 2. Start Public Mirror Pool Search (Sequential Failover)
+  const publicPoolPromise = (async () => {
+      for (const baseUrl of SAAVN_MIRRORS) {
+          const results = await fetchSaavnResults(baseUrl, query);
+          if (results.length > 0) {
+              console.log(`[Saavn] ✅ Public Mirror (${baseUrl}) found ${results.length} songs`);
+              return results;
+          }
+      }
+      return [];
+  })();
+
+  // 3. Wait for BOTH to finish (or fail) and merge
+  const [userResults, publicResults] = await Promise.all([userApiPromise, publicPoolPromise]);
+  
+  // 4. Merge & Deduplicate (User results take priority on ID collision)
+  const combined = [...publicResults, ...userResults];
+  const uniqueSongs = Array.from(new Map(combined.map(song => [song.id, song])).values());
+  
+  if (uniqueSongs.length > 0) {
+      console.log(`[Saavn] Layer 1 Total: ${uniqueSongs.length} unique songs`);
   }
-  return []; // Trigger Layer 2 if all mirrors fail
+  
+  return uniqueSongs;
 }
 
 /**

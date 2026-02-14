@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   StyleSheet,
   View,
@@ -39,10 +40,29 @@ import * as ImagePicker from 'expo-image-picker';
 type Props = TabScreenProps<'Library'>;
 
 const LibraryScreen: React.FC<Props> = ({ navigation }) => {
-  const { songs, fetchSongs, setCurrentSong, updateSong, currentSong: libraryCurrentSong, getSong, deleteSong } = useSongsStore();
-  const { currentSong: playerCurrentSong } = usePlayerStore(); // Get live player song
+  const songs = useSongsStore(state => state.songs);
+  const fetchSongs = useSongsStore(state => state.fetchSongs);
+  const setCurrentSong = useSongsStore(state => state.setCurrentSong);
+  const updateSong = useSongsStore(state => state.updateSong);
+  const libraryCurrentSong = useSongsStore(state => state.currentSong);
+  const getSong = useSongsStore(state => state.getSong);
+  const deleteSong = useSongsStore(state => state.deleteSong);
+  const toggleLike = useSongsStore(state => state.toggleLike);
+  
+  const playerCurrentSong = usePlayerStore(state => state.currentSong);
   const { recentArts, addRecentArt } = useArtHistoryStore();
-  const { libraryBackgroundMode } = useSettingsStore();
+  const libraryBackgroundMode = useSettingsStore(state => state.libraryBackgroundMode);
+  const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
+  const miniPlayerStyle = useSettingsStore(state => state.miniPlayerStyle);
+  const isIsland = miniPlayerStyle === 'island';
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  
+  // Visibility Management: Ensure MiniPlayer is VISIBLE when Home is focused
+  useFocusEffect(
+    useCallback(() => {
+      setMiniPlayerHidden(false);
+    }, [setMiniPlayerHidden])
+  );
   
   // Bottom Sheet State
   const [showBottomSheet, setShowBottomSheet] = React.useState(false);
@@ -135,8 +155,9 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
-  const { playInMiniPlayerOnly, miniPlayerStyle } = useSettingsStore((state) => state);
-  const isIsland = miniPlayerStyle === 'island';
+
+  // Removed Scrollable Header - User prefers icons in "All Songs" section
+
 
   // Removed Scrollable Header - User prefers icons in "All Songs" section
 
@@ -163,22 +184,25 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const handleSongPress = useCallback((song: Song) => {
+    // Check if the song is already the current one in the player
+    const isCurrentlyPlaying = playerCurrentSong?.id === song.id;
+
     if (playInMiniPlayerOnly) {
-      // If tapping the currently playing song, open NowPlayingScreen
-      if (libraryCurrentSong?.id === song.id) {
+      if (isCurrentlyPlaying) {
+        // Second tap on the same song: Open NowPlayingScreen
         navigation.navigate('NowPlaying', { songId: song.id });
       } else {
-        // First tap or different song: Play in mini player (just set current)
+        // First tap or different song: Just start playing in mini player
         setCurrentSong(song);
+        usePlayerStore.getState().loadSong(song.id);
       }
     } else {
       // Default: Always navigate to NowPlayingScreen
-      // Sync with playerStore for MiniPlayer visibility
-      setCurrentSong(song); // Instant UI update (Fixes flash)
+      setCurrentSong(song);
       navigation.navigate('NowPlaying', { songId: song.id });
-      usePlayerStore.getState().loadSong(song.id); // Load audio in background
+      usePlayerStore.getState().loadSong(song.id);
     }
-  }, [navigation, setCurrentSong, playInMiniPlayerOnly, libraryCurrentSong]);
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly, playerCurrentSong?.id]);
 
   const handleSongLongPress = useCallback((song: Song, event?: any) => {
     // Show bottom sheet for cover art options
@@ -363,8 +387,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                             gradientId={song.gradientId}
                             coverImageUri={song.coverImageUri}
                             duration={song.duration}
+                            isLiked={song.isLiked}
                             onPress={() => handleSongPress(song)}
                             onLongPress={() => handleSongLongPress(song, {} as any)}
+                            onLikePress={() => toggleLike(song.id)}
                           />
                         </View>
                       ))}
@@ -660,7 +686,6 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
       
 
       
-      <MiniPlayer />
        {toast && (
            <Toast 
                visible={toast.visible} 

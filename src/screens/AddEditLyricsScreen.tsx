@@ -62,6 +62,13 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const isEditing = !!songId;
 
   const { getSong, addSong, updateSong } = useSongsStore();
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+
+  // Visibility Management: Hide MiniPlayer when Editor is open
+  useEffect(() => {
+    setMiniPlayerHidden(true);
+    return () => setMiniPlayerHidden(false);
+  }, [setMiniPlayerHidden]);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -184,8 +191,8 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       return;
     }
 
-    // Parse and Update
-    let parsedLines = LrcLibService.parseLrc(finalLyrics);
+    // Parse and Update (with estimated timestamps if plain text)
+    let parsedLines = LrcLibService.parseLrc(finalLyrics, result.duration);
     
     // If it was plain text/Genius, convert using helper if no brackets found
     if (result.source === 'Genius' || result.type === 'plain') {

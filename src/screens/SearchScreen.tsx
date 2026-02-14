@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
+import { usePlayerStore } from '../store/playerStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { AuroraHeader, SongCard } from '../components';
 import { Colors } from '../constants/colors';
 import { Song } from '../types/song';
@@ -32,7 +34,12 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
   const [results, setResults] = useState<Song[]>([]);
   const [filterAudio, setFilterAudio] = useState<'all' | 'audio' | 'no-audio'>('all');
   const [filterTimestamp, setFilterTimestamp] = useState<'all' | 'timestamp' | 'no-timestamp'>('all');
-  const { searchSongs, setCurrentSong } = useSongsStore();
+  const searchSongs = useSongsStore(state => state.searchSongs);
+  const setCurrentSong = useSongsStore(state => state.setCurrentSong);
+  const toggleLike = useSongsStore(state => state.toggleLike);
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  const playerCurrentSong = usePlayerStore(state => state.currentSong);
+  const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
 
   const handleSearch = useCallback(async (text: string) => {
     setQuery(text);
@@ -59,6 +66,12 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
     }
   }, [searchSongs, filterAudio, filterTimestamp]);
 
+  // Visibility Management: Hide MiniPlayer when Search is open
+  React.useEffect(() => {
+    setMiniPlayerHidden(true);
+    return () => setMiniPlayerHidden(false);
+  }, [setMiniPlayerHidden]);
+
   // Re-run search when filters change
   React.useEffect(() => {
     if (query.trim().length > 0) {
@@ -80,14 +93,30 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
   }, [handleSearch]);
 
   const handleSongPress = useCallback((song: Song) => {
-    setCurrentSong(song);
     // Also add to history on selection
     setRecentSearches(prev => {
       const newHistory = [song.title, ...prev.filter(q => q !== song.title)];
       return newHistory.slice(0, 8);
     });
-    navigation.navigate('NowPlaying', { songId: song.id });
-  }, [navigation, setCurrentSong]);
+
+    const isCurrentlyPlaying = playerCurrentSong?.id === song.id;
+
+    if (playInMiniPlayerOnly) {
+      if (isCurrentlyPlaying) {
+        // Second tap: Open NowPlayingScreen
+        navigation.navigate('NowPlaying', { songId: song.id });
+      } else {
+        // First tap: Play in mini player
+        setCurrentSong(song);
+        usePlayerStore.getState().loadSong(song.id);
+      }
+    } else {
+      // Default: Always navigate
+      setCurrentSong(song);
+      navigation.navigate('NowPlaying', { songId: song.id });
+      usePlayerStore.getState().loadSong(song.id);
+    }
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly, playerCurrentSong?.id]);
 
   const renderResult = ({ item }: { item: Song }) => {
     const gradient = getGradientById(item.gradientId) || GRADIENTS[0];
@@ -117,6 +146,32 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
             Song • {item.artist || 'Unknown Artist'}
           </Text>
         </View>
+        
+        {/* Heart Toggle */}
+        <Pressable 
+          onPress={(e) => {
+            e.stopPropagation();
+            toggleLike(item.id);
+          }}
+          style={({ pressed }) => [
+            styles.heartGlow,
+            pressed && { transform: [{ scale: 1.2 }] },
+            {
+              shadowColor: getGradientById(item.gradientId)?.colors[1] || '#fff',
+              shadowOpacity: item.isLiked ? 0.8 : 0.3,
+              shadowRadius: item.isLiked ? 8 : 2,
+              elevation: item.isLiked ? 5 : 1,
+            }
+          ]}
+          hitSlop={10}
+        >
+          <Ionicons 
+            name={item.isLiked ? "heart" : "heart-outline"} 
+            size={22} 
+            color={item.isLiked ? "#fff" : "rgba(255,255,255,0.6)"} 
+          />
+        </Pressable>
+
         <Ionicons name="play" size={20} color={Colors.textSecondary} />
       </Pressable>
     );
@@ -356,6 +411,11 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#fff',
+  },
+  heartGlow: {
+    padding: 8,
+    marginRight: 8,
+    shadowOffset: { width: 0, height: 0 },
   },
 });
 

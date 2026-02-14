@@ -7,8 +7,10 @@ import React from 'react';
 import { StyleSheet, View, Text, FlatList, Pressable, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSongsStore } from '../store/songsStore';
+import { usePlayerStore } from '../store/playerStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { AuroraHeader } from '../components';
 import { Colors } from '../constants/colors';
 import { formatTime } from '../utils/formatters';
@@ -17,11 +19,40 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 export const LikedSongsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { songs } = useSongsStore();
+  const songs = useSongsStore(state => state.songs);
+  const setCurrentSong = useSongsStore(state => state.setCurrentSong);
+  const toggleLike = useSongsStore(state => state.toggleLike);
+  const playerCurrentSong = usePlayerStore(state => state.currentSong);
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
+  
   const likedSongs = songs.filter(s => s.isLiked);
 
-  const handleSongPress = (songId: string) => {
-    navigation.navigate('NowPlaying', { songId });
+  // Visibility Management: Hide MiniPlayer when Liked Songs is open
+  useFocusEffect(
+    React.useCallback(() => {
+      setMiniPlayerHidden(true);
+    }, [setMiniPlayerHidden])
+  );
+
+  const handleSongPress = (song: any) => {
+    const isCurrentlyPlaying = playerCurrentSong?.id === song.id;
+
+    if (playInMiniPlayerOnly) {
+      if (isCurrentlyPlaying) {
+        // Second tap: Open NowPlayingScreen
+        navigation.navigate('NowPlaying', { songId: song.id });
+      } else {
+        // First tap: Play in mini player
+        setCurrentSong(song);
+        usePlayerStore.getState().loadSong(song.id);
+      }
+    } else {
+      // Default: Always navigate
+      setCurrentSong(song);
+      navigation.navigate('NowPlaying', { songId: song.id });
+      usePlayerStore.getState().loadSong(song.id);
+    }
   };
 
   return (
@@ -48,7 +79,7 @@ export const LikedSongsScreen: React.FC = () => {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
-              <Pressable style={styles.songItem} onPress={() => handleSongPress(item.id)}>
+              <Pressable style={styles.songItem} onPress={() => handleSongPress(item)}>
                 <View style={styles.thumbnail}>
                   {item.coverImageUri ? (
                     <Image source={{ uri: item.coverImageUri }} style={styles.image} />
@@ -62,6 +93,19 @@ export const LikedSongsScreen: React.FC = () => {
                     {item.artist || 'Unknown Artist'}
                   </Text>
                 </View>
+                
+                {/* Heart Toggle */}
+                <Pressable 
+                  onPress={() => toggleLike(item.id)}
+                  style={({ pressed }) => [
+                    styles.heartButton,
+                    pressed && { transform: [{ scale: 1.2 }] }
+                  ]}
+                  hitSlop={10}
+                >
+                  <Ionicons name="heart" size={24} color="#fff" />
+                </Pressable>
+
                 <Text style={styles.duration}>{formatTime(item.duration)}</Text>
               </Pressable>
             )}
@@ -155,6 +199,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 8,
   },
+  heartButton: {
+    padding: 8,
+    marginRight: 8,
+  }
 });
 
 export default LikedSongsScreen;
