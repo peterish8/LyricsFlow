@@ -8,6 +8,11 @@ interface PlayerState {
   loadedAudioId: string | null; // Tracks what is actually loaded in the player
   showTransliteration: boolean;
   hideMiniPlayer: boolean;
+  // Controls exposed by PlayerContext
+  play: () => void;
+  pause: () => void;
+  seekTo: (position: number) => void;
+  setControls: (controls: { play: () => void; pause: () => void; seekTo: (pos: number) => void }) => void;
   
   loadSong: (songId: string) => Promise<void>;
   setInitialSong: (song: Song) => void;
@@ -15,6 +20,7 @@ interface PlayerState {
   updateCurrentSong: (updates: Partial<Song>) => void;
   toggleShowTransliteration: () => void;
   setMiniPlayerHidden: (hidden: boolean) => void;
+  reset: () => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
@@ -23,6 +29,17 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   loadedAudioId: null,
   showTransliteration: false,
   hideMiniPlayer: false,
+  
+  // Default no-ops
+  play: () => console.warn('Player not initialized'),
+  pause: () => console.warn('Player not initialized'),
+  seekTo: () => console.warn('Player not initialized'),
+  
+  setControls: (controls) => set({ 
+      play: controls.play, 
+      pause: controls.pause, 
+      seekTo: controls.seekTo 
+  }),
   
   loadSong: async (songId: string) => {
     // We need to import the query function. The prompt uses 'queries.getSongById'.
@@ -45,4 +62,6 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   toggleShowTransliteration: () => set((state) => ({ showTransliteration: !state.showTransliteration })),
   
   setMiniPlayerHidden: (hidden: boolean) => set({ hideMiniPlayer: hidden }),
+
+  reset: () => set({ currentSongId: null, currentSong: null, loadedAudioId: null }),
 }));

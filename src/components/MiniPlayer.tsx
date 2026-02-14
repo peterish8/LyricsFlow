@@ -1,16 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import * as GestureHandler from 'react-native-gesture-handler';
+const { Gesture, GestureDetector } = GestureHandler;
 import Animated, { 
   useAnimatedStyle, 
   useSharedValue, 
   withRepeat, 
   withTiming, 
   withSequence,
+  withSpring,
   Easing, 
-  cancelAnimation
+  cancelAnimation,
+  interpolate,
+  Extrapolation,
+  runOnJS
 } from 'react-native-reanimated';
 
 import { usePlayer } from '../contexts/PlayerContext';
@@ -23,13 +29,16 @@ import { getCurrentLineIndex } from '../utils/timestampParser';
 
 const { width } = Dimensions.get('window');
 
+// Create Animated Pressable
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 const MiniPlayer: React.FC = () => {
   const player = usePlayer();
-  const { currentSong, showTransliteration, loadedAudioId, setLoadedAudioId, hideMiniPlayer } = usePlayerStore();
+  const { currentSong, showTransliteration, loadedAudioId, setLoadedAudioId, hideMiniPlayer, setMiniPlayerHidden } = usePlayerStore();
   const { miniPlayerStyle } = useSettingsStore();
   const navigation = useNavigation();
   
@@ -37,15 +46,26 @@ const MiniPlayer: React.FC = () => {
   const isNowPlaying = hideMiniPlayer;
   
   const [expanded, setExpanded] = useState(false);
+  const [lyricExpanded, setLyricExpanded] = useState(false);
+  const [fullLyricExpanded, setFullLyricExpanded] = useState(false);
   
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [progressBarWidth, setProgressBarWidth] = useState(0);
   
-  // Animation value for rotation
+  const flatListRef = useRef<FlatList>(null);
+  const isUserScrolling = useRef(false);
+  const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
+  
+  // Animation values
   const rotation = useSharedValue(0);
+  const expansionProgress = useSharedValue(0); // 0 = collapsed, 1 = tray (190px)
+  const lyricExpansionProgress = useSharedValue(0); // 0 = tray, 1 = half screen
+  const fullExpansionProgress = useSharedValue(0); // 0 = half screen, 1 = full screen (nav-bar level)
   
   const isIsland = miniPlayerStyle === 'island';
+  
+  const screenHeight = Dimensions.get('window').height;
   
   const gradientColors = currentSong?.gradientId 
     ? getGradientColors(currentSong.gradientId) 
@@ -122,6 +142,51 @@ const MiniPlayer: React.FC = () => {
     };
   });
   
+  // Dynamic Island Spring Animation
+  const animatedIslandStyle = useAnimatedStyle(() => {
+    if (!isIsland) return {};
+
+    const currentWidth = interpolate(
+      expansionProgress.value,
+      [0, 1],
+      [width * 0.45, width - 24], // Expand to full width minus margin * 2 (12 + 12)
+      Extrapolation.CLAMP
+    );
+
+    const trayHeight = interpolate(expansionProgress.value, [0, 1], [50, 190], Extrapolation.CLAMP);
+    const halfHeight = screenHeight * 0.5;
+    const fullHeight = screenHeight * 0.9; // Final stage (90% height)
+
+    const currentHeight = interpolate(
+      fullExpansionProgress.value,
+      [0, 1],
+      [
+        interpolate(lyricExpansionProgress.value, [0, 1], [trayHeight, halfHeight], Extrapolation.CLAMP),
+        fullHeight
+      ],
+      Extrapolation.CLAMP
+    );
+    
+    const currentRadius = interpolate(
+      fullExpansionProgress.value,
+      [0, 1],
+      [
+        interpolate(lyricExpansionProgress.value, [0, 1], 
+          [interpolate(expansionProgress.value, [0, 1], [30, 44], Extrapolation.CLAMP), 24], 
+          Extrapolation.CLAMP
+        ),
+        28 // Slightly more rounded again at full screen for aesthetics
+      ],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      width: currentWidth,
+      height: currentHeight,
+      borderRadius: currentRadius,
+    };
+  });
+  
   // Safe progress calculation
   const progress = duration > 0 && !isNaN(currentTime) 
     ? Math.min(currentTime / duration, 1) 
@@ -145,6 +210,33 @@ const MiniPlayer: React.FC = () => {
   const currentLyricText = (currentLyricIndex !== -1 && lyricsToUse?.[currentLyricIndex]) 
     ? lyricsToUse[currentLyricIndex].text 
     : '';
+
+  // Auto-scroll lyrics effect
+  useEffect(() => {
+    if (!isUserScrolling.current && (lyricExpanded || fullLyricExpanded) && currentLyricIndex !== -1 && flatListRef.current && lyricsToUse?.length) {
+        try {
+            flatListRef.current.scrollToIndex({
+                index: currentLyricIndex,
+                animated: true,
+                viewPosition: 0.5
+            });
+        } catch (e) {
+            // Index might not be ready yet
+        }
+    }
+  }, [currentLyricIndex, lyricExpanded, fullLyricExpanded]);
+
+  const handleScrollBegin = () => {
+    isUserScrolling.current = true;
+    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+  };
+
+  const handleScrollEnd = () => {
+    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+    scrollTimeout.current = setTimeout(() => {
+      isUserScrolling.current = false;
+    }, 3000);
+  };
 
   const togglePlay = (e?: any) => {
     e?.stopPropagation();
@@ -175,15 +267,99 @@ const MiniPlayer: React.FC = () => {
       player.seekTo(seekTime);
   };
 
+  const panGesture = Gesture.Pan()
+    .activeOffsetY([-20, 20]) // Require 20px of vertical movement to activate
+    .simultaneousWithExternalGesture()
+    .onUpdate((event: any) => {
+      if (expanded) {
+        if (!lyricExpanded && !fullLyricExpanded) {
+          // Stage 1 (Tray) -> Stage 2 (Half)
+          if (event.translationY > 0) {
+            lyricExpansionProgress.value = Math.min(event.translationY / 200, 1);
+          }
+        } else if (lyricExpanded && !fullLyricExpanded) {
+          // Stage 2 (Half) -> Stage 3 (Full) or back to Stage 1
+          if (event.translationY > 0) {
+            fullExpansionProgress.value = Math.min(event.translationY / 200, 1);
+          } else if (event.translationY < 0) {
+            lyricExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
+          }
+        } else if (fullLyricExpanded) {
+          // Stage 3 (Full) -> Stage 2 (Half)
+          if (event.translationY < 0) {
+            fullExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
+          }
+        }
+      }
+    })
+    .onEnd((event: any) => {
+      if (expanded) {
+        const velocity = event.velocityY;
+        const translation = event.translationY;
+
+        if (!lyricExpanded && !fullLyricExpanded) {
+          // Transition Tray -> Half
+          if (translation > 50 || velocity > 500) {
+            lyricExpansionProgress.value = withSpring(1);
+            runOnJS(setLyricExpanded)(true);
+          } else {
+            lyricExpansionProgress.value = withSpring(0);
+          }
+        } else if (lyricExpanded && !fullLyricExpanded) {
+          // From Half: Go Full or back to Tray
+          if (translation > 50 || velocity > 500) {
+            fullExpansionProgress.value = withSpring(1);
+            runOnJS(setFullLyricExpanded)(true);
+          } else if (translation < -50 || velocity < -500) {
+            lyricExpansionProgress.value = withSpring(0);
+            runOnJS(setLyricExpanded)(false);
+          } else {
+            lyricExpansionProgress.value = withSpring(1);
+            fullExpansionProgress.value = withSpring(0);
+          }
+        } else if (fullLyricExpanded) {
+          // From Full: Go back to Half
+          if (translation < -50 || velocity < -500) {
+            fullExpansionProgress.value = withSpring(0);
+            runOnJS(setFullLyricExpanded)(false);
+          } else {
+            fullExpansionProgress.value = withSpring(1);
+          }
+        }
+      }
+    });
+
   const toggleExpand = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    // 1. Trigger the spring animation
+    expansionProgress.value = withSpring(expanded ? 0 : 1, {
+      damping: 14,    // Lower = more bounce
+      stiffness: 150, // Higher = snappier
+      mass: 0.6       // Lighter = faster
+    });
+    
+    // Reset lyric expanded if collapsing
+    if (expanded) {
+      lyricExpansionProgress.value = withSpring(0);
+      fullExpansionProgress.value = withSpring(0);
+      setLyricExpanded(false);
+      setFullLyricExpanded(false);
+    }
+
+    // 2. Update state for content switching (allow small delay for smooth fade if needed)
     setExpanded(!expanded);
   };
 
   const openNowPlaying = () => {
     if (currentSong) {
+      setMiniPlayerHidden(true); // Immediate hide to prevent flicker
       (navigation as any).navigate('NowPlaying', { songId: currentSong.id });
-      setExpanded(false); // Collapse on navigate
+      // Collapse with spring
+      expansionProgress.value = withSpring(0);
+      lyricExpansionProgress.value = withSpring(0);
+      fullExpansionProgress.value = withSpring(0);
+      setExpanded(false);
+      setLyricExpanded(false);
+      setFullLyricExpanded(false);
     }
   };
   
@@ -193,7 +369,7 @@ const MiniPlayer: React.FC = () => {
     <View style={[
       styles.container, 
       isIsland ? styles.islandContainer : styles.barContainer,
-      isIsland && { marginHorizontal: expanded ? 10 : 40 } // Dynamic Width
+      isIsland && expanded && { marginHorizontal: 12 } // Expanded: Symmetric 12px. Collapsed: Standard right alignment
     ]}>
       {/* ... (Progress Bar for Classic Mode Only) ... */}
       {!isIsland && (
@@ -211,14 +387,15 @@ const MiniPlayer: React.FC = () => {
         </View>
       )}
       
-      <Pressable 
+      <AnimatedPressable 
         onPress={isIsland ? toggleExpand : openNowPlaying} 
-        style={({ pressed }) => [
+        style={[
           styles.content, 
           isIsland && styles.islandContent,
-          isIsland && { maxWidth: expanded ? width - 20 : width * 0.5 },
-          isIsland && expanded && styles.islandExpanded,
-          pressed && { opacity: 0.95 }
+          isIsland && animatedIslandStyle, // Apply Reanimated style
+          // Remove static conditional styles that conflict
+          // isIsland && { maxWidth: expanded ? width - 20 : width * 0.5 },
+          // isIsland && expanded && styles.islandExpanded,
         ]}
       >
         {isIsland && (
@@ -248,66 +425,127 @@ const MiniPlayer: React.FC = () => {
         
         {/* Expanded View Content */}
         {isIsland && expanded ? (
-            <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
-                {/* Top Row: Vinyl + Info + Controls */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15 }}>
-                    {/* Rotating Vinyl */}
-                    <Animated.View style={[animatedVinylStyle, { marginRight: 12 }]}>
-                        <Pressable onPress={openNowPlaying}>
-                             <VinylRecord imageUri={currentSong.coverImageUri} size={64} />
-                        </Pressable>
-                    </Animated.View>
+            <GestureDetector gesture={panGesture}>
+                <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
+                    {/* Top Row: Vinyl + Info + Controls */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15, paddingBottom: 5 }}>
+                        {/* Rotating Vinyl */}
+                        <Animated.View style={[animatedVinylStyle, { marginRight: 12 }]}>
+                            <Pressable onPress={openNowPlaying}>
+                                 <VinylRecord imageUri={currentSong.coverImageUri} size={64} />
+                            </Pressable>
+                        </Animated.View>
 
-                    {/* Info */}
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={[styles.title, { fontSize: 16, marginBottom: 2 }]} numberOfLines={1}>
-                            {currentSong.title}
-                        </Text>
-                        <Text style={styles.artist} numberOfLines={1}>
-                            {currentSong.artist}
-                        </Text>
-                    </View>
+                        {/* Info */}
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={[styles.title, { fontSize: 16, marginBottom: 2 }]} numberOfLines={1}>
+                                {currentSong.title}
+                            </Text>
+                            <Text style={styles.artist} numberOfLines={1}>
+                                {currentSong.artist}
+                            </Text>
+                        </View>
 
-                    {/* Controls Grouped */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                         <Pressable onPress={skipBackward} hitSlop={10}>
-                             <Ionicons name="play-skip-back" size={24} color="#fff" />
-                         </Pressable>
-                         <Pressable onPress={togglePlay} hitSlop={10}>
-                             <Ionicons name={player?.playing ? 'pause' : 'play'} size={32} color="#fff" />
-                         </Pressable>
-                         <Pressable onPress={skipForward} hitSlop={10}>
-                             <Ionicons name="play-skip-forward" size={24} color="#fff" />
-                         </Pressable>
+                        {/* Controls Grouped */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                             <Pressable onPress={skipBackward} hitSlop={10}>
+                                 <Ionicons name="play-skip-back" size={24} color="#fff" />
+                             </Pressable>
+                             <Pressable onPress={togglePlay} hitSlop={10}>
+                                 <Ionicons name={player?.playing ? 'pause' : 'play'} size={32} color="#fff" />
+                             </Pressable>
+                             <Pressable onPress={skipForward} hitSlop={10}>
+                                 <Ionicons name="play-skip-forward" size={24} color="#fff" />
+                             </Pressable>
+                        </View>
+                        
+                        {/* Drag Handle Overlay for Stage 1/2 */}
+                        {(!fullLyricExpanded) && (
+                            <View style={{
+                                position: 'absolute',
+                                bottom: -10,
+                                left: '50%',
+                                marginLeft: -20,
+                                width: 40,
+                                height: 4,
+                                backgroundColor: 'rgba(255,255,255,0.2)',
+                                borderRadius: 2
+                            }} />
+                        )}
                     </View>
+                    
+                    {/* Bottom Row: Lyrics */}
+                    <View style={{ 
+                        flex: 1, 
+                        width: '100%',
+                        justifyContent: 'center', 
+                        alignItems: 'center',
+                        minHeight: 40,
+                        paddingHorizontal: 8,
+                        marginTop: (lyricExpanded || fullLyricExpanded) ? 10 : 0
+                    }}>
+                        {(lyricExpanded || fullLyricExpanded) ? (
+                            <View style={{ flex: 1, width: '100%', paddingBottom: 20 }}>
+                                <FlatList
+                                    ref={flatListRef}
+                                    data={lyricsToUse || []}
+                                    keyExtractor={(item, index) => `${index}`}
+                                    scrollEnabled={fullLyricExpanded} // Only allow manual scroll in full mode
+                                    renderItem={({ item, index }) => {
+                                        const isCurrent = index === currentLyricIndex;
+                                        return (
+                                            <Text 
+                                                style={{ 
+                                                    color: isCurrent ? '#fff' : 'rgba(255,255,255,0.4)', 
+                                                    fontSize: fullLyricExpanded ? (isCurrent ? 24 : 20) : (isCurrent ? 24 : 18), 
+                                                    fontWeight: isCurrent ? '700' : '400', 
+                                                    textAlign: 'center',
+                                                    marginVertical: fullLyricExpanded ? 10 : 6,
+                                                    textShadowColor: isCurrent ? 'rgba(0,0,0,0.5)' : 'transparent',
+                                                    textShadowOffset: { width: 0, height: 1 },
+                                                    textShadowRadius: 2
+                                                }}
+                                            >
+                                                {item.text}
+                                            </Text>
+                                        );
+                                    }}
+                                    contentContainerStyle={{ paddingVertical: 10 }}
+                                    showsVerticalScrollIndicator={false}
+                                    onScrollBeginDrag={handleScrollBegin}
+                                    onMomentumScrollEnd={handleScrollEnd}
+                                    onScrollEndDrag={handleScrollEnd}
+                                    getItemLayout={(data, index) => ({
+                                        length: fullLyricExpanded ? 50 : 40, // Height of each line (rough estimate)
+                                        offset: (fullLyricExpanded ? 50 : 40) * index,
+                                        index,
+                                    })}
+                                />
+                            </View>
+                        ) : (
+                            <Text 
+                                style={{ 
+                                    color: '#fff', 
+                                    fontSize: 18, 
+                                    fontWeight: '700', 
+                                    textAlign: 'center',
+                                    textShadowColor: 'rgba(0,0,0,0.5)',
+                                    textShadowOffset: { width: 0, height: 1 },
+                                    textShadowRadius: 2
+                                }}
+                                numberOfLines={2}
+                            >
+                                {!!currentLyricText ? currentLyricText : ''}
+                            </Text>
+                        )}
+                    </View>
+                    {fullLyricExpanded && (
+                        <View style={{ height: 40, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                            <View style={{ width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2 }} />
+                        </View>
+                    )}
                 </View>
-                
-                {/* Bottom Row: Lyrics */}
-                <View style={{ 
-                    flex: 1, 
-                    justifyContent: 'center', 
-                    alignItems: 'center',
-                    minHeight: 40,
-                    paddingHorizontal: 8 
-                }}>
-                    <Text 
-                        style={{ 
-                            color: '#fff', 
-                            fontSize: 18, 
-                            fontWeight: '700', 
-                            textAlign: 'center',
-                            textShadowColor: 'rgba(0,0,0,0.5)',
-                            textShadowOffset: { width: 0, height: 1 },
-                            textShadowRadius: 2
-                        }}
-                        numberOfLines={2}
-                    >
-                        {currentLyricText || ''}
-                    </Text>
-                </View>
-                
-                {/* Tiny progress bar at very bottom (optional, but good for visual anchoring if user wants "timings" implicit) -> User said remove timelines. Keeping meaningful silence here. */}
-            </View>
+            </GestureDetector>
         ) : (
             // COLLAPSED / CLASSIC VIEW
             <>
@@ -363,7 +601,7 @@ const MiniPlayer: React.FC = () => {
                 )}
             </>
         )}
-      </Pressable>
+      </AnimatedPressable>
     </View>
   );
 };
@@ -396,10 +634,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: "#fff", // Subtle white glow
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    shadowColor: "#000", // Deep black shadow
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
     elevation: 12,
   },
   islandExpanded: {

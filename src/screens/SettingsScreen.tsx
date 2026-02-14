@@ -48,6 +48,8 @@ const SettingsScreen: React.FC<Props> = () => {
   const [selectedFiles, setSelectedFiles] = React.useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = React.useState('');
   const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  const [hiddenSongsVisible, setHiddenSongsVisible] = React.useState(false);
+  const { hiddenSongs, fetchHiddenSongs, hideSong: unhideSong } = useSongsStore();
 
   // Visibility Management: Hide MiniPlayer when Settings is focus
   useFocusEffect(
@@ -481,6 +483,15 @@ const SettingsScreen: React.FC<Props> = () => {
                   settings.setLibraryBackgroundMode(nextMode);
               }}
             />
+            <SettingsRow
+              icon="eye-off-outline"
+              label="Hidden Songs"
+              value={hiddenSongs.length > 0 ? `${hiddenSongs.length} songs` : 'None'}
+              onPress={() => {
+                  fetchHiddenSongs();
+                  setHiddenSongsVisible(true);
+              }}
+            />
           </View>
 
           <View style={styles.section}>
@@ -637,6 +648,77 @@ const SettingsScreen: React.FC<Props> = () => {
                 disabled={selectedFiles.size === 0}
               >
                 <Text style={[styles.selectionButtonText, styles.selectionButtonTextImport]}>Import {selectedFiles.size}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal
+        visible={hiddenSongsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setHiddenSongsVisible(false)}
+      >
+        <Pressable 
+          style={styles.selectionOverlay}
+          onPress={() => setHiddenSongsVisible(false)}
+        >
+          <Pressable 
+            style={styles.selectionContainer}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.selectionHeader}>
+              <Text style={styles.selectionTitle}>Hidden Songs ({hiddenSongs.length})</Text>
+              <Pressable onPress={() => setHiddenSongsVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+              </Pressable>
+            </View>
+            
+            <ScrollView style={[styles.selectionList, { maxHeight: 500 }]} keyboardShouldPersistTaps="handled">
+              {hiddenSongs.length === 0 ? (
+                <View style={styles.emptySearchContainer}>
+                  <Ionicons name="eye-outline" size={40} color={Colors.textMuted} />
+                  <Text style={styles.emptySearchText}>No hidden songs</Text>
+                </View>
+              ) : (
+                hiddenSongs.map((song) => (
+                  <View
+                    key={song.id}
+                    style={styles.selectionItem}
+                  >
+                    {song.coverImageUri ? (
+                        <Image source={{ uri: song.coverImageUri }} style={{ width: 44, height: 44, borderRadius: 8 }} />
+                    ) : (
+                        <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: '#2C2C2E', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
+                        </View>
+                    )}
+                    <View style={styles.selectionItemInfo}>
+                      <Text style={styles.selectionItemTitle} numberOfLines={1}>{song.title}</Text>
+                      <Text style={styles.selectionItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
+                    </View>
+                    <Pressable
+                        style={{ 
+                            paddingHorizontal: 16, 
+                            paddingVertical: 8, 
+                            borderRadius: 16, 
+                            backgroundColor: 'rgba(0,122,255,0.1)' 
+                        }}
+                        onPress={() => unhideSong(song.id, false)}
+                    >
+                        <Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Unhide</Text>
+                    </Pressable>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+            
+            <View style={styles.selectionActions}>
+              <Pressable 
+                style={[styles.selectionButton, styles.selectionButtonCancel, { flex: 1 }]} 
+                onPress={() => setHiddenSongsVisible(false)}
+              >
+                <Text style={styles.selectionButtonText}>Close</Text>
               </Pressable>
             </View>
           </Pressable>

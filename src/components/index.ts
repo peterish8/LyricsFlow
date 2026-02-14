@@ -12,3 +12,7 @@ export { CustomTabBar } from './CustomTabBar';
 export { default as VinylRecord } from './VinylRecord';
 export { LrcSearchModal } from './LrcSearchModal';
 export { Toast } from './Toast';
+export { DownloadQueueModal } from './DownloadQueueModal';
+export { DownloadGridCard } from './DownloadGridCard';
+export { BatchReviewModal } from './BatchReviewModal';
+export { FloatingDownloadIndicator } from './FloatingDownloadIndicator';

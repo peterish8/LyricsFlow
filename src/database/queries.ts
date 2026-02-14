@@ -5,6 +5,7 @@
 import { closeDatabase, getDatabase, initDatabase } from './db';
 import { Song, LyricLine } from '../types/song';
 import { normalizeLyrics } from '../utils/timestampParser';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const LOG_PREFIX = '[QUERIES]';
 
@@ -70,9 +71,10 @@ export const getAllSongs = async (): Promise<Song[]> => {
       text_case: string | null;
       audio_uri: string | null;
       is_liked: number | null;
+      is_hidden: number | null;
       separation_status: string | null;
       separation_progress: number | null;
-    }>('SELECT * FROM songs ORDER BY date_modified DESC');
+    }>('SELECT * FROM songs WHERE is_hidden = 0 ORDER BY date_modified DESC');
     
     return songsRows.map((row) => ({
       id: row.id,
@@ -92,6 +94,52 @@ export const getAllSongs = async (): Promise<Song[]> => {
       textCase: (row.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
       audioUri: row.audio_uri ?? undefined,
       isLiked: row.is_liked === 1,
+      isHidden: row.is_hidden === 1,
+    }));
+  });
+};
+
+export const getHiddenSongs = async (): Promise<Song[]> => {
+  return withDbSafe(async (db) => {
+    const songsRows = await db.getAllAsync<{
+      id: string;
+      title: string;
+      artist: string | null;
+      album: string | null;
+      gradient_id: string;
+      duration: number;
+      date_created: string;
+      date_modified: string;
+      play_count: number;
+      last_played: string | null;
+      scroll_speed: number;
+      cover_image_uri: string | null;
+      lyrics_align: string | null;
+      text_case: string | null;
+      audio_uri: string | null;
+      is_liked: number | null;
+      is_hidden: number | null;
+    }>('SELECT * FROM songs WHERE is_hidden = 1 ORDER BY date_modified DESC');
+    
+    return songsRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      artist: row.artist ?? undefined,
+      album: row.album ?? undefined,
+      gradientId: row.gradient_id,
+      duration: row.duration,
+      dateCreated: row.date_created,
+      dateModified: row.date_modified,
+      playCount: row.play_count,
+      lastPlayed: row.last_played ?? undefined,
+      lyrics: [],
+      scrollSpeed: row.scroll_speed ?? 50,
+      coverImageUri: row.cover_image_uri ?? undefined,
+      lyricsAlign: (row.lyrics_align as 'left' | 'center' | 'right') ?? 'left',
+      textCase: (row.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
+      audioUri: row.audio_uri ?? undefined,
+      isLiked: row.is_liked === 1,
+      isHidden: row.is_hidden === 1,
     }));
   });
 };
@@ -116,6 +164,7 @@ export const getSongById = async (id: string): Promise<Song | null> => {
     text_case: string | null;
     audio_uri: string | null;
     is_liked: number | null;
+    is_hidden: number | null;
     separation_status: string | null;
     separation_progress: number | null;
   }>('SELECT * FROM songs WHERE id = ?', [id]);
@@ -146,6 +195,7 @@ export const getSongById = async (id: string): Promise<Song | null> => {
     textCase: (songRow.text_case as 'normal' | 'uppercase' | 'titlecase' | 'sentencecase') ?? 'titlecase',
     audioUri: songRow.audio_uri ?? undefined,
     isLiked: songRow.is_liked === 1,
+    isHidden: songRow.is_hidden === 1,
     lyrics: normalizeLyrics(lyricsRows.map((row) => ({
       id: row.id,
       timestamp: row.timestamp,
@@ -193,8 +243,9 @@ export const updateSong = async (song: Song): Promise<void> => {
     if (song.lyrics && song.lyrics.length > 0) {
       await db.execAsync(`DELETE FROM lyrics WHERE song_id = '${song.id}';`);
       
-      log(`Inserting ${song.lyrics.length} lyrics...`);
+      log(`Inserting ${song.lyrics.length} lyrics for song ${song.id}`);
       const normalizedLyrics = normalizeLyrics(song.lyrics);
+      log(`Normalized to ${normalizedLyrics.length} lines`);
       
       for (const lyric of normalizedLyrics) {
         await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
@@ -206,8 +257,43 @@ export const updateSong = async (song: Song): Promise<void> => {
 };
 
 export const deleteSong = async (id: string): Promise<void> => {
+  try {
+    const song = await getSongById(id);
+    if (song) {
+      // 1. Delete physical files from disk if they are in the app's document directory
+      if (song.audioUri && song.audioUri.includes(FileSystem.documentDirectory!)) {
+        try {
+          console.log(`[QUERIES] Deleting physical audio file: ${song.audioUri}`);
+          await FileSystem.deleteAsync(song.audioUri, { idempotent: true });
+        } catch (e) {
+          console.warn('[QUERIES] Failed to delete audio file, it might not exist:', e);
+        }
+      }
+      
+      if (song.coverImageUri && (song.coverImageUri.includes(FileSystem.documentDirectory!) || song.coverImageUri.includes('file:///'))) {
+        try {
+          console.log(`[QUERIES] Deleting physical cover image: ${song.coverImageUri}`);
+          await FileSystem.deleteAsync(song.coverImageUri, { idempotent: true });
+        } catch (e) {
+          console.warn('[QUERIES] Failed to delete cover image:', e);
+        }
+      }
+    }
+
+    await withDbSafe(async (db) => {
+      // 2. Delete from database
+      await db.execAsync(`DELETE FROM lyrics WHERE song_id = '${id}';`);
+      await db.execAsync(`DELETE FROM songs WHERE id = '${id}';`);
+    });
+  } catch (error) {
+    console.error('[QUERIES] deleteSong failed during file or DB cleanup:', error);
+    throw error;
+  }
+};
+
+export const hideSong = async (id: string, hide: boolean): Promise<void> => {
   await withDbSafe(async (db) => {
-    await db.execAsync(`DELETE FROM songs WHERE id = '${id}';`);
+    await db.execAsync(`UPDATE songs SET is_hidden = ${hide ? 1 : 0} WHERE id = '${id}';`);
   });
 };
 

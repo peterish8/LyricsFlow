@@ -106,14 +106,23 @@ class LyricaService {
               console.log(`[Lyrica] ✓ Found via ${data.data.source || strategy.label}`);
               return {
                 lyrics: finalLyrics,
-                source: data.data.source || 'Lyrica',
-                metadata: data.metadata,
+                source: `Lyrica (${strategy.label})`, // e.g., "Lyrica (synced-slow)"
+                metadata: {
+                  title: data.data?.track_name,
+                  artist: data.data?.artist_name,
+                  duration: data.data?.duration,
+                  coverArt: data.data?.album_art
+                }
               };
             }
           }
         } catch (err: any) {
           clearTimeout(timeoutId);
-          console.log(`[Lyrica] ${strategy.label} failed:`, err.message);
+          if (err.name === 'AbortError') {
+             console.warn(`[Lyrica] ${strategy.label} timed out`);
+          } else {
+             console.log(`[Lyrica] ${strategy.label} failed:`, err.message);
+          }
         }
       }
       

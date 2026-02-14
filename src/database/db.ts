@@ -122,7 +122,8 @@ const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> 
       scroll_speed INTEGER DEFAULT 50,
       cover_image_uri TEXT,
       lyrics_align TEXT DEFAULT 'left',
-      audio_uri TEXT
+      audio_uri TEXT,
+      is_hidden INTEGER DEFAULT 0
     );
     
     CREATE TABLE IF NOT EXISTS lyrics (
@@ -184,8 +185,26 @@ const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> 
       await database.execAsync('ALTER TABLE songs ADD COLUMN separation_progress INTEGER DEFAULT 0');
       log('Migration complete');
     }
+    if (!columns.some(c => c.name === 'is_hidden')) {
+      log('Adding is_hidden column...');
+      // Retry logic for locked database
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await database.execAsync('ALTER TABLE songs ADD COLUMN is_hidden INTEGER DEFAULT 0');
+          log('Migration complete');
+          break;
+        } catch (e) {
+          if (retries === 1) throw e; // Throw on last attempt
+          log(`Migration failed (locked?), retrying in 500ms... (${retries} left)`, e);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          retries--;
+        }
+      }
+    }
   } catch (e) {
     log('Migration check failed', e);
+    throw e; // RETHROW to ensure init fails if schema is broken
   }
 };
 

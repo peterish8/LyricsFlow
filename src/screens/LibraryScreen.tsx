@@ -18,6 +18,7 @@ import {
   ScrollView,
   Animated,
   Platform,
+  Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,13 +29,19 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { useDailyStatsStore } from '../store/dailyStatsStore';
-import { AuroraHeader, SongCard, CustomMenu, MiniPlayer, Toast } from '../components';
+import { 
+  AuroraHeader, SongCard, CustomMenu, MiniPlayer, Toast, DownloadQueueModal 
+} from '../components';
+import { useDownloadQueueStore } from '../store/downloadQueueStore';
 import { CoverArtSearchScreen } from './CoverArtSearchScreen';
 import { Colors } from '../constants/colors';
 import { getGradientColors } from '../constants/gradients';
 // import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Song } from '../types/song';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { Swipeable } from 'react-native-gesture-handler';
+import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
 // import { useTasksStore } from '../store/tasksStore';
 // import { TasksModal } from '../components/TasksModal';
 
@@ -49,6 +56,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const getSong = useSongsStore(state => state.getSong);
   const deleteSong = useSongsStore(state => state.deleteSong);
   const toggleLike = useSongsStore(state => state.toggleLike);
+  const hideSong = useSongsStore(state => state.hideSong);
   
   const playerCurrentSong = usePlayerStore(state => state.currentSong);
   const { recentArts, addRecentArt } = useArtHistoryStore();
@@ -79,8 +87,32 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const [recentArtVisible, setRecentArtVisible] = React.useState(false);
   const [showCoverSearch, setShowCoverSearch] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
-  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
-  // const [showTasksModal, setShowTasksModal] = React.useState(false);
+  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [showQueueModal, setShowQueueModal] = React.useState(false);
+  
+  const downloadQueue = useDownloadQueueStore(state => state.queue);
+  const activeDownloadsCount = downloadQueue.filter(i => i.status === 'downloading' || i.status === 'pending' || i.status === 'staging').length;
+
+  const scanQueue = useLyricsScanQueueStore(state => state.queue);
+  const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
+
+  // Wrapper for feedback
+  const handleAddToQueue = useCallback((song: Song) => {
+      const existing = scanQueue.find(j => j.songId === song.id);
+      if (existing) {
+         if (existing.status === 'failed') {
+            // Allow retry
+         } else {
+            setToast({ visible: true, message: `Already searching for "${song.title}"`, type: 'info' });
+            return;
+         }
+      }
+  
+      addToScanQueue(song);
+      Vibration.vibrate(50); // Light haptic
+      setToast({ visible: true, message: `Searching lyrics for "${song.title}"...`, type: 'success' });
+  }, [addToScanQueue, scanQueue]);
+
 
   // const { tasks } = useTasksStore();
   // const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
@@ -160,9 +192,6 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   // Removed Scrollable Header - User prefers icons in "All Songs" section
 
 
-  // Removed Scrollable Header - User prefers icons in "All Songs" section
-
-
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchSongs();
@@ -191,6 +220,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     if (playInMiniPlayerOnly) {
       if (isCurrentlyPlaying) {
         // Second tap on the same song: Open NowPlayingScreen
+        setMiniPlayerHidden(true);
         navigation.navigate('NowPlaying', { songId: song.id });
       } else {
         // First tap or different song: Just start playing in mini player
@@ -200,6 +230,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     } else {
       // Default: Always navigate to NowPlayingScreen
       setCurrentSong(song);
+      setMiniPlayerHidden(true);
       navigation.navigate('NowPlaying', { songId: song.id });
       usePlayerStore.getState().loadSong(song.id);
     }
@@ -340,6 +371,161 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     </View>
   );
 
+// Extract SongListItem to a memoized component to improve performance
+const SongListItem = React.memo(({ 
+  song, 
+  onPress, 
+  onLongPress, 
+  scanQueue, 
+  addToScanQueue 
+}: { 
+  song: Song, 
+  onPress: (song: Song) => void, 
+  onLongPress: (song: Song, event: any) => void,
+  scanQueue: any[],
+  addToScanQueue: (song: Song) => void
+}) => {
+    const scanJob = scanQueue.find(j => j.songId === song.id);
+    const isScanning = scanJob?.status === 'scanning' || scanJob?.status === 'pending';
+    const isCompleted = scanJob?.status === 'completed';
+    
+    // Scale animation for bounce effect
+    const scaleAnim = React.useRef(new Animated.Value(1)).current;
+
+    const handlePressIn = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 0.96,
+            useNativeDriver: true,
+            speed: 20,
+            bounciness: 4,
+        }).start();
+    };
+
+    const handlePressOut = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 1,
+            useNativeDriver: true,
+            speed: 20,
+            bounciness: 4,
+        }).start();
+    };
+
+    const renderRightActions = (_progress: any, dragX: any) => {
+        const scale = dragX.interpolate({
+            inputRange: [-80, 0],
+            outputRange: [1, 0],
+            extrapolate: 'clamp',
+        });
+        
+        return (
+            <Pressable 
+                style={[styles.swipeAction]} 
+                onPress={() => addToScanQueue(song)}
+            >
+                <Animated.View style={[
+                    StyleSheet.absoluteFill, 
+                    { 
+                        transform: [{ scale }],
+                        borderRadius: 12, 
+                        overflow: 'hidden',
+                    }
+                ]}>
+                    {song.coverImageUri ? (
+                       <Image 
+                         source={{ uri: song.coverImageUri }} 
+                         style={StyleSheet.absoluteFill}
+                         blurRadius={40} 
+                       />
+                    ) : (
+                       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#222' }]} />
+                    )}
+
+                    <LinearGradient
+                      colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.1)', 'rgba(0,0,0,0.5)']}
+                      start={{x: 0, y: 0}}
+                      end={{x: 0, y: 1}}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    
+                    <View style={{ 
+                        flex: 1,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        shadowColor: '#FFF',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 0.9,
+                        shadowRadius: 15,
+                        elevation: 10,
+                    }}>
+                        <Ionicons name="sparkles" size={28} color="#FFF" />
+                    </View>
+                </Animated.View>
+            </Pressable>
+        );
+    };
+
+    return (
+        <Swipeable 
+            renderRightActions={renderRightActions}
+            containerStyle={{ marginBottom: 8 }}
+            overshootRight={false}
+            friction={2}
+            rightThreshold={40}
+        >
+            <Pressable
+              onPress={() => onPress(song)}
+              onLongPress={(e: any) => onLongPress(song, e)}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+              style={{ marginBottom: 0 }} // Move style to Animated.View
+            >
+                <Animated.View style={[
+                    styles.listItem, 
+                    { 
+                        marginBottom: 0,
+                        transform: [{ scale: scaleAnim }] 
+                    }
+                ]}>
+                  <View style={styles.listItemThumbnail}>
+                    {song.coverImageUri ? (
+                      <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
+                    ) : (
+                      <View style={styles.defaultListThumbnail}>
+                        <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    )}
+                    {isScanning && (
+                        <View style={styles.scanningOverlay}>
+                            <Ionicons name="sync" size={16} color="#FFF" />
+                        </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.listItemContent}>
+                    <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
+                        {isCompleted && (
+                            <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={{ marginLeft: 4 }} />
+                        )}
+                        {scanJob?.status === 'failed' && (
+                            <Ionicons name="alert-circle" size={12} color={Colors.error} style={{ marginLeft: 4 }} />
+                        )}
+                    </View>
+                  </View>
+                  
+                  <View style={{ alignItems: 'flex-end', marginRight: 8 }}>
+                      <Text style={styles.listItemDuration}>
+                        {Math.floor(song.duration / 60)}:{String(Math.floor(song.duration % 60)).padStart(2, '0')}
+                      </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+                </Animated.View>
+            </Pressable>
+        </Swipeable>
+    );
+});
+
   return (
     <View style={styles.container}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
@@ -355,9 +541,17 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         {/* Content */}
         <FlatList<Song>
           key="library-list"
-          data={[] as Song[]}
+          data={songs}
           keyExtractor={(item) => item.id}
-          renderItem={() => null}
+          renderItem={({ item }) => (
+            <SongListItem 
+                song={item} 
+                onPress={handleSongPress} 
+                onLongPress={handleSongLongPress}
+                scanQueue={scanQueue}
+                addToScanQueue={handleAddToQueue}
+            />
+          )}
           contentContainerStyle={[
              styles.listContent,
              isIsland && { paddingTop: 20 } // Reduced gap to bring covers up
@@ -410,6 +604,18 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                       >
                         <Ionicons name="search" size={20} color={Colors.textSecondary} />
                       </Pressable>
+                      
+                      <Pressable 
+                        style={styles.actionButton}
+                        onPress={() => setShowQueueModal(true)}
+                      >
+                        <Ionicons name="list" size={22} color={Colors.textSecondary} />
+                        {activeDownloadsCount > 0 && (
+                            <View style={styles.badge}>
+                                <Text style={styles.badgeText}>{activeDownloadsCount}</Text>
+                            </View>
+                        )}
+                      </Pressable>
                       <Pressable 
                         style={styles.actionButton}
                         onPress={() => (navigation as any).navigate('AudioDownloader')}
@@ -424,37 +630,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                       </Pressable>
                     </View>
                   </View>
-
-                  {songs.map((song) => (
-                    <Pressable
-                      key={song.id}
-                      style={styles.listItem}
-                      onPress={() => handleSongPress(song)}
-                      onLongPress={(e: any) => handleSongLongPress(song, e)}
-                    >
-                      <View style={styles.listItemThumbnail}>
-                        {song.coverImageUri ? (
-                          <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
-                        ) : (
-                          <View style={styles.defaultListThumbnail}>
-                            <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.listItemContent}>
-                        <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
-                        <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
-                      </View>
-                      <Text style={styles.listItemDuration}>
-                        {Math.floor(song.duration / 60)}:{String(Math.floor(song.duration % 60)).padStart(2, '0')}
-                      </Text>
-                      <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-                    </Pressable>
-                  ))}
                 </>
               ) : null}
             </View>
           }
+          ListFooterComponent={<View style={{ height: 100 }} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -471,7 +651,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
               useNativeDriver: true,
             }).start();
           }}
-          scrollEventThrottle={8}
+          scrollEventThrottle={16}
         />
 
         {/* FAB - Hidden */}
@@ -602,6 +782,20 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
             </Pressable>
 
             <Pressable
+              style={styles.bottomSheetOption}
+              onPress={async () => {
+                setShowBottomSheet(false);
+                if (selectedSongForArt) {
+                  await hideSong(selectedSongForArt.id, true);
+                  setToast({ visible: true, message: 'Song hidden from library', type: 'success' });
+                }
+              }}
+            >
+              <Ionicons name="eye-off-outline" size={24} color="#FFA500" />
+              <Text style={[styles.bottomSheetOptionText, { color: '#FFA500' }]}>Hide Song</Text>
+            </Pressable>
+
+            <Pressable
               style={[styles.bottomSheetOption, styles.bottomSheetCancel, { borderBottomWidth: 0, marginTop: 12, backgroundColor: '#2A2A2A' }]}
               onPress={() => {
                 setShowBottomSheet(false);
@@ -698,6 +892,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                onDismiss={() => setToast(null)} 
            />
        )}
+       
+       <DownloadQueueModal 
+         visible={showQueueModal}
+         onClose={() => setShowQueueModal(false)}
+       />
     </View>
   );
 };
@@ -736,6 +935,8 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
     maxWidth: '45%', // Ensure space for island
     paddingRight: 10, // Explicit gap
+    marginLeft: 6, // +1px nudge
+    marginTop: 5, // Moved slightly down per request
   },
   headerLeft: {
     flex: 1,
@@ -955,6 +1156,25 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 4,
+  },
+  swipeAction: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%', 
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 12,
+    borderTopLeftRadius: 12,
+    borderBottomLeftRadius: 12,
+    borderRadius: 12, 
+    marginLeft: 8, // Add gap to separate from list item
+  },
+  scanningOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 4,
   },
   bottomSheetOverlay: {
     flex: 1,

@@ -10,11 +10,14 @@ const BROWSER_HEADERS = {
 };
 
 // The Hydra: If one server dies, try the next
+// Layer 1: JioSaavn API Hierarchy (Primary → Secondary)
 const SAAVN_MIRRORS = [
-  'https://saavn.dev/api',
-  'https://jiosaavn-api-sigma.vercel.app/api',
-  'https://saavn.sumit.co/api'
+  'https://saavn.sumit.co/api',                      // Primary (User's working mirror)
+  'https://jiosaavn-api-byprats.vercel.app/api'     // Secondary (User's hosted API)
 ];
+
+// Layer 1.1: Gaana API (User's hosted)
+const GAANA_API = 'https://gaanaapibyprats.vercel.app/api/search';
 
 // SoundCloud Client ID Caching
 let cachedClientId: string | null = null;
@@ -62,10 +65,10 @@ async function getSoundCloudClientId(): Promise<string | null> {
 
 /**
  * ============================================================================
- * LAYER 1: JIOSAAVN (The Official Source)
+ * LAYER 1: JIOSAAVN (Primary Music Source)
+ * Hierarchy: saavn.sumit.co → jiosaavn-api-byprats.vercel.app
  * ============================================================================
  */
-const USER_SAAVN_API = 'https://jiosaavn-api-byprats.vercel.app/api';
 
 /**
  * Helper: Fetch from a SINGLE Saavn Mirror
@@ -103,7 +106,7 @@ async function fetchSaavnResults(baseUrl: string, query: string): Promise<Unifie
         return {
           id: song.id,
           title: song.name || song.title,
-          artist: song.primaryArtists?.split(',')[0]?.trim() || 'Unknown Artist',
+          artist: (song.artists?.primary?.map((a: any) => a.name).join(', ')) || (song.primaryArtists || '').split(',')[0]?.trim() || 'Unknown Artist',
           highResArt: highResImage?.url || '',
           downloadUrl: topQuality?.url || topQuality?.link || '',
           hasLyrics: song.hasLyrics === 'true' || song.hasLyrics === true,
@@ -125,37 +128,71 @@ async function fetchSaavnResults(baseUrl: string, query: string): Promise<Unifie
  * ============================================================================
  */
 async function searchSaavn(query: string): Promise<UnifiedSong[]> {
-  // 1. Start User's Custom API Search
-  const userApiPromise = fetchSaavnResults(USER_SAAVN_API, query)
-      .then(res => {
-          if (res.length > 0) console.log(`[Saavn] ✅ Custom API found ${res.length} songs`);
-          return res;
-      });
-
-  // 2. Start Public Mirror Pool Search (Sequential Failover)
-  const publicPoolPromise = (async () => {
-      for (const baseUrl of SAAVN_MIRRORS) {
-          const results = await fetchSaavnResults(baseUrl, query);
-          if (results.length > 0) {
-              console.log(`[Saavn] ✅ Public Mirror (${baseUrl}) found ${results.length} songs`);
-              return results;
-          }
-      }
-      return [];
-  })();
-
-  // 3. Wait for BOTH to finish (or fail) and merge
-  const [userResults, publicResults] = await Promise.all([userApiPromise, publicPoolPromise]);
-  
-  // 4. Merge & Deduplicate (User results take priority on ID collision)
-  const combined = [...publicResults, ...userResults];
-  const uniqueSongs = Array.from(new Map(combined.map(song => [song.id, song])).values());
-  
-  if (uniqueSongs.length > 0) {
-      console.log(`[Saavn] Layer 1 Total: ${uniqueSongs.length} unique songs`);
+  // Try mirrors in priority order (saavn.sumit.co first, then user's hosted API)
+  for (const baseUrl of SAAVN_MIRRORS) {
+    const results = await fetchSaavnResults(baseUrl, query);
+    if (results.length > 0) {
+      console.log(`[Saavn] ✅ Mirror (${baseUrl}) found ${results.length} songs`);
+      return results;
+    }
   }
   
-  return uniqueSongs;
+  console.log('[Saavn] All mirrors failed or returned empty');
+  return [];
+}
+
+/**
+ * ============================================================================
+ * LAYER 1.1: GAANA (Secondary Music Source - User's Hosted API)
+ * ============================================================================
+ */
+async function searchGaana(query: string): Promise<UnifiedSong[]> {
+  try {
+    const url = `${GAANA_API}?q=${encodeURIComponent(query)}`;
+    console.log(`[Gaana] Searching...`);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const response = await fetch(url, { 
+      headers: BROWSER_HEADERS,
+      signal: controller.signal 
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.warn(`[Gaana] API returned status ${response.status}`);
+      return [];
+    }
+    
+    const data = await response.json();
+    const results = data.results || data.data || [];
+    
+    if (results.length === 0) {
+      console.log('[Gaana] No results found');
+      return [];
+    }
+    
+    console.log(`[Gaana] ✅ Found ${results.length} songs`);
+    
+    // Normalize Gaana results to UnifiedSong format
+    return results.map((track: any) => ({
+      id: `gaana-${track.id || track.seokey || Math.random()}`,
+      title: track.title || track.track_title || 'Unknown Title',
+      artist: track.artist || track.artists_name || track.artist_names || 'Unknown Artist',
+      album: track.album || track.album_title || '',
+      duration: track.duration ? parseInt(track.duration) : undefined,
+      highResArt: track.artwork || track.artwork_large || track.image || track.artworkLink || '',
+      downloadUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || '',
+      streamUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || '',
+      hasLyrics: false, // Gaana API doesn't provide lyrics info
+      source: 'Gaana' as const,
+    }));
+  } catch (error: any) {
+    console.warn('[Gaana] Search failed:', error.message);
+    return [];
+  }
 }
 
 /**
@@ -360,7 +397,7 @@ async function searchAudiomack(query: string): Promise<UnifiedSong[]> {
 }
 
 export async function searchMusic(query: string, onProgress?: (status: string) => void): Promise<UnifiedSong[]> {
-  console.log('[SearchEngine] 🚀 Starting Ultimate 4-Layer God Mode Search...');
+  console.log('[SearchEngine] 🚀 Starting Ultimate 5-Layer Search...');
   onProgress?.('Searching JioSaavn (Layer 1)...');
 
   // LAYER 1: JioSaavn (The Official 320kbps Standard)
@@ -370,13 +407,26 @@ export async function searchMusic(query: string, onProgress?: (status: string) =
           console.log('[SearchEngine] ✅ Layer 1 (Saavn) SUCCESS');
           return results;
       }
-      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EMPTY/FAILED, falling to Layer 2...');
+      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EMPTY/FAILED, falling to Layer 1.1...');
   } catch (e) {
-      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EXCEPTION, falling to Layer 2...');
+      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EXCEPTION, falling to Layer 1.1...');
+  }
+
+  // LAYER 1.1: Gaana (Secondary Indian Music Source)
+  onProgress?.('Saavn failed. Trying Gaana (Layer 1.1)...');
+  try {
+      const results = await searchGaana(query);
+      if (results.length > 0) {
+          console.log('[SearchEngine] ✅ Layer 1.1 (Gaana) SUCCESS');
+          return results;
+      }
+      console.log('[SearchEngine] ⚠️ Layer 1.1 (Gaana) EMPTY/FAILED, falling to Layer 2...');
+  } catch (e) {
+      console.log('[SearchEngine] ⚠️ Layer 1.1 (Gaana) EXCEPTION, falling to Layer 2...');
   }
 
   // LAYER 2: Wynk Music (Backup Official)
-  onProgress?.('Saavn failed. Trying Wynk Music (Layer 2)...');
+  onProgress?.('Gaana failed. Trying Wynk Music (Layer 2)...');
   try {
       const results = await searchWynk(query);
       if (results.length > 0) {
@@ -416,5 +466,6 @@ export async function searchMusic(query: string, onProgress?: (status: string) =
 // Named export for compatibility
 export const MultiSourceSearchService = {
   searchMusic,
-  searchSaavn
+  searchSaavn,
+  searchGaana
 };

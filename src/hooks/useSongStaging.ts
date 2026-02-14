@@ -22,6 +22,7 @@ export interface StagingSong {
   id: string; 
   title: string;
   artist: string;
+  album?: string;
   duration: number;
   qualityOptions: AudioOption[];
   selectedQuality?: AudioOption; 
@@ -29,6 +30,7 @@ export interface StagingSong {
   lyricOptions: LyricaResult[] | null; // null = loading, [] = empty
   selectedCoverUri?: string;
   selectedLyrics?: string;
+  selectedLyricIndex?: number;
   status: 'idle' | 'searching' | 'ready' | 'downloading' | 'completed' | 'error';
   progress: number;
   error?: string;
@@ -169,81 +171,73 @@ export const useSongStaging = () => {
         coverOptions: coverArtUrls.length > 0 ? coverArtUrls : [song.highResArt],
         selectedCoverUri: selectedCover,
 
-        // Lyrics - empty initially, will load async
-        lyricOptions: null, // null indicates "fetching"
-        selectedLyrics: undefined,
+                lyricOptions: null, // null indicates "fetching"
+                selectedLyrics: undefined,
+                selectedLyricIndex: -1,
 
-        status: 'ready', // INSTANTLY READY
-        progress: 0,
-    });
-    
-    console.log(`[Staging] ✓ Staged instantly with iTunes art: ${song.title}`);
+                status: 'ready', // INSTANTLY READY
+                progress: 0,
+            });
+            
+            console.log(`[Staging] ✓ Staged instantly with iTunes art: ${song.title}`);
 
-    // 4. Fetch lyrics in background (Parallel Sources)
-    let isCancelled = false;
-    const timeoutId = setTimeout(async () => {
-        if (isCancelled) return;
-        
-        try {
-            console.log('[Staging-V2] 🔄 Fetching lyrics in background (Multi-Source)...');
+            // 4. Fetch lyrics in background (Parallel Sources)
+            // Use a reference to track validity
+            let isActive = true;
             
-            // Using Static Import now
-            const lyricResults = await MultiSourceLyricsService.fetchLyricsParallel(song.title, song.artist, song.duration);
-            
-            console.log(`[Staging-V2] Lyrics found: ${lyricResults.length} options`);
-            
-            if (isCancelled) return;
-            
-            if (lyricResults.length > 0) {
-                setStaging(prev => {
-                    if (!prev || isCancelled) {
-                        console.log('[Staging] Skipping lyrics update - staging cleared');
-                        return prev;
-                    }
-                    console.log('[Staging] ✓ Updating staging with multiple lyric options');
+            const fetchLyrics = async () => {
+                try {
+                    console.log('[Staging-V2] 🔄 Fetching lyrics in background (Multi-Source)...');
                     
-                    // Default to first option (usually Lyrica/Synced)
-                    return {
-                        ...prev,
-                        lyricOptions: lyricResults,
-                        selectedLyrics: lyricResults[0].lyrics
-                    };
-                });
-                console.log('[Staging] ✓ Lyrics loaded and applied!');
-            } else {
-                console.log('[Staging] ⚠️ No lyrics found for this song');
-                // Update staging to clear loading state even if no lyrics
-                setStaging(prev => {
-                    if (!prev || isCancelled) return prev;
-                    return {
-                        ...prev,
-                        lyricOptions: [],
-                        selectedLyrics: undefined
-                    };
-                });
-            }
-        } catch(e) {
-            if (!isCancelled) {
-                console.error('[Staging] ❌ Lyrics fetch failed:', e);
-                // Clear loading state on error
-                setStaging(prev => {
-                    if (!prev) return prev;
-                    return {
-                        ...prev,
-                        lyricOptions: [],
-                        selectedLyrics: undefined
-                    };
-                });
-            }
-        }
-    }, 100);
-
-    // Return cleanup function
-    return () => {
-        isCancelled = true;
-        clearTimeout(timeoutId);
-        console.log('[Staging] Cleanup called - cancelling lyrics fetch');
-    };
+                    // Using Static Import now
+                    const lyricResults = await MultiSourceLyricsService.fetchLyricsParallel(song.title, song.artist, song.duration);
+                    
+                    if (!isActive) return;
+                    
+                    console.log(`[Staging-V2] Lyrics found: ${lyricResults.length} options`);
+                    
+                    if (lyricResults.length > 0) {
+                        setStaging(prev => {
+                            // Safety check: Ensure we are updating the CORRECT song staging
+                            if (!prev || prev.id !== tempId) return prev;
+                            
+                            console.log('[Staging] ✓ Updating staging with lyrics');
+                            return {
+                                ...prev,
+                                lyricOptions: lyricResults,
+                                selectedLyrics: lyricResults[0].lyrics,
+                                selectedLyricIndex: 0
+                            };
+                        });
+                    } else {
+                        console.log('[Staging] ⚠️ No lyrics found for this song');
+                        setStaging(prev => {
+                            if (!prev || prev.id !== tempId) return prev;
+                            return {
+                                ...prev,
+                                lyricOptions: [],
+                                selectedLyrics: undefined,
+                                selectedLyricIndex: -1
+                            };
+                        });
+                    }
+                } catch(e) {
+                    if (!isActive) return;
+                    console.error('[Staging] ❌ Lyrics fetch failed:', e);
+                    setStaging(prev => {
+                        if (!prev || prev.id !== tempId) return prev;
+                        return {
+                            ...prev,
+                            lyricOptions: [],
+                            selectedLyrics: undefined,
+                            selectedLyricIndex: -1
+                        };
+                    });
+                }
+            };
+            
+    // Execute immediately
+    fetchLyrics();
 
   }, [sound]);
 
@@ -291,6 +285,43 @@ export const useSongStaging = () => {
     }
   }, [staging, addSong, fetchSongs]);
 
+  const retryLyrics = useCallback(async () => {
+    if (!staging) return;
+
+    console.log('[Staging] 🔄 Retrying lyrics fetch...');
+    setStaging(prev => prev ? ({ ...prev, lyricOptions: null }) : null);
+
+    try {
+        const lyricResults = await MultiSourceLyricsService.fetchLyricsParallel(staging.title, staging.artist, staging.duration);
+        
+        console.log(`[Staging] Retry results: ${lyricResults.length}`);
+        
+        setStaging(prev => {
+            if (!prev || prev.id !== staging.id) return prev;
+            return {
+                ...prev,
+                lyricOptions: lyricResults.length > 0 ? lyricResults : [],
+                selectedLyrics: lyricResults.length > 0 ? lyricResults[0].lyrics : undefined,
+                selectedLyricIndex: lyricResults.length > 0 ? 0 : -1
+            };
+        });
+    } catch (e) {
+        console.error('[Staging] Retry failed:', e);
+        setStaging(prev => prev ? ({ ...prev, lyricOptions: [], selectedLyricIndex: -1 }) : null);
+    }
+  }, [staging]);
+
+  const selectLyrics = useCallback((index: number) => {
+    setStaging(prev => {
+        if (!prev || !prev.lyricOptions || !prev.lyricOptions[index]) return prev;
+        return {
+            ...prev,
+            selectedLyrics: prev.lyricOptions[index].lyrics,
+            selectedLyricIndex: index
+        };
+    });
+  }, []);
+
   return {
     staging,
     stageSong,
@@ -298,6 +329,8 @@ export const useSongStaging = () => {
     updateSelection,
     finalizeDownload,
     togglePreview,
-    isPlaying
+    isPlaying,
+    retryLyrics,
+    selectLyrics
   };
 };

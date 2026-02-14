@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing } from 'react-native-reanimated';
-import { Gesture, GestureDetector, FlatList } from 'react-native-gesture-handler';
+import * as GestureHandler from 'react-native-gesture-handler';
+const { Gesture, GestureDetector, FlatList } = GestureHandler;
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
@@ -32,7 +33,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
   const { songId } = route.params;
   
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
   const contentHeightRef = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoading, setIsLoading] = useState(false);

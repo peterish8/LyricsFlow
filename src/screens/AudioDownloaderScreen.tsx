@@ -1,133 +1,189 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     View, Text, StyleSheet, TextInput, Pressable, Image, 
-    ActivityIndicator, Dimensions, ScrollView, Animated, Modal, FlatList
+    ActivityIndicator, Dimensions, ScrollView, Modal, FlatList, SectionList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSongStaging } from '../hooks/useSongStaging';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import { useSongStaging } from '../hooks/useSongStaging'; // Kept for simple single-song checks if needed
 import { Colors } from '../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
+import { QueueItem } from '../store/downloadQueueStore';
 import { Toast } from '../components/Toast';
 import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
 import { UnifiedSong } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
-
-import { QualitySelector } from '../components/QualitySelector';
 import { Audio } from 'expo-av';
 import { ImageSearchService } from '../services/ImageSearchService';
 
+// New Architecture Imports
+import { useDownloaderTabStore } from '../store/downloaderTabStore';
+import { useDownloadQueueStore } from '../store/downloadQueueStore';
+import { 
+    DownloadGridCard, 
+    BatchReviewModal, 
+    FloatingDownloadIndicator, 
+    DownloadQueueModal 
+} from '../components';
+
 const { width } = Dimensions.get('window');
 
-export const AudioDownloaderScreen = ({ navigation, route }: any) => {
-    const [query, setQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<UnifiedSong[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
-    const [searchStatus, setSearchStatus] = useState<string>('');
+export const AudioDownloaderScreen = ({ navigation }: any) => {
+    // Global Stores
+    const { 
+        tabs, activeTabId, 
+        createTab, closeTab, setActiveTab, updateTab, 
+        toggleSelection, clearAllSelections, getSelectedSongs 
+    } = useDownloaderTabStore();
     
-    // Preview sound for search results
-    const [previewSound, setPreviewSound] = useState<Audio.Sound | null>(null);
-    const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
-    const [previewPosition, setPreviewPosition] = useState(0);
-    const [previewDuration, setPreviewDuration] = useState(0);
-    
-    // Lyrics fetch cleanup
-    const lyricsFetchCleanupRef = useRef<(() => void) | null>(null);
-    
-    // stageSong now accepts UnifiedSong from race engine
-    const { staging, stageSong, updateSelection, finalizeDownload, togglePreview, isPlaying } = useSongStaging();
+    const { addToQueue } = useDownloadQueueStore();
     const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+
+    // Local UI State
+    const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
     const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
     
-    // Visibility Management: Hide MiniPlayer when Downloader is open
+    const [showQueue, setShowQueue] = useState(false);
+    const [selectionMode, setSelectionMode] = useState(false);
+    
+    // Dual-Field Search State (Mutually Exclusive)
+    const [searchMode, setSearchMode] = useState<'title' | 'artist'>('title'); // Default: title open
+    const [titleQuery, setTitleQuery] = useState('');
+    const [artistQuery, setArtistQuery] = useState('');
+    const [remixSectionExpanded, setRemixSectionExpanded] = useState(false);
+    
+    // Animated values for smooth transitions
+    const titleFieldWidth = useSharedValue(200); // Start with title open
+    const artistFieldWidth = useSharedValue(0);
+    
+    // Animated styles
+    const titleFieldStyle = useAnimatedStyle(() => ({
+        width: titleFieldWidth.value,
+        opacity: titleFieldWidth.value > 0 ? 1 : 0
+    }));
+    
+    const artistFieldStyle = useAnimatedStyle(() => ({
+        width: artistFieldWidth.value,
+        opacity: artistFieldWidth.value > 0 ? 1 : 0
+    }));
+    
+    // Handle field expansion (mutually exclusive)
     useEffect(() => {
-        setMiniPlayerHidden(true);
-        return () => setMiniPlayerHidden(false);
-    }, [setMiniPlayerHidden]);
-    const [showLyricsModal, setShowLyricsModal] = useState(false);
-    const [showQualityModal, setShowQualityModal] = useState(false);
-    const [showCoverSearchModal, setShowCoverSearchModal] = useState(false);
-    const [coverSearchQuery, setCoverSearchQuery] = useState('');
-    const [coverSearchResults, setCoverSearchResults] = useState<string[]>([]);
-    const [isSearchingCovers, setIsSearchingCovers] = useState(false);
+        if (searchMode === 'title') {
+            titleFieldWidth.value = withSpring(200);
+            artistFieldWidth.value = withSpring(0);
+        } else if (searchMode === 'artist') {
+            titleFieldWidth.value = withSpring(0);
+            artistFieldWidth.value = withSpring(200);
+        }
+    }, [searchMode]);
+    
+    // Preview Audio State
+    const [previewSound, setPreviewSound] = useState<Audio.Sound | null>(null);
+    const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
 
-    // Cleanup preview sound on unmount
+    // Audio Ref for cleanup
+    const previewSoundRef = useRef<Audio.Sound | null>(null);
+
+    // Sync ref with state
     useEffect(() => {
-        return () => {
-            if (previewSound) {
-                previewSound.unloadAsync();
-            }
-            if (lyricsFetchCleanupRef.current) {
-                lyricsFetchCleanupRef.current();
-            }
-        };
+        previewSoundRef.current = previewSound;
     }, [previewSound]);
 
-    // Stop preview and lyrics fetch when navigating away from screen
+    // Cleanup on unmount
     useEffect(() => {
-        const unsubscribe = navigation.addListener('blur', async () => {
-            if (previewSound) {
-                await previewSound.unloadAsync();
-                setPreviewSound(null);
-                setPlayingPreviewId(null);
+        setMiniPlayerHidden(true);
+        return () => {
+            setMiniPlayerHidden(false);
+            if (previewSoundRef.current) {
+                previewSoundRef.current.unloadAsync();
             }
-            if (lyricsFetchCleanupRef.current) {
-                lyricsFetchCleanupRef.current();
-                lyricsFetchCleanupRef.current = null;
-            }
-        });
+        };
+    }, []);
 
-        return unsubscribe;
-    }, [navigation, previewSound]);
-
-    const handleSearch = async () => {
-        if (!query.trim()) return;
+    // Filter Results for Artist Search
+    const filterResults = (results: UnifiedSong[], artistQuery: string): {
+        exactMatches: UnifiedSong[];
+        remixesAndCovers: UnifiedSong[];
+    } => {
+        const artistLower = artistQuery.toLowerCase().trim();
         
-        // Stop any playing preview
-        if (previewSound) {
-            await previewSound.unloadAsync();
-            setPreviewSound(null);
-            setPlayingPreviewId(null);
+        const exactMatches = results.filter(song => {
+            const songArtist = song.artist.toLowerCase();
+            // Exact match: artist name appears without remix/cover keywords
+            return songArtist.includes(artistLower) && 
+                   !songArtist.match(/remix|cover|vs\.|feat\.|ft\./i);
+        });
+        
+        const remixesAndCovers = results.filter(song => {
+            const songArtist = song.artist.toLowerCase();
+            return songArtist.includes(artistLower) && 
+                   songArtist.match(/remix|cover|vs\.|feat\.|ft\./i);
+        });
+        
+        return { exactMatches, remixesAndCovers };
+    };
+
+    // Handle Search
+    const handleSearch = async () => {
+        // Construct query from dual fields
+        let finalQuery = '';
+        
+        if (titleQuery && artistQuery) {
+            finalQuery = `${titleQuery} ${artistQuery}`;
+        } else if (artistQuery) {
+            finalQuery = artistQuery;
+        } else if (titleQuery) {
+            finalQuery = titleQuery;
         }
         
-        setIsSearching(true);
-        setSearchStatus('Starting search...');
-        setSearchResults([]);
+        if (!finalQuery.trim()) return;
+        
+        // Update Tab State
+        updateTab(activeTabId, { isSearching: true, status: 'Searching...', results: [], remixResults: [] });
+
         try {
-            console.log('[UI] 🏁 Starting parallel race search...');
-            const results = await MultiSourceSearchService.searchMusic(query, (status) => {
-                setSearchStatus(status);
+            console.log(`[Tab-${activeTabId.slice(-4)}] 🔍 Searching: ${finalQuery}`);
+            const results = await MultiSourceSearchService.searchMusic(finalQuery, (status) => {
+                 updateTab(activeTabId, { status });
             });
-            setSearchResults(results);
-            if (results.length === 0) {
-                setToast({ visible: true, message: 'No songs found', type: 'error' });
+            
+            // Filter results if artist query exists
+            if (artistQuery) {
+                const { exactMatches, remixesAndCovers } = filterResults(results, artistQuery);
+                updateTab(activeTabId, { 
+                    results: exactMatches,
+                    remixResults: remixesAndCovers,
+                    isSearching: false, 
+                    status: exactMatches.length === 0 && remixesAndCovers.length === 0 ? 'No results found.' : '' 
+                });
             } else {
-                console.log(`[UI] ✓ Got ${results.length} results`);
+                updateTab(activeTabId, { 
+                    results, 
+                    remixResults: [],
+                    isSearching: false, 
+                    status: results.length === 0 ? 'No results found.' : '' 
+                });
             }
+            
         } catch (error) {
+            updateTab(activeTabId, { isSearching: false, status: 'Search failed.' });
             setToast({ visible: true, message: 'Search failed', type: 'error' });
-        } finally {
-            setIsSearching(false);
-            setSearchStatus('');
         }
     };
 
+    // Handle Preview
     const handlePreviewToggle = async (song: UnifiedSong) => {
         try {
-            // If this song is already playing, pause it
             if (playingPreviewId === song.id && previewSound) {
                 await previewSound.pauseAsync();
                 setPlayingPreviewId(null);
                 return;
             }
 
-            // Stop any currently playing preview
-            if (previewSound) {
-                await previewSound.unloadAsync();
-            }
+            if (previewSound) await previewSound.unloadAsync();
 
-            // Load and play new preview
-            console.log('[Preview] Loading:', song.title);
             const { sound } = await Audio.Sound.createAsync(
                 { uri: song.downloadUrl },
                 { shouldPlay: true }
@@ -135,500 +191,342 @@ export const AudioDownloaderScreen = ({ navigation, route }: any) => {
             
             setPreviewSound(sound);
             setPlayingPreviewId(song.id);
-
-            // Track playback status for progress bar
-            sound.setOnPlaybackStatusUpdate((status) => {
-                if (status.isLoaded) {
-                    setPreviewPosition(status.positionMillis);
-                    setPreviewDuration(status.durationMillis || 0);
-                    
-                    if (status.didJustFinish) {
-                        setPlayingPreviewId(null);
-                        setPreviewPosition(0);
-                        setPreviewDuration(0);
-                    }
-                }
+            sound.setOnPlaybackStatusUpdate((s) => {
+                if (s.isLoaded && s.didJustFinish) setPlayingPreviewId(null);
             });
-        } catch (error) {
-            console.error('[Preview] Failed:', error);
+        } catch (e) {
             setToast({ visible: true, message: 'Preview failed', type: 'error' });
         }
     };
 
-    const handleSelectSong = async (song: UnifiedSong) => {
-        // Stop preview when selecting
-        if (previewSound) {
-            await previewSound.unloadAsync();
-            setPreviewSound(null);
-            setPlayingPreviewId(null);
+    // New Tab for Artist
+    const openArtistTab = (artistName: string) => {
+        createTab(artistName);
+        // We'll need to trigger search for the new tab after creation
+        // Since createTab is synchronous, we can find the last tab and update it
+        // Or better: createTab could accept initial search request?
+        // Current implementation: createTab(query).
+        // I need to trigger search effect or just call search manually?
+        // I'll manually trigger it in a timeout to ensure state update
+        setTimeout(() => {
+            // Find the new tab (it's the active one now)
+            // But wait, createTab sets active.
+            // We need a way to run search.
+            // For now, user has to hit enter? 
+            // Better: update logic.
+            // Actually, `handleSearch` uses `activeTab`. 
+            // So if I call handleSearch() immediately it might use old active tab if state hasn't flushed.
+            // React batching...
+            // I'll just let the user hit enter for now or Auto-Search?
+            // "Clicking Artist Name -> Opens new search tab... and immediately fetch".
+            // I'll add an effect: useEffect(() => { if new tab has query & no results & !searching => search }, [activeTabId])
+        }, 100);
+    };
+    
+    // Auto-Search Effect for new Tabs
+    useEffect(() => {
+        if (activeTab.query && activeTab.results.length === 0 && !activeTab.isSearching && activeTab.status === '') {
+             handleSearch();
         }
-        
-        // Cancel any previous lyrics fetch
-        if (lyricsFetchCleanupRef.current) {
-            lyricsFetchCleanupRef.current();
-        }
-        
-        // Stage song and store cleanup function
-        const cleanup = await stageSong(song);
-        lyricsFetchCleanupRef.current = cleanup || null;
-        
-        setSearchResults([]); // Clear results to show staging
-        setQuery(''); 
+    }, [activeTabId]); // When switching to a tab (including new one)
+
+    // Selection Logic
+    const handleLongPress = (song: UnifiedSong) => {
+        toggleSelection(activeTabId, song.id);
     };
 
-    const handleCoverSearch = async () => {
-        if (!coverSearchQuery.trim()) return;
-        
-        console.log('[CoverSearch] Searching for:', coverSearchQuery);
-        setIsSearchingCovers(true);
-        try {
-            const results = await ImageSearchService.searchItunes(coverSearchQuery);
-            console.log('[CoverSearch] Got results:', results.length);
-            setCoverSearchResults(results);
-            if (results.length === 0) {
-                setToast({ visible: true, message: 'No cover art found', type: 'error' });
-            } else {
-                console.log('[CoverSearch] First result:', results[0]);
-            }
-        } catch (error) {
-            console.error('[CoverSearch] Failed:', error);
-            setToast({ visible: true, message: 'Cover search failed', type: 'error' });
-        } finally {
-            setIsSearchingCovers(false);
-        }
-    };
-
-    const handleAddCover = (coverUrl: string) => {
-        console.log('[CoverSearch] Adding cover:', coverUrl);
-        if (!staging) {
-            console.error('[CoverSearch] No staging found!');
+    // Direct Download Logic
+    const handlePress = (song: UnifiedSong) => {
+        // If selection mode is active, toggle selection
+        if (activeTab.selectedSongs.length > 0 || selectionMode) {
+            toggleSelection(activeTabId, song.id);
             return;
         }
-        
-        console.log('[CoverSearch] Current coverOptions:', staging.coverOptions);
-        
-        // Add to cover options if not already there
-        const newCoverOptions = staging.coverOptions.includes(coverUrl)
-            ? staging.coverOptions
-            : [...staging.coverOptions, coverUrl];
-        
-        console.log('[CoverSearch] New coverOptions:', newCoverOptions);
-        console.log('[CoverSearch] Calling updateSelection...');
-        
-        updateSelection({ 
-            coverOptions: newCoverOptions,
-            selectedCoverUri: coverUrl 
-        });
-        
-        console.log('[CoverSearch] UpdateSelection called');
-        
-        setShowCoverSearchModal(false);
-        setCoverSearchQuery('');
-        setCoverSearchResults([]);
-        setToast({ visible: true, message: 'Cover art added!', type: 'success' });
+
+        // Direct Download
+        const queueItem: UnifiedSong = {
+            ...song,
+            highResArt: song.highResArt || song.thumbnail || '',
+            downloadUrl: song.downloadUrl || song.streamUrl || '',
+            streamUrl: song.downloadUrl || song.streamUrl || '', // Ensure streamUrl is set
+            selectedQuality: {
+                url: song.downloadUrl || song.streamUrl || '',
+                quality: '320kbps',
+                format: 'mp3'
+            },
+            selectedLyrics: '', // Lyrics will be fetched during download
+            selectedCoverUri: song.highResArt || song.thumbnail || ''
+        };
+
+        addToQueue([queueItem]);
+        setToast({ visible: true, message: 'Added to Download Queue', type: 'success' });
     };
 
-    // Render Search Results
-    const renderSearchResults = () => {
-        if (staging) return null; // Don't show results if staging is active
+    const handleBatchDownload = () => {
+        const selectedSongs = getSelectedSongs().map(s => s.song);
+        if (selectedSongs.length === 0) return;
 
-        if (isSearching) {
-            return (
-                <View style={styles.center}>
-                    <ActivityIndicator size="large" color={Colors.primary} />
-                    <Text style={styles.statusText}>{searchStatus || 'Searching...'}</Text>
-                </View>
-            );
-        }
+        const queueItems = selectedSongs.map(song => ({
+            ...song,
+            highResArt: song.highResArt || song.thumbnail || '',
+            downloadUrl: song.downloadUrl || song.streamUrl || '',
+            streamUrl: song.downloadUrl || song.streamUrl || '',
+            selectedQuality: {
+                url: song.downloadUrl || song.streamUrl || '',
+                quality: '320kbps',
+                format: 'mp3'
+            },
+            selectedLyrics: '',
+            selectedCoverUri: song.highResArt || song.thumbnail || ''
+        }));
 
-        if (searchResults.length > 0) {
-            return (
-                <FlatList
-                    data={searchResults}
-                    keyExtractor={(item) => item.id}
-                    contentContainerStyle={{ padding: 20 }}
-                    renderItem={({ item }) => (
-                        <View style={styles.resultItem}>
-                            {/* Play/Pause Button */}
-                            <Pressable 
-                                style={styles.playButton}
-                                onPress={() => handlePreviewToggle(item)}
-                            >
-                                <Ionicons 
-                                    name={playingPreviewId === item.id ? "pause" : "play"} 
-                                    size={24} 
-                                    color="#fff" 
-                                />
-                            </Pressable>
-
-                            {/* Song Info - Tappable to select */}
-                            <Pressable 
-                                style={styles.resultContent}
-                                onPress={() => handleSelectSong(item)}
-                            >
-                                <Image source={{ uri: item.highResArt }} style={styles.resultImage} />
-                                <View style={styles.resultInfo}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                        <Text style={styles.resultTitle} numberOfLines={1}>{item.title}</Text>
-                                        <View style={[
-                                            styles.sourceBadge, 
-                                            { backgroundColor: 
-                                                item.source === 'Wynk' ? '#0066FF' : // Blue for Wynk
-                                                item.source === 'NetEase' ? '#E60012' : // Red for NetEase
-                                                item.source === 'SoundCloud' ? '#FF5500' : 
-                                                '#FFA500' 
-                                            }
-                                        ]}>
-                                            <Text style={styles.sourceBadgeText}>{item.source}</Text>
-                                        </View>
-                                    </View>
-                                    <Text style={styles.resultArtist} numberOfLines={1}>{item.artist}</Text>
-                                </View>
-                                <Ionicons name="download-outline" size={24} color={Colors.primary} />
-                            </Pressable>
-                        </View>
-                    )}
-                />
-            );
-        }
-        
-        return null;
+        addToQueue(queueItems as UnifiedSong[]);
+        clearAllSelections();
+        setToast({ visible: true, message: `Added ${selectedSongs.length} songs to queue`, type: 'success' });
     };
 
-    // Staging Preview UI
-    const renderStaging = () => {
-        if (!staging) return null;
-
-        if (staging.status === 'searching') {
-             // Should not happen often with new flow, but good fallback
-            return (
-                <View style={styles.center}>
-                    <ActivityIndicator size="large" color={Colors.primary} />
-                    <Text style={styles.statusText}>Loading metadata...</Text>
-                </View>
-            );
-        }
-        
-        // Error state...
-        if (staging.status === 'error') {
-            return (
-                <View style={styles.center}>
-                    <Ionicons name="alert-circle-outline" size={48} color={Colors.error} />
-                    <Text style={styles.errorText}>{staging.error || 'Staging failed'}</Text>
-                    <Pressable style={styles.retryBtn} onPress={() => stageSong({ 
-                        id: staging.id, 
-                        title: staging.title, 
-                        artist: staging.artist, 
-                        highResArt: staging.coverOptions[0], 
-                        downloadUrl: staging.qualityOptions[0]?.url || '', 
-                        source: 'SoundCloud', // Default to SoundCloud for retry
-                        duration: staging.duration  
-                    })}> 
-                        <Text style={styles.retryText}>Retry</Text>
+    // Render Tab Bar
+    const renderTabBar = () => (
+        <View style={styles.tabBar}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 8}}>
+                {tabs.map(tab => (
+                    <Pressable 
+                        key={tab.id}
+                        style={[styles.tabItem, tab.id === activeTabId && styles.activeTabItem]}
+                        onPress={() => setActiveTab(tab.id)}
+                    >
+                        <Text style={[styles.tabText, tab.id === activeTabId && styles.activeTabText]} numberOfLines={1}>
+                            {tab.query || 'New Tab'}
+                        </Text>
+                        {tabs.length > 1 && (
+                            <Pressable onPress={() => closeTab(tab.id)} style={{marginLeft: 6}}>
+                                <Ionicons name="close" size={14} color="#999" />
+                            </Pressable>
+                        )}
                     </Pressable>
-                     <Pressable style={styles.cancelBtn} onPress={() => setSearchResults([])}>
-                        <Text style={styles.cancelText}>Cancel</Text>
-                    </Pressable>
-                </View>
-            );
-        }
-        
-        return (
-            <ScrollView contentContainerStyle={styles.stagingContent}>
-                {/* 1. Cover Art Selection (Carousel) */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingRight: 16 }}>
-                    <Text style={styles.sectionTitle}>Cover Art</Text>
-                    <Pressable onPress={() => {
-                        setCoverSearchQuery(`${staging.title} ${staging.artist}`);
-                        setShowCoverSearchModal(true);
-                    }}>
-                        <Ionicons name="search" size={20} color={Colors.primary} />
-                    </Pressable>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carousel}>
-                    {staging.coverOptions.map((uri, idx) => (
-                        <Pressable 
-                            key={idx} 
-                            onPress={() => updateSelection({ selectedCoverUri: uri })}
-                            onLongPress={() => {
-                                setCoverSearchQuery(`${staging.title} ${staging.artist}`);
-                                setShowCoverSearchModal(true);
-                            }}
-                            style={[
-                                styles.coverOption, 
-                                staging.selectedCoverUri === uri && styles.selectedCover
-                            ]}
-                        >
-                            <Image source={{ uri }} style={styles.coverImage} />
-                            {staging.selectedCoverUri === uri && (
-                                <View style={styles.checkBadge}>
-                                    <Ionicons name="checkmark" size={16} color="#fff" />
-                                </View>
-                            )}
-                        </Pressable>
-                    ))}
-                </ScrollView>
-
-                {/* 2. Audio Metadata & Quality */}
-                <View style={styles.metaContainer}>
-                    <Text style={styles.trackTitle}>{staging.title}</Text>
-                    <Text style={styles.trackArtist}>{staging.artist}</Text>
-                    
-                    {/* Quality Selection Button */}
-                    <View style={styles.qualityContainer}>
-                       <Pressable 
-                            style={styles.qualityBtn}
-                            onPress={() => setShowQualityModal(true)}
-                       >
-                            <View style={styles.qualityInfo}>
-                                <Text style={styles.qualityLabel}>Audio Quality</Text>
-                                <Text style={styles.qualityValue}>
-                                    {staging.selectedQuality?.label}
-                                </Text>
-                            </View>
-                            <Ionicons name="chevron-down" size={20} color="#888" />
-                       </Pressable>
-                    </View>
-
-                    {/* Quality Modal */}
-                    <QualitySelector
-                        visible={showQualityModal}
-                        onClose={() => setShowQualityModal(false)}
-                        options={staging.qualityOptions}
-                        selected={staging.selectedQuality}
-                        onSelect={(opt) => updateSelection({ selectedQuality: opt })}
-                    />
-
-                    <Pressable style={styles.previewBtn} onPress={togglePreview}>
-                        <Ionicons name={isPlaying ? "pause" : "play"} size={20} color="#fff" />
-                        <Text style={styles.previewText}>{isPlaying ? "Pause Preview" : "Preview Audio"}</Text>
-                    </Pressable>
-                </View>
-
-                {/* 3. Lyrics Selection */}
-                <Text style={styles.sectionTitle}>Select Lyrics</Text>
-                {staging.lyricOptions === null ? (
-                    <View style={styles.lyricsLoadingContainer}>
-                        <ActivityIndicator size="small" color={Colors.primary} />
-                        <Text style={styles.lyricsLoadingText}>Fetching lyrics...</Text>
-                    </View>
-                ) : staging.lyricOptions.length > 0 ? (
-                    <View style={styles.lyricsCard}>
-                        {staging.lyricOptions.map((opt, idx) => (
-                            <View key={idx}>
-                                <Pressable 
-                                    style={[
-                                        styles.lyricOption,
-                                        staging.selectedLyrics === opt.lyrics && styles.selectedLyricOption
-                                    ]}
-                                    onPress={() => updateSelection({ selectedLyrics: opt.lyrics })}
-                                >
-                                    <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
-                                        <Text style={styles.lyricSource}>{opt.source}</Text>
-                                        <Pressable onPress={() => setShowLyricsModal(true)} style={styles.viewFullBtn}>
-                                             <Text style={styles.viewFullText}>View Full</Text>
-                                        </Pressable>
-                                    </View>
-                                    <Text numberOfLines={3} style={styles.lyricPreview}>
-                                        {opt.lyrics.substring(0, 150).replace(/\n/g, ' ')}...
-                                    </Text>
-                                </Pressable>
-                            </View>
-                        ))}
-                    </View>
-                ) : (
-                    <View style={styles.lyricsLoadingContainer}>
-                        <Ionicons name="document-text-outline" size={24} color={Colors.textSecondary} />
-                        <Text style={[styles.lyricsLoadingText, { marginLeft: 8 }]}>No lyrics found.</Text>
-                    </View>
-                )}
-                
-                {/* 4. Action */}
-                <View style={{ height: 100 }} /> 
+                ))}
+                <Pressable style={styles.newTabBtn} onPress={() => createTab('')}>
+                    <Ionicons name="add" size={20} color="#fff" />
+                </Pressable>
             </ScrollView>
-        );
-    };
+        </View>
+    );
 
     return (
         <View style={styles.container}>
-            <LinearGradient
-                colors={['#1F1F1F', '#000']}
-                style={StyleSheet.absoluteFill}
-            />
+            <LinearGradient colors={['#1F1F1F', '#000']} style={StyleSheet.absoluteFill} />
             <SafeAreaView style={styles.safeArea}>
-                {/* Header */}
+                
+                {/* Header Section */}
                 <View style={styles.header}>
                     <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color="#fff" />
                     </Pressable>
-                    <View style={styles.searchBar}>
-                        <Ionicons name="search" size={20} color="#666" style={{ marginRight: 8 }} />
-                        <TextInput
-                            style={styles.input}
-                            value={query}
-                            onChangeText={setQuery}
-                            onSubmitEditing={handleSearch}
-                            placeholder="Search song to download..."
-                            placeholderTextColor="#666"
-                            returnKeyType="search"
-                            autoFocus
-                        />
-                         {query.length > 0 && (
-                            <Pressable onPress={() => setQuery('')}>
-                                <Ionicons name="close-circle" size={18} color="#666" />
-                            </Pressable>
+                    {/* Simplified Search Bar */}
+                    <View style={styles.searchContainer}>
+                        {/* Title Icon */}
+                        <Pressable 
+                            onPress={() => setSearchMode('title')}
+                            style={styles.iconBtn}
+                        >
+                            <Ionicons 
+                                name="musical-note" 
+                                size={20} 
+                                color={searchMode === 'title' ? '#fff' : '#666'} 
+                            />
+                        </Pressable>
+                        
+                        {/* Title Field (Animated) - Only render when active */}
+                        {searchMode === 'title' && (
+                            <Animated.View 
+                                style={[styles.animatedField, titleFieldStyle]}
+                            >
+                                <TextInput
+                                    style={styles.animatedInput}
+                                    value={titleQuery}
+                                    onChangeText={setTitleQuery}
+                                    onSubmitEditing={handleSearch}
+                                    placeholder="Song Title..."
+                                    placeholderTextColor="#666"
+                                    returnKeyType="search"
+                                />
+                                {titleQuery.length > 0 && (
+                                    <Pressable onPress={() => setTitleQuery('')} style={styles.inlineClearBtn}>
+                                        <Ionicons name="close-circle" size={16} color="#666" />
+                                    </Pressable>
+                                )}
+                            </Animated.View>
+                        )}
+
+                        {/* Artist Icon */}
+                        <Pressable 
+                            onPress={() => setSearchMode('artist')}
+                            style={styles.iconBtn}
+                        >
+                            <Ionicons 
+                                name="person" 
+                                size={20} 
+                                color={searchMode === 'artist' ? '#fff' : '#666'} 
+                            />
+                        </Pressable>
+                        
+                        {/* Artist Field (Animated) - Only render when active */}
+                        {searchMode === 'artist' && (
+                            <Animated.View 
+                                style={[styles.animatedField, artistFieldStyle]}
+                            >
+                                <TextInput
+                                    style={styles.animatedInput}
+                                    value={artistQuery}
+                                    onChangeText={setArtistQuery}
+                                    onSubmitEditing={handleSearch}
+                                    placeholder="Artist Name..."
+                                    placeholderTextColor="#666"
+                                    returnKeyType="search"
+                                />
+                                {artistQuery.length > 0 && (
+                                    <Pressable onPress={() => setArtistQuery('')} style={styles.inlineClearBtn}>
+                                        <Ionicons name="close-circle" size={16} color="#666" />
+                                    </Pressable>
+                                )}
+                            </Animated.View>
                         )}
                     </View>
+                    
+                    <Pressable 
+                        onPress={() => setSelectionMode(!selectionMode)} 
+                        style={[styles.selectModeBtn, selectionMode && styles.selectModeBtnActive]}
+                    >
+                        <Text style={[styles.selectModeText, selectionMode && styles.selectModeTextActive]}>
+                            {selectionMode ? 'Done' : 'Select'}
+                        </Text>
+                    </Pressable>
                 </View>
 
-                {renderSearchResults()}
-                {renderStaging()}
+                {/* Tab Bar */}
+                {renderTabBar()}
 
-                {/* FAB - Download Button */}
-                {staging && staging.status === 'ready' && (
-                    <Pressable 
-                        style={styles.fab} 
-                        onPress={async () => {
-                            await finalizeDownload();
-                            setToast({ visible: true, message: 'Song Saved to Library!', type: 'success' });
-                            setTimeout(() => {
-                                navigation.goBack(); // Close modal
-                                navigation.navigate('Main', { screen: 'Library' });
-                            }, 1500);
-                        }}
-                    >
-                        <LinearGradient
-                            colors={['#8E2DE2', '#4A00E0']}
-                            style={styles.fabGradient}
-                        >
-                            <Ionicons name="download-outline" size={24} color="#fff" />
-                            <Text style={styles.fabText}>Save to Library</Text>
-                        </LinearGradient>
-                    </Pressable>
-                )}
-                
-                {staging && staging.status === 'downloading' && (
-                     <View style={styles.downloadingOverlay}>
-                        <ActivityIndicator size="large" color="#fff" />
-                        <Text style={styles.downloadText}>Downloading... {(staging.progress * 100).toFixed(0)}%</Text>
-                     </View>
-                )}
-                
-                {/* Mini Preview Player Bar */}
-                {playingPreviewId && searchResults.length > 0 && (
-                    <View style={styles.miniPlayerBar}>
-                        {(() => {
-                            const playingSong = searchResults.find(s => s.id === playingPreviewId);
-                            if (!playingSong) return null;
-                            
-                            const progress = previewDuration > 0 ? previewPosition / previewDuration : 0;
-                            const formatTime = (ms: number) => {
-                                const seconds = Math.floor(ms / 1000);
-                                const mins = Math.floor(seconds / 60);
-                                const secs = seconds % 60;
-                                return `${mins}:${secs.toString().padStart(2, '0')}`;
-                            };
-                            
-                            return (
-                                <>
-                                    <Image source={{ uri: playingSong.highResArt }} style={styles.miniPlayerArt} />
-                                    <View style={styles.miniPlayerInfo}>
-                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                            <Text style={styles.miniPlayerTitle} numberOfLines={1}>{playingSong.title}</Text>
-                                            <Text style={styles.miniPlayerTime}>{formatTime(previewPosition)} / {formatTime(previewDuration)}</Text>
-                                        </View>
-                                        <Text style={styles.miniPlayerArtist} numberOfLines={1}>{playingSong.artist}</Text>
-                                        
-                                        {/* Progress Bar */}
-                                        <View 
-                                            style={styles.progressBarContainer}
-                                            onLayout={(e) => {
-                                                // Store width for scrubbing calculation
-                                                e.currentTarget.measure((x, y, width) => {
-                                                    (e.currentTarget as any)._width = width;
-                                                });
-                                            }}
-                                        >
-                                            <View style={styles.progressBarBackground}>
-                                                <View style={[styles.progressBarFill, { width: `${progress * 100}%` }]} />
-                                            </View>
-                                            {/* Scrubber - tap to seek */}
-                                            <Pressable 
-                                                style={styles.progressBarTouchArea}
-                                                onPress={async (e) => {
-                                                    if (!previewSound || !previewDuration) return;
-                                                    const { locationX } = e.nativeEvent;
-                                                    const containerWidth = (e.currentTarget as any)._width || 300;
-                                                    const seekPosition = (locationX / containerWidth) * previewDuration;
-                                                    await previewSound.setPositionAsync(seekPosition);
-                                                }}
+                {/* Content Area */}
+                <View style={styles.content}>
+                    {activeTab.isSearching ? (
+                        <View style={styles.center}>
+                            <ActivityIndicator size="large" color={Colors.primary} />
+                            <Text style={styles.statusText}>{activeTab.status}</Text>
+                        </View>
+                    ) : activeTab.results.length > 0 || (activeTab.remixResults && activeTab.remixResults.length > 0) ? (
+                        activeTab.remixResults && activeTab.remixResults.length > 0 ? (
+                            <SectionList
+                                sections={[
+                                    ...(activeTab.results.length > 0 ? [{
+                                        title: 'OFFICIAL TRACKS',
+                                        data: activeTab.results
+                                    }] : []),
+                                    {
+                                        title: 'REMIXES & COVERS',
+                                        data: activeTab.remixResults,
+                                        collapsed: !remixSectionExpanded
+                                    }
+                                ]}
+                                keyExtractor={(item) => item.id}
+                                contentContainerStyle={styles.gridContent}
+                                renderSectionHeader={({ section }) => (
+                                    <Pressable 
+                                        onPress={() => {
+                                            if (section.title === 'REMIXES & COVERS') {
+                                                setRemixSectionExpanded(!remixSectionExpanded);
+                                            }
+                                        }}
+                                        style={styles.sectionHeader}
+                                    >
+                                        <Text style={styles.sectionHeaderText}>
+                                            {section.title} ({section.data.length})
+                                        </Text>
+                                        {section.title === 'REMIXES & COVERS' && (
+                                            <Ionicons 
+                                                name={remixSectionExpanded ? 'chevron-up' : 'chevron-down'} 
+                                                size={18} 
+                                                color="#999" 
+                                            />
+                                        )}
+                                    </Pressable>
+                                )}
+                                renderItem={({ item, section }) => {
+                                    if (section.title === 'REMIXES & COVERS' && !remixSectionExpanded) {
+                                        return null;
+                                    }
+                                    return (
+                                        <View style={{ width: '50%', padding: 4 }}>
+                                            <DownloadGridCard
+                                                song={item}
+                                                isSelected={activeTab.selectedSongs.includes(item.id)}
+                                                isPlayingPreview={playingPreviewId === item.id}
+                                                onPress={() => handlePress(item)}
+                                                onLongPress={() => handleLongPress(item)}
+                                                onPlayPress={() => handlePreviewToggle(item)}
+                                                onArtistPress={() => openArtistTab(item.artist)}
+                                                selectionMode={selectionMode || activeTab.selectedSongs.length > 0}
                                             />
                                         </View>
-                                    </View>
-                                    <Pressable 
-                                        style={styles.miniPlayerButton}
-                                        onPress={() => handlePreviewToggle(playingSong)}
-                                    >
-                                        <Ionicons name="pause" size={24} color="#fff" />
-                                    </Pressable>
-                                </>
-                            );
-                        })()}
+                                    );
+                                }}
+                            />
+                        ) : (
+                            <FlatList
+                                data={activeTab.results}
+                                keyExtractor={(item) => item.id}
+                                numColumns={2}
+                                contentContainerStyle={styles.gridContent}
+                                renderItem={({ item }) => (
+                                    <DownloadGridCard
+                                        song={item}
+                                        isSelected={activeTab.selectedSongs.includes(item.id)}
+                                        isPlayingPreview={playingPreviewId === item.id}
+                                        onPress={() => handlePress(item)}
+                                        onLongPress={() => handleLongPress(item)}
+                                        onPlayPress={() => handlePreviewToggle(item)}
+                                        onArtistPress={() => openArtistTab(item.artist)}
+                                        selectionMode={selectionMode || activeTab.selectedSongs.length > 0}
+                                    />
+                                )}
+                            />
+                        )
+                    ) : (
+                        <View style={styles.center}>
+                            <Ionicons name="musical-notes-outline" size={64} color="#333" />
+                            <Text style={styles.emptyText}>
+                                {activeTab.status || 'Search for your favorite songs to download.'}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                {/* Bottom Action Bar (Selection Mode) */}
+                 {getSelectedSongs().length > 0 && (
+                    <View style={styles.actionBar}>
+                        <Text style={styles.selectionText}>
+                            {getSelectedSongs().length} selected
+                        </Text>
+                        <Pressable style={styles.reviewBtn} onPress={handleBatchDownload}>
+                            <Text style={styles.reviewBtnText}>Download Selected</Text>
+                            <Ionicons name="download" size={18} color="#fff" />
+                        </Pressable>
+                        <Pressable style={styles.clearBtn} onPress={clearAllSelections}>
+                            <Ionicons name="close" size={24} color="#fff" />
+                        </Pressable>
                     </View>
                 )}
 
-                {/* Cover Art Search Modal */}
-                <Modal visible={showCoverSearchModal} animationType="slide" transparent={true}>
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Search Cover Art</Text>
-                                <Pressable onPress={() => {
-                                    setShowCoverSearchModal(false);
-                                    setCoverSearchQuery('');
-                                    setCoverSearchResults([]);
-                                }} style={styles.closeModalBtn}>
-                                    <Ionicons name="close" size={24} color="#fff" />
-                                </Pressable>
-                            </View>
+                {/* Overlays */}
+                {/* BatchReviewModal Removed */}
 
-                            {/* Search Input */}
-                            <View style={styles.searchContainer}>
-                                <TextInput
-                                    style={styles.searchInput}
-                                    placeholder="Search for cover art..."
-                                    placeholderTextColor="#888"
-                                    value={coverSearchQuery}
-                                    onChangeText={setCoverSearchQuery}
-                                    onSubmitEditing={handleCoverSearch}
-                                />
-                                <Pressable style={styles.searchButton} onPress={handleCoverSearch}>
-                                    {isSearchingCovers ? (
-                                        <ActivityIndicator color="#fff" />
-                                    ) : (
-                                        <Ionicons name="search" size={20} color="#fff" />
-                                    )}
-                                </Pressable>
-                            </View>
-
-                            {/* Results Grid */}
-                            <ScrollView style={styles.coverResultsScroll}>
-                                <View style={styles.coverResultsGrid}>
-                                    {coverSearchResults.map((coverUrl, idx) => (
-                                        <Pressable
-                                            key={idx}
-                                            style={styles.coverResultItem}
-                                            onPress={() => handleAddCover(coverUrl)}
-                                        >
-                                            <Image source={{ uri: coverUrl }} style={styles.coverResultImage} />
-                                        </Pressable>
-                                    ))}
-                                </View>
-                            </ScrollView>
-                        </View>
-                    </View>
-                </Modal>
-
+                
+                <DownloadQueueModal 
+                    visible={showQueue}
+                    onClose={() => setShowQueue(false)}
+                />
+                
+                <FloatingDownloadIndicator onPress={() => setShowQueue(true)} />
+                
                 {toast && (
                     <Toast 
                         visible={toast.visible} 
@@ -638,24 +536,6 @@ export const AudioDownloaderScreen = ({ navigation, route }: any) => {
                     />
                 )}
 
-                {/* Lyrics Preview Modal */}
-                <Modal visible={showLyricsModal} animationType="slide" transparent={true}>
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Full Lyrics</Text>
-                                <Pressable onPress={() => setShowLyricsModal(false)} style={styles.closeModalBtn}>
-                                    <Ionicons name="close" size={24} color="#fff" />
-                                </Pressable>
-                            </View>
-                            <ScrollView style={styles.modalScroll}>
-                                <Text style={styles.fullLyricsText}>
-                                    {staging?.selectedLyrics || 'No lyrics selected.'}
-                                </Text>
-                            </ScrollView>
-                        </View>
-                    </View>
-                </Modal>
             </SafeAreaView>
         </View>
     );
@@ -668,7 +548,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingBottom: 16,
+        paddingBottom: 8,
         paddingTop: 8,
     },
     backBtn: { padding: 8, marginRight: 8 },
@@ -681,275 +561,158 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         height: 44,
     },
-    input: { flex: 1, color: '#fff', fontSize: 16, height: '100%' },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    statusText: { color: Colors.textSecondary, marginTop: 12 },
-    errorText: { color: Colors.error, marginTop: 12, textAlign: 'center' },
-    retryBtn: { marginTop: 16, padding: 10, backgroundColor: '#333', borderRadius: 8 },
-    retryText: { color: '#fff' },
-    stagingContent: { paddingBottom: 120 },
-    sectionTitle: {
-        fontSize: 18, fontWeight: '700', color: '#fff', 
-        marginLeft: 16, marginTop: 24, marginBottom: 12 
-    },
-    carousel: { paddingLeft: 16 },
-    coverOption: {
-        width: 140, height: 140, marginRight: 12,
-        borderRadius: 12, overflow: 'hidden',
-        borderWidth: 2, borderColor: 'transparent',
-    },
-    selectedCover: { borderColor: Colors.primary },
-    coverImage: { width: '100%', height: '100%' },
-    checkBadge: {
-        position: 'absolute', top: 8, right: 8,
-        backgroundColor: Colors.primary, borderRadius: 12,
-        width: 24, height: 24, alignItems: 'center', justifyContent: 'center'
-    },
-    metaContainer: { padding: 16, alignItems: 'center' },
-    trackTitle: { fontSize: 22, fontWeight: 'bold', color: '#fff', textAlign: 'center' },
-    trackArtist: { fontSize: 16, color: Colors.textSecondary, marginTop: 4 },
-    qualityContainer: { width: '100%', marginTop: 16, paddingHorizontal: 16 },
-    qualityBtn: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        backgroundColor: '#222', padding: 16, borderRadius: 12,
-        borderWidth: 1, borderColor: '#333'
-    },
-    qualityInfo: {},
-    qualityLabel: { color: '#888', fontSize: 12, marginBottom: 4 },
-    qualityValue: { color: Colors.primary, fontSize: 16, fontWeight: '600' },
-    previewBtn: {
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: 'rgba(142, 45, 226, 0.2)',
-        paddingVertical: 10, paddingHorizontal: 20, borderRadius: 25,
-        marginTop: 16
-    },
-    previewText: { color: '#A78BFA', fontWeight: '600' },
-    lyricsCard: { marginHorizontal: 16 },
-    lyricOption: {
-        backgroundColor: '#222', borderRadius: 12, padding: 16, marginBottom: 10,
-        borderWidth: 1, borderColor: 'transparent'
-    },
-    selectedLyricOption: { borderColor: Colors.primary, backgroundColor: '#2A2A2A' },
-    lyricSource: { color: Colors.primary, fontSize: 12, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase' },
-    lyricPreview: { color: '#ccc', fontSize: 14, lineHeight: 22 },
-    viewFullBtn: { backgroundColor: '#333', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-    viewFullText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-    noLyricsText: { color: '#666', marginLeft: 16, fontStyle: 'italic' },
-    fab: {
-        position: 'absolute', bottom: 30,alignSelf: 'center',
-        borderRadius: 30, elevation: 8,
-        shadowColor: Colors.primary, shadowOffset: {width:0, height:4}, shadowOpacity:0.4, shadowRadius:8
-    },
-    fabGradient: {
-        flexDirection: 'row', alignItems: 'center', gap: 10,
-        paddingHorizontal: 24, paddingVertical: 16, borderRadius: 30
-    },
-    fabText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-    downloadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        justifyContent: 'center', alignItems: 'center',
-        zIndex: 100
-    },
-    downloadText: { color: '#fff', marginTop: 16, fontSize: 18, fontWeight: '600' },
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: '#1A1A1A', borderRadius: 16, maxHeight: '80%', padding: 20 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
-    closeModalBtn: { padding: 4 },
-    modalScroll: { flex: 1 },
-    fullLyricsText: { color: '#ddd', fontSize: 16, lineHeight: 28, textAlign: 'center' },
-    browseYoutubeBtn: {
-        marginHorizontal: 16,
-        marginTop: 16,
-        borderRadius: 16,
-        overflow: 'hidden',
-    },
-    browseYoutubeGradient: {
-        flexDirection: 'row',
+    selectModeBtn: {
+        marginLeft: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#222',
+        borderRadius: 20,
+        height: 44,
+        justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        gap: 12,
+        borderWidth: 1,
+        borderColor: '#333'
     },
-    browseYoutubeText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-    browseYoutubeSubtext: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
-    resultItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 12,
-        backgroundColor: '#1A1A1A',
-        borderRadius: 12,
-        marginBottom: 12,
-        gap: 12,
-    },
-    playButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+    selectModeBtnActive: {
         backgroundColor: Colors.primary,
-        justifyContent: 'center',
-        alignItems: 'center',
+        borderColor: Colors.primary
     },
-    resultContent: {
-        flex: 1,
+    selectModeText: {
+        color: '#fff',
+        fontWeight: '600',
+        fontSize: 14
+    },
+    selectModeTextActive: {
+        color: '#fff'
+    },
+    input: { flex: 1, color: '#fff', fontSize: 16, height: '100%' },
+    tabBar: {
+        height: 40,
+        borderBottomWidth: 1,
+        borderBottomColor: '#222',
+        marginBottom: 8
+    },
+    tabItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#111',
+        borderRadius: 12,
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: '#333'
     },
-    resultImage: {
-        width: 50,
-        height: 50,
-        borderRadius: 8,
+    activeTabItem: {
+        backgroundColor: '#333',
+        borderColor: Colors.primary
     },
-    resultInfo: {
-        flex: 1,
-    },
-    resultTitle: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    resultArtist: {
-        color: '#aaa',
-        fontSize: 14,
-    },
-    cancelBtn: {
-        marginTop: 12,
+    tabText: { color: '#888', fontSize: 13, maxWidth: 120 },
+    activeTabText: { color: '#fff', fontWeight: 'bold' },
+    newTabBtn: {
         padding: 8,
+        backgroundColor: '#222',
+        borderRadius: 20,
+        marginLeft: 4
     },
-    cancelText: {
-        color: '#888',
-        fontSize: 14,
-        textDecorationLine: 'underline',
-    },
-    sourceBadge: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-        marginLeft: 4,
-    },
-    sourceBadgeText: {
-        color: '#fff',
-        fontSize: 9,
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-    },
-    lyricsLoadingContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        gap: 10,
-    },
-    lyricsLoadingText: {
-        color: '#888',
-        fontSize: 14,
-        fontStyle: 'italic',
-    },
-    miniPlayerBar: {
+    content: { flex: 1 },
+    gridContent: { padding: 8, paddingBottom: 100 },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    statusText: { color: '#888', marginTop: 12 },
+    emptyText: { color: '#444', marginTop: 16, fontSize: 16 },
+    
+    actionBar: {
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
+        bottom: 20,
+        left: 20,
+        right: 20,
+        backgroundColor: '#222',
+        borderRadius: 16,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1A1A1A',
-        borderTopWidth: 1,
-        borderTopColor: '#333',
-        padding: 12,
-        gap: 12,
+        padding: 16,
+        elevation: 10,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.5,
+        shadowRadius: 5,
+        borderWidth: 1,
+        borderColor: Colors.primary
     },
-    miniPlayerArt: {
-        width: 50,
-        height: 50,
-        borderRadius: 8,
+    selectionText: { color: '#fff', fontSize: 16, fontWeight: 'bold', flex: 1 },
+    reviewBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.primary,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 20,
+        gap: 8,
+        marginRight: 12
     },
-    miniPlayerInfo: {
+    reviewBtnText: { color: '#fff', fontWeight: 'bold' },
+    clearBtn: { padding: 4 },
+    
+    // Simplified Search Styles
+    searchContainer: {
         flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8
     },
-    miniPlayerTitle: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    miniPlayerArtist: {
-        color: '#888',
-        fontSize: 12,
-        marginTop: 2,
-    },
-    miniPlayerButton: {
+    iconBtn: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: Colors.primary,
+        backgroundColor: '#222',
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#333'
     },
-    miniPlayerTime: {
-        color: '#888',
-        fontSize: 10,
-        marginLeft: 8,
-    },
-    progressBarContainer: {
-        marginTop: 6,
-        position: 'relative',
-    },
-    progressBarBackground: {
-        height: 3,
-        backgroundColor: '#333',
-        borderRadius: 2,
-        overflow: 'hidden',
-    },
-    progressBarFill: {
-        height: '100%',
-        backgroundColor: Colors.primary,
-    },
-    searchContainer: {
+    animatedField: {
+        height: 40,
         flexDirection: 'row',
-        gap: 8,
-        marginBottom: 16,
+        alignItems: 'center',
+        backgroundColor: '#222',
+        borderRadius: 20,
+        overflow: 'hidden',
+        paddingHorizontal: 12,
+        borderWidth: 1,
+        borderColor: '#333'
     },
-    searchInput: {
+    animatedInput: {
         flex: 1,
-        backgroundColor: '#2A2A2A',
-        borderRadius: 8,
-        padding: 12,
         color: '#fff',
         fontSize: 14,
+        height: '100%'
     },
-    searchButton: {
-        backgroundColor: Colors.primary,
-        borderRadius: 8,
-        width: 48,
-        height: 48,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    progressBarTouchArea: {
-        position: 'absolute',
-        top: -8,
-        left: 0,
-        right: 0,
-        height: 20,
-    },
-    coverResultsScroll: {
-        maxHeight: 400,
-    },
-    coverResultsGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
+    inlineClearBtn: {
         padding: 4,
+        marginLeft: 4
     },
-    coverResultItem: {
-        width: '30%',
-        aspectRatio: 1,
-        borderRadius: 8,
-        overflow: 'hidden',
+    
+    // Section Header Styles
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        marginHorizontal: 8,
+        marginTop: 8,
+        marginBottom: 4,
+        borderRadius: 8
     },
-    coverResultImage: {
-        width: '100%',
-        height: '100%',
-    },
+    sectionHeaderText: {
+        color: '#999',
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 1
+    }
 });
+

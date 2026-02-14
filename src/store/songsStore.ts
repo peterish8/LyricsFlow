@@ -11,6 +11,7 @@ import { useDailyStatsStore } from './dailyStatsStore';
 interface SongsState {
   // State
   songs: Song[];
+  hiddenSongs: Song[];
   currentSong: Song | null;
   isLoading: boolean;
   error: string | null;
@@ -18,10 +19,12 @@ interface SongsState {
   
   // Actions
   fetchSongs: () => Promise<void>;
+  fetchHiddenSongs: () => Promise<void>;
   getSong: (id: string) => Promise<Song | null>;
   addSong: (song: Song) => Promise<void>;
   updateSong: (song: Song) => Promise<void>;
   deleteSong: (id: string) => Promise<void>;
+  hideSong: (id: string, hide: boolean) => Promise<void>;
   setCurrentSong: (song: Song | null) => void;
   setSortBy: (sort: SortOption) => void;
   searchSongs: (query: string) => Promise<Song[]>;
@@ -32,6 +35,7 @@ interface SongsState {
 export const useSongsStore = create<SongsState>((set, get) => ({
   // Initial state
   songs: [],
+  hiddenSongs: [],
   currentSong: null,
   isLoading: false,
   error: null,
@@ -48,6 +52,22 @@ export const useSongsStore = create<SongsState>((set, get) => ({
       console.error('[STORE] Fetch error:', error);
       set({ 
         error: error instanceof Error ? error.message : 'Failed to fetch songs', 
+        isLoading: false 
+      });
+    }
+  },
+
+  // Fetch hidden songs
+  fetchHiddenSongs: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const hiddenSongs = await queries.getHiddenSongs();
+      console.log('[STORE] Fetched hidden songs:', hiddenSongs.length);
+      set({ hiddenSongs, isLoading: false });
+    } catch (error) {
+      console.error('[STORE] Fetch hidden error:', error);
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to fetch hidden songs', 
         isLoading: false 
       });
     }
@@ -110,14 +130,50 @@ export const useSongsStore = create<SongsState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await queries.deleteSong(id);
+      
       // Clear current song if it was deleted
       if (get().currentSong?.id === id) {
         set({ currentSong: null });
       }
+
+      // ✅ Sync with playerStore: Clear the active song if it was deleted
+      const { usePlayerStore } = await import('./playerStore');
+      const playerState = usePlayerStore.getState();
+      if (playerState.currentSong?.id === id) {
+          playerState.reset();
+      }
+
       await get().fetchSongs();
     } catch (error) {
       set({ 
         error: error instanceof Error ? error.message : 'Failed to delete song', 
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+
+  // Hide/Unhide song
+  hideSong: async (id: string, hide: boolean) => {
+    set({ isLoading: true, error: null });
+    try {
+      await queries.hideSong(id, hide);
+      
+      // Clear from player if hidden
+      if (hide) {
+        const { usePlayerStore } = await import('./playerStore');
+        const playerState = usePlayerStore.getState();
+        if (playerState.currentSong?.id === id) {
+          playerState.reset();
+        }
+      }
+
+      await get().fetchSongs();
+      await get().fetchHiddenSongs();
+      set({ isLoading: false });
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to hide song', 
         isLoading: false 
       });
       throw error;

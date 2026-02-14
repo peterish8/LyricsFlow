@@ -88,6 +88,7 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   
   // Audio URI (kept for legacy compatibility or future local playback, but VAD features removed)
   const [audioUri, setAudioUri] = useState<string | null>(null);
@@ -344,6 +345,14 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
                         onChangeText={setTitle}
                       />
                    </View>
+                   {/* Sync Button */}
+                   <Pressable 
+                      style={[styles.magicButtonSmall, { backgroundColor: '#4ADE80' }]} 
+                      onPress={() => setShowSyncModal(true)}
+                   >
+                     <Ionicons name="timer-outline" size={16} color="#000" />
+                     <Text style={[styles.magicButtonText, { color: '#000' }]}>Sync</Text>
+                   </Pressable>
                    {/* ✨ Magic Search Button */}
                    <Pressable 
                       style={styles.magicButtonSmall} 

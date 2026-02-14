@@ -29,6 +29,7 @@ export interface Song {
   lyricSource?: 'LRCLIB' | 'Genius' | 'Manual'; // Where lyrics came from
   audioUri?: string; // URI to local audio file
   isLiked?: boolean; // Whether song is liked
+  isHidden?: boolean; // Whether song is hidden
   transliteratedLyrics?: LyricLine[]; // Romanized/Colloquial lyrics
   
   // AI Karaoke fields removed
@@ -68,7 +69,14 @@ export interface UnifiedSong {
   artist: string;
   highResArt: string;
   downloadUrl: string;
-  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack';
+  streamUrl?: string; // Optional alias for downloadUrl
+  thumbnail?: string; // Optional alias for highResArt
+  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack' | 'Gaana';
   duration?: number; // in seconds
   hasLyrics?: boolean;
+  
+  // Selection/Download Properties
+  selectedQuality?: { url: string; quality: string; format: string };
+  selectedLyrics?: string;
+  selectedCoverUri?: string;
 }

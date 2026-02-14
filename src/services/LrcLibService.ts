@@ -55,8 +55,12 @@ export const LrcLibService = {
         throw new Error(`LRCLIB Search failed: ${response.status} ${response.statusText}`);
       }
       return await response.json();
-    } catch (error) {
-      console.error('[LrcLibService] Search error:', error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+         console.warn('[LrcLibService] Search timed out');
+      } else {
+         console.error('[LrcLibService] Search error:', error);
+      }
       return [];
     }
   },
@@ -97,8 +101,12 @@ export const LrcLibService = {
         throw new Error(`LRCLIB Get failed: ${response.status} ${response.statusText}`);
       }
       return await response.json();
-    } catch (error) {
-      console.error('[LrcLibService] GetLyrics error:', error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+         console.warn('[LrcLibService] GetLyrics timed out');
+      } else {
+         console.error('[LrcLibService] GetLyrics error:', error);
+      }
       return null;
     }
   },

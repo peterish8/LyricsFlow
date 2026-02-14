@@ -7,63 +7,60 @@ const PlayerContext = createContext<any>(null);
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const player = useAudioPlayer();
-  const { currentSong } = usePlayerStore();
+  const { currentSong, setControls } = usePlayerStore();
   const { songs, setCurrentSong } = useSongsStore();
+
+  useEffect(() => {
+    if (player) {
+        setControls({
+            play: () => player.play(),
+            pause: () => player.pause(),
+            seekTo: (pos: number) => player.seekTo(pos)
+        });
+    }
+  }, [player, setControls]);
 
   useEffect(() => {
     if (!player || !currentSong) return;
 
     // claim Lock Screen and set Metadata
-    player.setActiveForLockScreen(true, {
-      title: currentSong.title,
-      artist: currentSong.artist || 'Unknown Artist',
-      artworkUrl: currentSong.coverImageUri || undefined,
-      albumTitle: 'LuvLyrics'
-    });
-
-    // Listen to remote commands
-    // We use any or ts-ignore because the types might be missing these bleeding-edge events
-    const playSub = (player as any).addListener('playCommand', () => player.play());
-    const pauseSub = (player as any).addListener('pauseCommand', () => player.pause());
-    
-    // @ts-ignore
-    const nextSub = (player as any).addListener('nextCommand', () => {
-      console.log('[Hardware] Next Command received');
-      const storeSongs = useSongsStore.getState().songs;
-      if (storeSongs.length <= 1) return;
-      
-      const currentIndex = storeSongs.findIndex(s => s.id === currentSong.id);
-      if (currentIndex === -1) return;
-      
-      const nextIndex = (currentIndex + 1) % storeSongs.length;
-      const nextSong = storeSongs[nextIndex];
-      
-      usePlayerStore.getState().loadSong(nextSong.id);
-    });
-
-    // @ts-ignore
-    const prevSub = (player as any).addListener('previousCommand', () => {
-      console.log('[Hardware] Previous Command received');
-      const storeSongs = useSongsStore.getState().songs;
-      if (storeSongs.length <= 1) return;
-      
-      const currentIndex = storeSongs.findIndex(s => s.id === currentSong.id);
-      if (currentIndex === -1) return;
-      
-      const prevIndex = (currentIndex - 1 + storeSongs.length) % storeSongs.length;
-      const prevSong = storeSongs[prevIndex];
-      
-      usePlayerStore.getState().loadSong(prevSong.id);
-    });
+    try {
+        player.setActiveForLockScreen(true, {
+            title: currentSong.title,
+            artist: currentSong.artist || 'Unknown Artist',
+            artworkUrl: currentSong.coverImageUri || undefined,
+            albumTitle: 'LuvLyrics',
+        }, {
+            showSeekForward: true,
+            showSeekBackward: true
+        });
+    } catch (e) {
+        console.warn('[PlayerContext] Failed to set lock screen active:', e);
+    }
 
     return () => {
-      player.setActiveForLockScreen(false);
-      playSub.remove();
-      pauseSub.remove();
-      nextSub.remove();
-      prevSub.remove();
+      try {
+          // Extra safety check: ensure player is still valid and not just an ID/Integer
+          if (player && typeof (player as any).setActiveForLockScreen === 'function') {
+              player.setActiveForLockScreen(false);
+          }
+      } catch (e) {
+          console.log('[PlayerContext] Failed to cleanup lock screen:', e);
+      }
     };
   }, [player, currentSong]);
+
+  // Stop playback if currentSong is cleared (e.g. deleted)
+  useEffect(() => {
+    if (!currentSong && player) {
+        if (player.playing) {
+            player.pause();
+        }
+        // Purge the audio buffer and truly turn "off" the audio by loading an empty string
+        player.replace('');
+        console.log('[PlayerContext] Audio aggressively terminated as current song was removed.');
+    }
+  }, [currentSong, player]);
 
   return <PlayerContext.Provider value={player}>{children}</PlayerContext.Provider>;
 };

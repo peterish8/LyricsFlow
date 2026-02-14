@@ -129,8 +129,12 @@ export const JioSaavnLyricsService = {
         }
       };
       
-    } catch (error) {
-      console.error('[JioSaavn] Error:', error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+          console.warn('[JioSaavn] Search timed out');
+      } else {
+          console.error('[JioSaavn] Error:', error);
+      }
       return null;
     }
   },
@@ -194,8 +198,12 @@ export const JioSaavnLyricsService = {
           return data;
         }
         
-      } catch (error) {
-        console.log(`[JioSaavn] ${endpoint} error:`, error);
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+             console.warn(`[JioSaavn] ${endpoint} timed out`);
+        } else {
+             console.log(`[JioSaavn] ${endpoint} error:`, error);
+        }
         continue;
       }
     }

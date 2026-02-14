@@ -13,7 +13,32 @@ import { lyricaService } from '../services/LyricaService';
 import { useSongsStore } from '../store/songsStore';
 
 class DownloadManager {
-    
+    private activeDownloads: Map<string, FileSystem.DownloadResumable> = new Map();
+
+    async pauseDownload(id: string) {
+        const download = this.activeDownloads.get(id);
+        if (download) {
+            try {
+                await download.pauseAsync();
+                console.log(`[DownloadManager] Paused: ${id}`);
+            } catch (e) {
+                console.error(`[DownloadManager] Pause failed: ${id}`, e);
+            }
+        }
+    }
+
+    async resumeDownload(id: string) {
+        const download = this.activeDownloads.get(id);
+        if (download) {
+            try {
+                await download.resumeAsync();
+                console.log(`[DownloadManager] Resumed: ${id}`);
+            } catch (e) {
+                console.error(`[DownloadManager] Resume failed: ${id}`, e);
+            }
+        }
+    }
+
     /**
      * Finalize the download process
      * @param staging - The fully prepped staging object
@@ -28,7 +53,14 @@ class DownloadManager {
 
         const songDir = `${FileSystem.documentDirectory}music/${staging.id}/`;
         
+        // Helper to update progress with small delay for UI rendering
+        const updateProgress = async (progress: number) => {
+            onProgress(progress);
+            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay for UI
+        };
+        
         // 1. Prepare Directory
+        await updateProgress(0.05); // 5% - Starting
         // Clean up if exists (atomic retry)
         const dirInfo = await FileSystem.getInfoAsync(songDir);
         if (dirInfo.exists) {
@@ -38,32 +70,35 @@ class DownloadManager {
 
         try {
             // 2. Resolve & Download Audio
-            // Cobalt returns direct download URLs (tunnels or CDN links)
+            await updateProgress(0.1); // 10% - Directory ready
             let downloadUrl = staging.selectedQuality.url;
-            const audioFormat = staging.selectedQuality.format || 'mp3';
+            const format = staging.selectedQuality.format || 'mp3';
+            const audioFile = `${songDir}audio.${format}`;
             
-            // Warn only if we somehow still have a raw YouTube URL
-            if (downloadUrl.includes('youtube.com/watch') || downloadUrl.includes('youtu.be/')) {
-                 console.error('[DownloadManager] ERROR: Raw YouTube URL detected — Cobalt was supposed to resolve this!');
-                 throw new Error('Cannot download raw YouTube URL. Audio extraction failed.');
-            }
-
             console.log(`[DownloadManager] Downloading Audio: ${downloadUrl.substring(0, 80)}...`);
 
-            const audioFile = `${songDir}audio.${audioFormat}`;
             const audioDownload = FileSystem.createDownloadResumable(
                 downloadUrl,
                 audioFile,
                 {},
-                (downloadProgress) => {
+                async (downloadProgress) => {
                     const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
-                    onProgress(progress * 0.8); // Audio is 80% of the work
+                    await updateProgress(0.1 + (progress * 0.7)); // 10% to 80%
                 }
             );
-            await audioDownload.downloadAsync();
+
+            this.activeDownloads.set(staging.id, audioDownload);
+            
+            try {
+                await audioDownload.downloadAsync();
+                await updateProgress(0.8); // 80% - Audio downloaded
+            } finally {
+                this.activeDownloads.delete(staging.id);
+            }
 
 
             // 3. Download Cover Art
+            await updateProgress(0.85); // 85% - Starting cover download
             let coverLocalUri: string | undefined = undefined;
             if (staging.selectedCoverUri) {
                 const coverFile = `${songDir}cover.jpg`;
@@ -71,9 +106,11 @@ class DownloadManager {
                 await coverDownload.downloadAsync();
                 coverLocalUri = coverFile;
             }
+            await updateProgress(0.9); // 90% - Cover downloaded
 
 
             // 4. Save Lyrics
+            await updateProgress(0.95); // 95% - Saving lyrics
             if (staging.selectedLyrics) {
                 const lyricsFile = `${songDir}lyrics.lrc`;
                 await FileSystem.writeAsStringAsync(lyricsFile, staging.selectedLyrics);
@@ -85,7 +122,7 @@ class DownloadManager {
                 id: staging.id,
                 title: staging.title,
                 artist: staging.artist,
-                album: 'Downloaded',
+                album: staging.album, 
                 duration: staging.duration,
                 coverImageUri: coverLocalUri,
                 audioUri: audioFile,
@@ -96,9 +133,7 @@ class DownloadManager {
                 gradientId: Math.floor(Math.random() * 5).toString() // Random gradient
             };
 
-            // Call the store action directly here or return for caller to handle?
-            // "Save the text lyrics and local file paths into the app's local... store."
-            // We'll return the object so the hook can call the store hook (since we can't use hooks in a class easily)
+            await updateProgress(1.0); // 100% - Complete
             return newSong;
 
         } catch (error) {

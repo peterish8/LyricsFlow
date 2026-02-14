@@ -77,6 +77,8 @@ export const generateId = (): string => {
  * Format song subtitle (artist • album)
  */
 export const formatSongSubtitle = (artist?: string, album?: string): string => {
-  const parts = [artist, album].filter(Boolean);
+  const parts = [artist, album]
+    .filter(Boolean)
+    .filter(p => p !== 'Downloaded'); // Filter out legacy/hardcoded 'Downloaded' album name
   return parts.join(' • ') || 'Unknown';
 };

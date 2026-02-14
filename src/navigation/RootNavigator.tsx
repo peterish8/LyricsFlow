@@ -18,6 +18,7 @@ import SearchScreen from '../screens/SearchScreen';
 import { AudioDownloaderScreen } from '../screens/AudioDownloaderScreen';
 import { YoutubeBrowserScreen } from '../screens/YoutubeBrowserScreen';
 import { MiniPlayer } from '../components';
+import { BackgroundDownloader } from '../components/BackgroundDownloader';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -76,6 +77,7 @@ export const RootNavigator: React.FC = () => {
         </Stack.Navigator>
         
         <MiniPlayer />
+        <BackgroundDownloader />
       </View>
     </NavigationContainer>
   );

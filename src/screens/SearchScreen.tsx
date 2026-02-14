@@ -104,6 +104,7 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
     if (playInMiniPlayerOnly) {
       if (isCurrentlyPlaying) {
         // Second tap: Open NowPlayingScreen
+        setMiniPlayerHidden(true);
         navigation.navigate('NowPlaying', { songId: song.id });
       } else {
         // First tap: Play in mini player
@@ -113,6 +114,7 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
     } else {
       // Default: Always navigate
       setCurrentSong(song);
+      setMiniPlayerHidden(true);
       navigation.navigate('NowPlaying', { songId: song.id });
       usePlayerStore.getState().loadSong(song.id);
     }
