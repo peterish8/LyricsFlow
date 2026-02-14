@@ -119,7 +119,10 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
           {/* Source Badge */}
           <View style={[
             styles.badge, 
-            item.source === 'LRCLIB' ? styles.badgeLrc : styles.badgeGenius
+            item.source === 'LRCLIB.net' || item.source === 'LRCLIB' ? styles.badgeLrc : 
+            item.source.includes('JioSaavn') ? styles.badgeSaavn : 
+            item.source.includes('Lyrica') ? styles.badgeLyrica : 
+            styles.badgeGenius
           ]}>
             <Text style={styles.badgeText}>{item.source}</Text>
           </View>
@@ -216,7 +219,10 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
                   <View
                     style={[
                       styles.badge,
-                      previewItem.source === 'LRCLIB' ? styles.badgeLrc : styles.badgeGenius,
+                      previewItem.source.includes('LRCLIB') ? styles.badgeLrc : 
+                      previewItem.source.includes('JioSaavn') ? styles.badgeSaavn :
+                      previewItem.source.includes('Lyrica') ? styles.badgeLyrica :
+                      styles.badgeGenius,
                     ]}
                   >
                     <Text style={styles.badgeText}>{previewItem.source}</Text>
@@ -370,6 +376,12 @@ const styles = StyleSheet.create({
   },
   badgeLrc: {
     backgroundColor: '#0A84FF',
+  },
+  badgeSaavn: {
+    backgroundColor: '#24D366', // Saavn Greenish
+  },
+  badgeLyrica: {
+    backgroundColor: '#A78BFA', // Purple
   },
   badgeGenius: {
     backgroundColor: '#FFD60A', // Genius Yellow

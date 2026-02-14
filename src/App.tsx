@@ -14,6 +14,7 @@ import { useSongsStore } from './store/songsStore';
 import { usePlayerStore } from './store/playerStore';
 import { Colors } from './constants/colors';
 import { PlayerProvider } from './contexts/PlayerContext';
+import { setAudioModeAsync } from 'expo-audio';
 
 const App: React.FC = () => {
   const [isReady, setIsReady] = useState(false);
@@ -23,6 +24,14 @@ const App: React.FC = () => {
   useEffect(() => {
     const initialize = async () => {
       try {
+        // Initialize Audio Mode for background/remote controls
+        await setAudioModeAsync({
+          allowsRecording: false,
+          shouldPlayInBackground: true,
+          playsInSilentMode: true,
+          interruptionMode: 'doNotMix',
+        });
+
         // Initialize database
         await initDatabase();
         

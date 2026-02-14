@@ -216,6 +216,7 @@ const MiniPlayer: React.FC = () => {
         style={({ pressed }) => [
           styles.content, 
           isIsland && styles.islandContent,
+          isIsland && { maxWidth: expanded ? width - 20 : width * 0.5 },
           isIsland && expanded && styles.islandExpanded,
           pressed && { opacity: 0.95 }
         ]}
@@ -381,9 +382,10 @@ const styles = StyleSheet.create({
     borderTopColor: '#333',
   },
   islandContainer: {
-    top: Platform.OS === 'ios' ? 48 : 30, 
-    marginHorizontal: 12,
-    alignItems: 'center',
+    top: Platform.OS === 'ios' ? 58 : 40, 
+    marginLeft: 12,
+    marginRight: 8,
+    alignItems: 'flex-end', // Right-aligned
   },
   islandContent: {
     backgroundColor: 'transparent', 
@@ -394,17 +396,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: "#fff", // Subtle white glow
+    shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 10,
+    elevation: 12,
   },
   islandExpanded: {
-    height: 180, // Increased height for lyrics
+    height: 190, 
     marginTop: 10,
-    paddingVertical: 0, // Padding handled in inner view
+    paddingVertical: 0,
     borderRadius: 40,
+    maxWidth: width - 24, // Expand to almost full width
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
   },
   progressBarContainer: {
     height: 4,

@@ -5,6 +5,7 @@
 
 import { lyricaService, LyricaResult } from './LyricaService';
 import { SmartLyricMatcher } from './SmartLyricMatcher';
+import { MultiSourceLyricsService } from './MultiSourceLyricsService';
 
 export interface SearchResult {
   id: string;
@@ -33,52 +34,56 @@ export const LyricsRepository = {
     onProgress?.('Searching global databases...');
     
     try {
-      const lyricaResult = await lyricaService.fetchLyrics(
+      const multiResults = await MultiSourceLyricsService.fetchLyricsParallel(
         targetMetadata.title,
-        targetMetadata.artist
+        targetMetadata.artist,
+        targetMetadata.duration
       );
       
-      if (!lyricaResult) {
+      if (!multiResults || multiResults.length === 0) {
         onProgress?.('No lyrics found');
         return [];
       }
 
-      const hasTimestamps = lyricaService.hasTimestamps(lyricaResult.lyrics);
-      const parsedLyrics = hasTimestamps 
-        ? lyricaService.parseLrc(lyricaResult.lyrics)
-        : [];
+      for (let i = 0; i < multiResults.length; i++) {
+        const res = multiResults[i];
+        const hasTimestamps = lyricaService.hasTimestamps(res.lyrics);
+        
+        const scored = SmartLyricMatcher.calculateScore(
+          {
+            id: i,
+            trackName: res.metadata?.title || targetMetadata.title,
+            artistName: res.metadata?.artist || targetMetadata.artist,
+            duration: res.metadata?.duration || targetMetadata.duration,
+            plainLyrics: res.lyrics,
+            syncedLyrics: hasTimestamps ? res.lyrics : '',
+            albumName: res.metadata?.album || '',
+            instrumental: false,
+          },
+          null,
+          targetMetadata
+        );
 
-      const scored = SmartLyricMatcher.calculateScore(
-        {
-          id: 1,
-          trackName: lyricaResult.metadata?.title || targetMetadata.title,
-          artistName: lyricaResult.metadata?.artist || targetMetadata.artist,
-          duration: lyricaResult.metadata?.duration || targetMetadata.duration,
-          plainLyrics: lyricaResult.lyrics,
-          syncedLyrics: hasTimestamps ? lyricaResult.lyrics : '',
-          albumName: lyricaResult.metadata?.album || '',
-          instrumental: false,
-        },
-        null,
-        targetMetadata
-      );
+        results.push({
+          id: `result-${i}-${res.source}`,
+          source: res.source,
+          type: hasTimestamps ? 'synced' : 'plain',
+          trackName: res.metadata?.title || targetMetadata.title,
+          artistName: res.metadata?.artist || targetMetadata.artist,
+          albumName: res.metadata?.album,
+          plainLyrics: res.lyrics,
+          syncedLyrics: hasTimestamps ? res.lyrics : undefined,
+          matchScore: scored.matchScore,
+          matchReason: scored.matchReason,
+          duration: res.metadata?.duration,
+          albumArt: res.metadata?.coverArt,
+        });
+      }
 
-      results.push({
-        id: 'lyrica-1',
-        source: lyricaResult.source,
-        type: hasTimestamps ? 'synced' : 'plain',
-        trackName: lyricaResult.metadata?.title || targetMetadata.title,
-        artistName: lyricaResult.metadata?.artist || targetMetadata.artist,
-        albumName: lyricaResult.metadata?.album,
-        plainLyrics: lyricaResult.lyrics,
-        syncedLyrics: hasTimestamps ? lyricaResult.lyrics : undefined,
-        matchScore: scored.matchScore,
-        matchReason: scored.matchReason,
-        duration: lyricaResult.metadata?.duration,
-        albumArt: lyricaResult.metadata?.coverArt,
-      });
+      // Sort by match score
+      results.sort((a, b) => b.matchScore - a.matchScore);
 
-      onProgress?.(`Found lyrics from ${lyricaResult.source}`);
+      onProgress?.(`Found ${results.length} lyric options`);
     } catch (error) {
       console.error('[LyricsRepository] Error:', error);
       onProgress?.('Search failed');

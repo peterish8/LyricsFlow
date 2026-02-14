@@ -17,6 +17,7 @@ import {
   Modal,
   ScrollView,
   Animated,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -346,7 +347,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         <AuroraHeader palette="library" colors={activeThemeColors} imageUri={activeImageUri} />
       </Animated.View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Fixed Header - Removed as icons are moved to section header for all modes */}
+        {/* Brand Header */}
+        <View style={styles.brandHeader}>
+          <Text style={styles.brandName}>LuvLyrics</Text>
+        </View>
 
         {/* Content */}
         <FlatList<Song>
@@ -356,7 +360,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           renderItem={() => null}
           contentContainerStyle={[
              styles.listContent,
-             isIsland && { paddingTop: 55 } // Just a bit more gap
+             isIsland && { paddingTop: 20 } // Reduced gap to bring covers up
           ]}
           ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
           ListHeaderComponent={
@@ -713,6 +717,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     zIndex: 10,
+  },
+  brandHeader: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 8 : 4, // Adjusted for SafeArea + Island
+    paddingBottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brandName: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#fff',
+    letterSpacing: -1.5,
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    maxWidth: '45%', // Ensure space for island
+    paddingRight: 10, // Explicit gap
   },
   headerLeft: {
     flex: 1,
