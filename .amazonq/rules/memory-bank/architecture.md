@@ -7,7 +7,6 @@
 - **State Management**: Zustand
 - **UI**: React Native Skia, Reanimated
 - **Audio**: expo-audio
-- **AI**: onnxruntime-react-native
 
 ## Directory Structure
 

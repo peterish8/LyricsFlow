@@ -13,7 +13,7 @@ The latest v8 update transforms LuvLyrics into a production-grade media player w
 - **Native Hardware Sync**: Full Bluetooth, Lock Screen, and Control Center integration.
 - **Dynamic Island UI**: A premium, compact, right-aligned island player that sits perfectly with the brand header.
 - **Unified Lyric Selection**: Parallel fetching from **LRCLIB**, **JioSaavn**, and **Lyrica/Genius**.
-- **On-Device separation**: Powered by ONNX separation logic—runs 100% standalone.
+- **On-Device Reliability**: Powered by a robust SQLite engine—runs 100% standalone.
 
 ---
 
@@ -162,22 +162,16 @@ Located in `src/constants/`:
 - **Long-press actions**: Access cover art upload from any song card
 - **Recently Played**: Horizontal scrolling list of your last 10 listened songs
 
-### ✨ Magic Timestamp (AI)
-- **Dynamic Time Warping**: Aligns your pasted lyrics with audio using advanced matching.
-- **Background Processing**: Start tasks and keep browsing. AI runs in a global queue accessible via the notification bell.
-- **Task Management**: Stop active tasks mid-process or restart failed jobs.
-- **Visual Progress**: Real-time feedback with live progress bars and stage updates (Converting → Aligning).
-- **Confidence Scoring**: System assigns a confidence score to every line and the song overall.
+### ✨ Magic Timestamp Search
+- **Smart Matching**: Aligns your pasted lyrics with audio using advanced string matching.
+- **Unified Search**: Hit multiple databases (LRCLIB, JioSaavn, Genius) simultaneously.
+- **Visual Progress**: Real-time feedback with live progress bars.
+- **Match Scoring**: System assigns a confidence score to every result to help you pick the best one.
 
-### 🎤 AI Karaoke Mode
-- **Apple Music Sing-style**: Real-time vocal/instrumental balance control
-- **ONNX AI Separation**: On-device neural network splits any song into vocals + instruments
-- **Dual-Track Engine**: Synchronized dual audio players with 50ms drift correction
-- **Balance Slider**: -1.0 (vocals only) ↔ 0.0 (both) ↔ +1.0 (karaoke/instruments only)
-- **Background Separation**: Process songs while using other apps (progress saved to database)
-- **Persistent Stems**: Once separated, stems are saved permanently per song
-- **One-Tap Trigger**: `StemProcessButton` initiates separation with visual progress
-- **Integration**: Works alongside existing lyrics display (karaoke + lyrics sync)
+### 🎵 Premium Playback
+- **60fps Scroll Engine**: Uses `requestAnimationFrame` for buttery-smooth scrolling.
+- **Dynamic Theme Engine**: 24+ curated vibrant presets and organic Skia-powered blurs.
+- **Hardware Integration**: Full Bluetooth, Lock Screen, and Control Center synchronization.
 
 ### UI/UX Enhancements
 - **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused. Re-appears on interaction.
@@ -238,27 +232,34 @@ CREATE TABLE songs (
 
 ## 📱 Standalone Deployment
 
-LuvLyrics is designed to run purely on your phone without needing a laptop or local server. All AI tasks (Whisper, ONNX) and library management (SQLite) happen on-device.
+LuvLyrics is designed to run purely on your phone without needing a laptop or local server. All playback logic (Zustand) and library management (SQLite) happen on-device.
 
-### How to get the APK?
-The project uses **Expo EAS** for native builds. To generate your own standalone APK:
+### How to get the APK? (Choose one method)
 
-1.  **Install EAS CLI**:
-    ```bash
-    npm install -g eas-cli
-    ```
-2.  **Login to Expo**:
-    ```bash
-    eas login
-    ```
-3.  **Run Build**:
-    ```bash
-    eas build -p android --profile production
-    ```
-4.  **Download**: Once the build completes, EAS will provide a `https://expo.dev/...` link where you can download the APK directly to your phone.
+#### Option A: Local Build (No-EAS / Your Machine) 💻
+This project includes a pre-configured native `android` folder. You can build the APK directly on your machine:
 
-> [!NOTE]
-> All search features (Lyrics, Downloads) require a standard internet connection to reach public APIs (LRCLIB, JioSaavn), but the core playback and separation features are 100% offline-ready once the app is installed.
+1.  **Navigate to Android folder**:
+    ```bash
+    cd android
+    ```
+2.  **Generate Release APK**:
+    ```bash
+    ./gradlew assembleRelease
+    ```
+3.  **Find your APK**: The file will be generated at:
+    `android/app/build/outputs/apk/release/app-release.apk`
+    *You can copy this file directly to your phone via USB or cloud storage.*
+
+#### Option B: Expo EAS Cloud Build (Remote) ☁️
+If you don't have the Android SDK installed, use Expo EAS:
+
+1.  **Install EAS CLI**: `npm install -g eas-cli`
+2.  **Login**: `eas login`
+3.  **Run Build**: `eas build -p android --profile production`
+4.  **Download**: EAS will provide a download link once finished.
+
+> All search features (Lyrics, Downloads) require a standard internet connection to reach public APIs (LRCLIB, JioSaavn), but the core playback and library features are 100% offline-ready once the app is installed.
 
 ---
 

@@ -59,7 +59,7 @@ The app implements a robust, tiered lyric fetching system.
     - **Ranking**: Results are scored via `SmartLyricMatcher.ts` and ranked for the user.
     - **User Selection**: Preview mode allows users to pick the best source with colorful badges identifying the provider.
 - **Hardware & Lock Screen Sync**: Fully integrated with the device media session via `expo-audio`, supporting Bluetooth remote commands and system metadata updates.
-- **On-Device AI**: Powerful ONNX separation logic for Karaoke mode (standalone capability).
+- **High-Performance Scaling**: Designed for large local libraries with instant search and low-latency navigation.
 
 ---
 
@@ -100,7 +100,7 @@ The app implements a robust, tiered lyric fetching system.
 ## 🔄 The Lifecycle of a Lyric
 
 1. **Search**: User clicks the ✨ Magic button.
-2. **Fetch**: `LyricsRepository` queries LRCLIB and Genius.
+2. **Fetch**: `LyricsRepository` queries multiple providers in parallel (LRCLIB, JioSaavn, Genius).
 3. **Preview**: User scrolls through results and previews the text content.
 4. **Parsing**: `timestampParser.ts` identifies timestamps and cleans text on apply.
 5. **Storage**: `queries.ts` saves the song metadata and line-by-line lyrics into SQLite.

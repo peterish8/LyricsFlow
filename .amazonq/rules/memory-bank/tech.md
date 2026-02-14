@@ -148,14 +148,9 @@ expo start --web
 - **Retry Mechanism**: Automatic recovery from NullPointerException
 - **PRAGMA Checks**: Efficient schema migrations
 
-### AI Processing
-- **On-Device Stem Separation**: Uses ONNX neural networks via `react-native-worklets` for vocal/instrumental splitting.
-- **Standalone Execution**: No network latency or API costs for AI tasks
-- **"Anti-Gravity" Forced Alignment**: 
-    - **WhisperX**: Used on desktop for VAD and segmentation.
-    - **Wav2Vec2**: Phoneme-level alignment for ±10ms precision.
-    - **Teacher Forcing**: Improved prompting to guide the model.
-    - **Force Mapper**: Python-based fuzzy word sequence matching.
+### High-Precision Sync
+- **Sub-millisecond Timing**: Ensuring lyrics never drift from audio.
+- **Standalone Execution**: All library and sync logic runs locally without backend costs.
 
 ## Version Control
 - **Git**: Version control system
