@@ -39,15 +39,17 @@
 
 ### Audio & Media
 - **expo-av**: ~16.0.8 - Audio/video playback
-- **expo-audio**: ~1.1.1 - Audio recording and playback
-- **expo-media-library**: ~18.2.1 - Media library access
-- **whisper.rn**: ^0.5.5 - (Legacy) On-device speech-to-text AI
-- **react-native-worklets**: 0.5.1 - High-performance audio processing
+- **expo-audio**: ~1.1.1 - Core audio engine with system media session sync
+- **expo-media-library**: ~18.2.1 - Local file access
+- **react-native-worklets**: 0.5.1 - High-performance audio processing (Stem separation)
 
 ### Search & Services
-- **LRCLIB API**: Primary source for synced lyrics (.lrc)
+### Unified Search Engine
+- **MultiSourceLyricsService**: Orchestrates parallel fetching from all providers (5s race)
+- **JioSaavn Service**: Official API wrapper for high-quality synced lyrics
+- **LRCLIB API**: Public source for synced lyrics (.lrc)
 - **Genius Scraper**: Fallback source for plain text lyrics with robust metadata scrubbing
-- **Smart Lyric Matcher**: Fuzzy matching and scoring logic for search results
+- **Smart Lyric Matcher**: Fuzzy matching and scoring logic for ranking results
 
 ### Development Tools
 - **expo-dev-client**: ~6.0.20 - Custom development client
@@ -147,9 +149,8 @@ expo start --web
 - **PRAGMA Checks**: Efficient schema migrations
 
 ### AI Processing
-- **16kHz Audio**: Reduced sample rate for faster processing
-- **Quantized Models**: Smaller Whisper models for mobile devices
-- **On-Device**: No network latency or API costs
+- **On-Device Stem Separation**: Uses ONNX neural networks via `react-native-worklets` for vocal/instrumental splitting.
+- **Standalone Execution**: No network latency or API costs for AI tasks
 - **"Anti-Gravity" Forced Alignment**: 
     - **WhisperX**: Used on desktop for VAD and segmentation.
     - **Wav2Vec2**: Phoneme-level alignment for ±10ms precision.

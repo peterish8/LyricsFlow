@@ -51,15 +51,15 @@ The app handles "messy" data intelligently.
 - **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
-### Smart Lyric Search (Waterfall strategy)
+### Smart Lyric Search (Unified Parallel Selection)
 The app implements a robust, tiered lyric fetching system.
-- **Engine**: Orchestrated by `LyricsRepository.ts`.
-- **Waterfall Strategy**:
-    1. **LRCLIB**: Primarily for synced lyrics. Uses Fuzzy search based on Title/Artist/Duration.
-    2. **Genius**: Fallback for plain text. Scrapes using `GeniusService.ts`.
-- **Robust Cleaning**: The system automatically detects and removals "embedded" metadata from Genius, such as "contributors," "translations," and "Harry Styles cover" annotations, ensuring a pure lyric reading experience.
-- **Preview UI**: Before applying, users can scroll through the found lyrics in a modal to verify timestamps and content.
-- **On-Device Whisper AI**: (Legacy) Support for local transcription remains in `whisperService.ts`.
+- **Engine**: Orchestrated by `LyricsRepository.ts` using `MultiSourceLyricsService`.
+- **Strategy**: 
+    - **Parallel Fetching**: Hits **LRCLIB**, **JioSaavn**, and **Lyrica/Genius** simultaneously.
+    - **Ranking**: Results are scored via `SmartLyricMatcher.ts` and ranked for the user.
+    - **User Selection**: Preview mode allows users to pick the best source with colorful badges identifying the provider.
+- **Hardware & Lock Screen Sync**: Fully integrated with the device media session via `expo-audio`, supporting Bluetooth remote commands and system metadata updates.
+- **On-Device AI**: Powerful ONNX separation logic for Karaoke mode (standalone capability).
 
 ---
 

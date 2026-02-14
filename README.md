@@ -8,6 +8,13 @@
 > **A Premium, Privacy-First, Local Lyrics Experience.**
 > LuvLyrics is a visual instrument designed to turn your lyric-reading into a cinematic experience. This document provides a comprehensive breakdown of the project's architecture, technical decisions, and file-by-file organization.
 
+### 🚀 **V8 COMPLETE ENGINE OVERHAUL**
+The latest v8 update transforms LuvLyrics into a production-grade media player with:
+- **Native Hardware Sync**: Full Bluetooth, Lock Screen, and Control Center integration.
+- **Dynamic Island UI**: A premium, compact, right-aligned island player that sits perfectly with the brand header.
+- **Unified Lyric Selection**: Parallel fetching from **LRCLIB**, **JioSaavn**, and **Lyrica/Genius**.
+- **On-Device separation**: Powered by ONNX separation logic—runs 100% standalone.
+
 ---
 
 ## 📖 Table of Contents
@@ -156,13 +163,11 @@ Located in `src/constants/`:
 - **Recently Played**: Horizontal scrolling list of your last 10 listened songs
 
 ### ✨ Magic Timestamp (AI)
-- **Dual Mode Intelligence**:
-    1. **Magic**: Aligns your pasted lyrics with audio using Dynamic Time Warping.
-    2. **Pure Magic**: Generates lyrics from scratch using on-device Whisper AI.
+- **Dynamic Time Warping**: Aligns your pasted lyrics with audio using advanced matching.
 - **Background Processing**: Start tasks and keep browsing. AI runs in a global queue accessible via the notification bell.
-- **Task Management**: Stop active transcriptions mid-process or restart failed jobs.
-- **Visual Progress**: Real-time feedback with live progress bars and stage updates (Converting → Transcribing → Aligning).
-- **Confidence Scoring**: AI assigns a confidence score to every line and the song overall.
+- **Task Management**: Stop active tasks mid-process or restart failed jobs.
+- **Visual Progress**: Real-time feedback with live progress bars and stage updates (Converting → Aligning).
+- **Confidence Scoring**: System assigns a confidence score to every line and the song overall.
 
 ### 🎤 AI Karaoke Mode
 - **Apple Music Sing-style**: Real-time vocal/instrumental balance control
@@ -227,6 +232,33 @@ CREATE TABLE songs (
 - **CustomMenu event passthrough**: `onPress` accepts optional event parameter for submenu positioning
 - **Long-press detection**: 1.5s delay for cover art, immediate for song cards in library
 - **Scroll gesture detection**: Tracks `scrollYRef` to determine scroll direction for control visibility
+- **Hardware Remote Commands**: Subscribed to system `play`, `pause`, `next`, and `previous` events via `expo-audio`.
+
+---
+
+## 📱 Standalone Deployment
+
+LuvLyrics is designed to run purely on your phone without needing a laptop or local server. All AI tasks (Whisper, ONNX) and library management (SQLite) happen on-device.
+
+### How to get the APK?
+The project uses **Expo EAS** for native builds. To generate your own standalone APK:
+
+1.  **Install EAS CLI**:
+    ```bash
+    npm install -g eas-cli
+    ```
+2.  **Login to Expo**:
+    ```bash
+    eas login
+    ```
+3.  **Run Build**:
+    ```bash
+    eas build -p android --profile production
+    ```
+4.  **Download**: Once the build completes, EAS will provide a `https://expo.dev/...` link where you can download the APK directly to your phone.
+
+> [!NOTE]
+> All search features (Lyrics, Downloads) require a standard internet connection to reach public APIs (LRCLIB, JioSaavn), but the core playback and separation features are 100% offline-ready once the app is installed.
 
 ---
 

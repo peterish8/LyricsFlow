@@ -7,7 +7,7 @@
 - **State Management**: Zustand
 - **UI**: React Native Skia, Reanimated
 - **Audio**: expo-audio
-- **AI**: whisper.rn (Whisper.cpp), onnxruntime-react-native
+- **AI**: onnxruntime-react-native
 
 ## Directory Structure
 
@@ -37,11 +37,12 @@
 - SettingsScreen.tsx - App preferences
 
 ### src/services/ (The Search Engine)
-- LyricsRepository.ts - Waterfall logic (LRCLIB → Genius)
+- MultiSourceLyricsService.ts - Orchestrates parallel fetching from all providers
+- JioSaavnLyricsService.ts - Official lyrics source from JioSaavn
+- LyricsRepository.ts - Parallel search & match ranking logic
 - LrcLibService.ts - LRCLIB API client
 - GeniusService.ts - Scraper with metadata scrubbing
 - SmartLyricMatcher.ts - Result scoring logic
-- whisperService.ts - (Legacy) Local transcription
 
 ### src/utils/
 Logic helpers:
@@ -68,13 +69,14 @@ export const getDatabase = async () => {
 };
 ```
 
-### 2. Search Waterfall Strategy
+### 2. Parallel Search Strategy
 ```typescript
-// LyricsRepository.ts - LRCLIB -> Genius fallback
-const bestMatch = await LrcLibService.search(query);
-if (!bestMatch || bestMatch.matchScore < 60) {
-  results = await GeniusService.searchGenius(query);
-}
+// LyricsRepository.ts - Aggregates and Ranks
+const multiResults = await MultiSourceLyricsService.fetchLyricsParallel(title, artist, duration);
+results = multiResults.map(res => ({
+  ...res,
+  matchScore: SmartLyricMatcher.calculateScore(res, null, targetMetadata)
+})).sort((a, b) => b.matchScore - a.matchScore);
 ```
 
 ### 3. Smart Scraping & Sanitization
@@ -124,10 +126,15 @@ CREATE TABLE songs (
 - Prevents accidental overwrites of existing lyrics
 - Integrated in `LrcSearchModal.tsx`
 
-### Dynamic Magic Button
-- Gradient colors updated on-the-fly based on `currentSong.gradientId`
-- Uses `LinearGradient` for a native, premium feel
-- High-vibrancy "Sparkle" UI
+### Dynamic Island & MiniPlayer
+- Right-aligned compact island for a premium top-bar experience.
+- Synchronized vertical alignment with the "LuvLyrics" brand title.
+- Expanded view for quick access to playback controls.
+
+### Hardware & Media Session Sync
+- Full integration with `expo-audio` for system-level remote commands.
+- Bluetooth skip/play/pause support (including headphone double-taps).
+- Real-time lock screen metadata and artwork synchronization.
 
 ### Error Recovery
 - Database: Automatic retry with connection reset
