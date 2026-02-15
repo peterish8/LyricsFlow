@@ -26,7 +26,7 @@ export type RootStackParamList = {
   YoutubeBrowser: undefined;
   ReelsVault: undefined; // Reels liked songs vault
   PlaylistDetail: { playlistId: string }; // Playlist detail screen
-  CreatePlaylist: undefined; // NEW: Create playlist modal
+  CreatePlaylist: { playlistId?: string, initialName?: string } | undefined; // Create or Edit playlist modal
   AddToPlaylist: { songId?: string; playlistId?: string }; // NEW: Add song to playlist modal
 };
 

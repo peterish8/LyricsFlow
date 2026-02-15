@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, interpolate, Easing, cancelAnimation } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, interpolate, Easing, cancelAnimation, SharedValue } from 'react-native-reanimated';
 import { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
@@ -13,9 +13,18 @@ interface PlaylistItemProps extends RenderItemParams<Song> {
   onPress: (song: Song, index: number) => void;
   onDelete: (songId: string) => void;
   isPlaying: boolean;
+  displayIndex: number;
 }
 
 // ... imports
+
+const VisualizerBar = ({ anim }: { anim: SharedValue<number> }) => {
+    const style = useAnimatedStyle(() => ({
+        height: interpolate(anim.value, [0, 1], [4, 14]),
+        opacity: interpolate(anim.value, [0, 1], [0.5, 1])
+    }));
+    return <Animated.View style={[styles.visualizerBar, style]} />;
+};
 
 const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     // Simple 3-bar animation (Organic Mode)
@@ -58,16 +67,7 @@ const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     return (
         <View style={styles.visualizerContainer}>
             {animations.map((anim, i) => (
-                <Animated.View 
-                    key={i}
-                    style={[
-                        styles.visualizerBar, 
-                        useAnimatedStyle(() => ({
-                            height: interpolate(anim.value, [0, 1], [4, 14]), 
-                            opacity: interpolate(anim.value, [0, 1], [0.5, 1])
-                        }))
-                    ]} 
-                />
+                <VisualizerBar key={i} anim={anim} />
             ))}
         </View>
     );
@@ -100,9 +100,9 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
   isEditMode, 
   onPress,
   onDelete,
-  isPlaying 
+  isPlaying,
+  displayIndex
 }) => {
-  const index = getIndex() || 0;
   const isActiveSong = currentSongId === item.id;
 
   const formatDuration = (seconds: number) => {
@@ -115,7 +115,7 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
     <ScaleDecorator>
       <Pressable
         onLongPress={isEditMode ? drag : undefined}
-        onPress={() => onPress(item, index)}
+        onPress={() => onPress(item, displayIndex)}
         disabled={isActive}
         style={[
           styles.songRow,
@@ -133,7 +133,7 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
              // Just the number, normal color
              // User: "make normal itself"
               <Text style={styles.songNumber}>
-                {index + 1}
+                {displayIndex + 1}
               </Text>
            )}
         </View>
@@ -309,6 +309,7 @@ export const PlaylistItem = memo(PlaylistItemComponent, (prevProps, nextProps) =
   const idChanged = prevProps.item.id !== nextProps.item.id;
   const activeChanged = prevProps.isActive !== nextProps.isActive;
   const editModeChanged = prevProps.isEditMode !== nextProps.isEditMode;
+  const indexChanged = prevProps.displayIndex !== nextProps.displayIndex;
   const currentSongChanged = prevProps.currentSongId !== nextProps.currentSongId;
   const isActiveSong = prevProps.item.id === prevProps.currentSongId || nextProps.item.id === nextProps.currentSongId;
   
@@ -321,7 +322,7 @@ export const PlaylistItem = memo(PlaylistItemComponent, (prevProps, nextProps) =
   // Return TRUE if props are equal (DO NOT RERENDER)
   // Return FALSE if props are different (RERENDER)
   
-  if (idChanged || activeChanged || editModeChanged) {
+  if (idChanged || activeChanged || editModeChanged || indexChanged) {
       return false; // Rerender
   }
   

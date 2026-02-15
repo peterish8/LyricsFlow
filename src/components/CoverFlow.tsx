@@ -9,6 +9,7 @@ import Animated, {
   interpolate,
   Extrapolation,
   withTiming,
+  SharedValue,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +33,98 @@ interface CoverFlowProps {
   onPress: (e: any) => void;
   onSwipeConfirmed: () => void;
 }
+
+interface CoverCardProps {
+  song: Song | null;
+  indexOffset: number;
+  translateX: SharedValue<number>;
+  isEditMode: boolean;
+  defaultGradientColors: string[];
+  prevSong: Song | null;
+  nextSong: Song | null;
+  onPress: (e: any) => void;
+  onSwipeConfirmed: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+}
+
+const CoverCard: React.FC<CoverCardProps> = ({
+  song,
+  indexOffset,
+  translateX,
+  isEditMode,
+  defaultGradientColors,
+  prevSong,
+  nextSong,
+}) => {
+    // indexOffset: -1 (Prev), 0 (Current), 1 (Next)
+    
+    const animatedStyle = useAnimatedStyle(() => {
+       // Calculate transform based on swipe
+       // We assume all cards are centered initially.
+       
+       // Spacing multiplier
+       const SWIPE_SPACING = SCREEN_WIDTH * 0.8; 
+       const cardTranslateX = translateX.value + (indexOffset * SWIPE_SPACING);
+       
+       // Removed Scale Effect as requested ("dont want getting big")
+       // Kept logic simple 1:1 size
+       const scale = 1;
+
+       return {
+           transform: [
+               { translateX: cardTranslateX }, 
+               { scale: scale } 
+           ] as any, 
+       };
+    });
+
+    // We simply stack them absolutely. Center is relative.
+    if (!song && indexOffset !== 0) return null; 
+
+    const imageUri = song?.coverImageUri;
+    // Use Helper designed to guarantee colors even if missing ID
+    const gradient = song ? getGradientForSong(song) : defaultGradientColors;
+
+    return (
+        <Animated.View 
+            key={indexOffset}
+            style={[
+                styles.cardContainer,
+                // Apply absolute positioning to ALL cards to ensure consistent behavior
+                // but use left/right calc to center them.
+                styles.centeredCard, 
+                animatedStyle,
+            ]}
+        >
+             <View style={styles.shadowContainer}>
+                {imageUri ? (
+                    <Image source={{ uri: imageUri }} style={styles.coverArt} />
+                ) : (
+                    <LinearGradient colors={gradient as [string, string]} style={styles.coverArt}>
+                        <Ionicons name="musical-notes" size={80} color="rgba(255,255,255,0.4)" />
+                    </LinearGradient>
+                )}
+                
+                {/* Hints for Center Card */}
+                {indexOffset === 0 && !isEditMode && (
+                    <Animated.View style={styles.swipeHintContainer}>
+                        {prevSong && <Ionicons name="chevron-back" size={24} color="rgba(255,255,255,0.5)" />}
+                        <View style={{ flex: 1 }} />
+                        {nextSong && <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.5)" />}
+                    </Animated.View>
+                )}
+
+                {/* Edit Overlay for Center Card */}
+                {indexOffset === 0 && isEditMode && (
+                    <View style={styles.editOverlay}>
+                        <Ionicons name="camera" size={32} color="#fff" />
+                    </View>
+                )}
+             </View>
+        </Animated.View>
+    );
+};
 
 export const CoverFlow: React.FC<CoverFlowProps> = ({
   currentSong,
@@ -113,89 +206,51 @@ export const CoverFlow: React.FC<CoverFlowProps> = ({
 
   const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
 
-  // --- RENDER HELPERS ---
-
-  const renderCover = (song: Song | null, indexOffset: number) => {
-    // indexOffset: -1 (Prev), 0 (Current), 1 (Next)
-    
-    const animatedStyle = useAnimatedStyle(() => {
-       // ... (Logic for scale/opacity remains same)
-       
-       // Calculate transform based on swipe
-       // We assume all cards are centered initially.
-       
-       // Spacing multiplier
-       const SPACING = SCREEN_WIDTH * 0.8; 
-       const cardTranslateX = translateX.value + (indexOffset * SPACING);
-       
-       // Removed Scale Effect as requested ("dont want getting big")
-       // Kept logic simple 1:1 size
-       const scale = 1;
-
-       return {
-           transform: [
-               { translateX: cardTranslateX }, 
-               { scale: scale } 
-           ] as any, 
-       };
-    });
-
-    // We simply stack them absolutely. Center is relative.
-    if (!song && indexOffset !== 0) return null; 
-
-    const imageUri = song?.coverImageUri;
-    // Use Helper designed to guarantee colors even if missing ID
-    const gradient = song ? getGradientForSong(song) : defaultGradientColors;
-
-    return (
-        <Animated.View 
-            key={indexOffset}
-            style={[
-                styles.cardContainer,
-                // Apply absolute positioning to ALL cards to ensure consistent behavior
-                // but use left/right calc to center them.
-                styles.centeredCard, 
-                animatedStyle,
-            ]}
-        >
-             <View style={styles.shadowContainer}>
-                {imageUri ? (
-                    <Image source={{ uri: imageUri }} style={styles.coverArt} />
-                ) : (
-                    <LinearGradient colors={gradient as [string, string]} style={styles.coverArt}>
-                        <Ionicons name="musical-notes" size={80} color="rgba(255,255,255,0.4)" />
-                    </LinearGradient>
-                )}
-                
-                {/* Hints for Center Card */}
-                {indexOffset === 0 && !isEditMode && (
-                    <Animated.View style={styles.swipeHintContainer}>
-                        {prevSong && <Ionicons name="chevron-back" size={24} color="rgba(255,255,255,0.5)" />}
-                        <View style={{ flex: 1 }} />
-                        {nextSong && <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.5)" />}
-                    </Animated.View>
-                )}
-
-                {/* Edit Overlay for Center Card */}
-                {indexOffset === 0 && isEditMode && (
-                    <View style={styles.editOverlay}>
-                        <Ionicons name="camera" size={32} color="#fff" />
-                    </View>
-                )}
-             </View>
-        </Animated.View>
-    );
-  };
-
   return (
     <View style={styles.container}>
         <GestureDetector gesture={composedGesture}>
             <Animated.View style={styles.touchArea}>
                 {/* Render Neighbors First (Below) */}
-                {renderCover(prevSong, -1)}
-                {renderCover(nextSong, 1)}
+                <CoverCard 
+                    song={prevSong} 
+                    indexOffset={-1} 
+                    translateX={translateX}
+                    isEditMode={isEditMode}
+                    defaultGradientColors={defaultGradientColors}
+                    prevSong={prevSong}
+                    nextSong={nextSong}
+                    onPress={onPress}
+                    onSwipeConfirmed={onSwipeConfirmed}
+                    onNext={onNext}
+                    onPrev={onPrev}
+                />
+                <CoverCard 
+                    song={nextSong} 
+                    indexOffset={1} 
+                    translateX={translateX}
+                    isEditMode={isEditMode}
+                    defaultGradientColors={defaultGradientColors}
+                    prevSong={prevSong}
+                    nextSong={nextSong}
+                    onPress={onPress}
+                    onSwipeConfirmed={onSwipeConfirmed}
+                    onNext={onNext}
+                    onPrev={onPrev}
+                />
                 {/* Render Current (Top) */}
-                {renderCover(currentSong, 0)}
+                <CoverCard 
+                    song={currentSong} 
+                    indexOffset={0} 
+                    translateX={translateX}
+                    isEditMode={isEditMode}
+                    defaultGradientColors={defaultGradientColors}
+                    prevSong={prevSong}
+                    nextSong={nextSong}
+                    onPress={onPress}
+                    onSwipeConfirmed={onSwipeConfirmed}
+                    onNext={onNext}
+                    onPrev={onPrev}
+                />
             </Animated.View>
         </GestureDetector>
     </View>

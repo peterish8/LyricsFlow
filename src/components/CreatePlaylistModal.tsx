@@ -13,21 +13,32 @@ import {
 import { BlurView } from 'expo-blur';
 import { Colors } from '../constants/colors';
 import { usePlaylistStore } from '../store/playlistStore';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 export const CreatePlaylistModal = () => {
     const navigation = useNavigation();
-    const [name, setName] = useState('');
+    const route = useRoute<any>(); // Get params properly
+    const params = route.params;
+    const isEditMode = !!params?.playlistId;
+    
+    // Initialize with existing name if editing
+    const [name, setName] = useState(params?.initialName || '');
+    
     const createPlaylist = usePlaylistStore(state => state.createPlaylist);
+    const updatePlaylist = usePlaylistStore(state => state.updatePlaylist);
     
     const handleCreate = async () => {
         if (!name.trim()) return;
         
         try {
-            await createPlaylist(name.trim());
+            if (isEditMode && params?.playlistId) {
+                await updatePlaylist(params.playlistId, { name: name.trim() });
+            } else {
+                await createPlaylist(name.trim());
+            }
             navigation.goBack();
         } catch (error) {
-            Alert.alert('Error', 'Failed to create playlist');
+            Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'create'} playlist`);
         }
     };
     
@@ -39,8 +50,8 @@ export const CreatePlaylistModal = () => {
                 style={styles.keyboardView}
             >
                 <View style={styles.content}>
-                    <Text style={styles.title}>New Playlist</Text>
-                    <Text style={styles.subtitle}>Enter a name for your playlist</Text>
+                    <Text style={styles.title}>{isEditMode ? 'Rename Playlist' : 'New Playlist'}</Text>
+                    <Text style={styles.subtitle}>{isEditMode ? 'Enter a new name' : 'Enter a name for your playlist'}</Text>
                     
                     <TextInput
                         style={styles.input}
@@ -64,7 +75,7 @@ export const CreatePlaylistModal = () => {
                             onPress={handleCreate}
                             disabled={!name.trim()}
                         >
-                            <Text style={styles.createText}>Create</Text>
+                            <Text style={styles.createText}>{isEditMode ? 'Save' : 'Create'}</Text>
                         </Pressable>
                     </View>
                 </View>

@@ -441,16 +441,40 @@ export async function searchMusic(query: string, artistName?: string, onProgress
   try {
       saavnResults = await searchSaavn(query);
       
-      // Mark Authenticity and Check
+      // Mark Authenticity and Filter
       if (saavnResults.length > 0) {
+          const lowerQuery = query.toLowerCase();
+          const queryHasRemix = lowerQuery.includes('remix');
+          const queryHasLive = lowerQuery.includes('live');
+          const queryHasCover = lowerQuery.includes('cover');
+
           saavnResults = saavnResults.map(s => {
-              const isAuth = artistName ? isArtistMatch(s.artist, artistName) : false;
-              if (isAuth) foundAuthentic = true;
+              const matchesArtist = artistName ? isArtistMatch(s.artist, artistName) : true;
+              const lowerTitle = s.title.toLowerCase();
+              
+              // Penalize unwanted versions
+              const isRemix = lowerTitle.includes('remix') || lowerTitle.includes('mix');
+              const isLive = lowerTitle.includes('live') || lowerTitle.includes('concert');
+              const isCover = lowerTitle.includes('cover') || lowerTitle.includes('performed by');
+              
+              let isAuth = matchesArtist;
+              
+              // If query didn't ask for remix but result is remix -> Not Authentic
+              if (!queryHasRemix && isRemix) isAuth = false;
+              if (!queryHasLive && isLive) isAuth = false;
+              if (!queryHasCover && isCover) isAuth = false;
+
               return { ...s, isAuthentic: isAuth };
           });
           
-          if (foundAuthentic) {
+          // Sort: Authentic first
+          saavnResults.sort((a, b) => (b.isAuthentic === true ? 1 : 0) - (a.isAuthentic === true ? 1 : 0));
+
+          // Check if we found a good match
+          if (saavnResults.some(s => s.isAuthentic)) {
                console.log('[SearchEngine] ✅ Found AUTHENTIC match in Saavn. Stopping here.');
+               // Filter to return ONLY authentic if found? Or just prioritize?
+               // Let's return the authentic ones primarily.
                return saavnResults;
           }
           

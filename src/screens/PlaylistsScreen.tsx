@@ -11,7 +11,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePlaylistStore } from '../store/playlistStore';
 import { usePlayerStore } from '../store/playerStore';
-import { AuroraHeader } from '../components';
+import { AuroraHeader, CustomMenu } from '../components';
 import { MosaicCover } from '../components/MosaicCover';
 import { Colors } from '../constants/colors';
 import { RootStackParamList } from '../types/navigation';
@@ -61,31 +61,66 @@ export const PlaylistsScreen: React.FC = () => {
     navigation.navigate('CreatePlaylist' as any);
   };
 
-  const handleDeletePlaylist = (playlist: any) => {
-      if (playlist.isDefault) {
-          // User request: Liked songs cannot be deleted
-          return; 
-      }
+  // Menu State
+  const [menuVisible, setMenuVisible] = React.useState(false);
+  const [menuAnchor, setMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
+  const [selectedPlaylist, setSelectedPlaylist] = React.useState<any>(null);
+
+  const handleLongPress = (playlist: any, event: any) => {
+    if (playlist.isDefault) return; // Cannot modify "Liked Songs"
+    
+    const { pageX, pageY } = event.nativeEvent;
+    setMenuAnchor({ x: pageX, y: pageY });
+    setSelectedPlaylist(playlist);
+    setMenuVisible(true);
+  };
+
+  const handleDeleteConfirm = () => {
+      if (!selectedPlaylist) return;
       
       Alert.alert(
           'Delete Playlist',
-          `Are you sure you want to delete "${playlist.name}"?`,
+          `Are you sure you want to delete "${selectedPlaylist.name}"?`,
           [
               { text: 'Cancel', style: 'cancel' },
               { 
                   text: 'Delete', 
                   style: 'destructive',
-                  onPress: () => deletePlaylist(playlist.id)
+                  onPress: () => {
+                      deletePlaylist(selectedPlaylist.id);
+                      setMenuVisible(false);
+                  }
               }
           ]
       );
   };
 
-  // ...
+  const handleRename = () => {
+      if (!selectedPlaylist) return;
+      setMenuVisible(false);
+      // Navigate to CreatePlaylistModal in Edit Mode
+      navigation.navigate('CreatePlaylist' as any, { 
+          playlistId: selectedPlaylist.id,
+          initialName: selectedPlaylist.name
+      });
+  };
+
+  const menuOptions = [
+      {
+          label: 'Rename Playlist',
+          icon: 'pencil-outline' as const,
+          onPress: handleRename
+      },
+      {
+          label: 'Delete Playlist',
+          icon: 'trash-outline' as const,
+          onPress: handleDeleteConfirm,
+          isDestructive: true
+      }
+  ];
 
   return (
     <View style={styles.container}>
-      {/* AuroraHeader removed as per user request */}
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* ... Header ... */}
         <View style={styles.header}>
@@ -101,7 +136,6 @@ export const PlaylistsScreen: React.FC = () => {
              </View>
         ) : playlists.length === 0 ? (
           <View style={styles.emptyContainer}>
-            {/* ... Empty State ... */}
             <Ionicons name="folder-open-outline" size={80} color="rgba(255,255,255,0.2)" />
             <Text style={styles.emptyTitle}>No playlists yet</Text>
             <Text style={styles.emptySubtitle}>Create your first playlist to get started</Text>
@@ -121,8 +155,8 @@ export const PlaylistsScreen: React.FC = () => {
               <Pressable
                 style={styles.playlistCard}
                 onPress={() => handlePlaylistPress(item.id)}
-                onLongPress={() => handleDeletePlaylist(item)}
-                delayLongPress={500}
+                onLongPress={(e) => handleLongPress(item, e)}
+                delayLongPress={300}
               >
                 <MosaicCover songs={playlistSongs[item.id] || []} size={160} />
                 <Text style={styles.playlistName} numberOfLines={2}>
@@ -136,6 +170,14 @@ export const PlaylistsScreen: React.FC = () => {
           />
         )}
       </SafeAreaView>
+
+      <CustomMenu
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        title={selectedPlaylist?.name || 'Options'}
+        anchorPosition={menuAnchor}
+        options={menuOptions}
+      />
     </View>
   );
 };

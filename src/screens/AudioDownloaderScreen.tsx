@@ -353,14 +353,27 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     const confirmDownload = (targetPlaylistId?: string, playlistName?: string) => {
         if (pendingDownloadSongs.length === 0) return;
 
-        addToQueue(pendingDownloadSongs, targetPlaylistId);
-        
-        let msg = `Added ${pendingDownloadSongs.length} song${pendingDownloadSongs.length > 1 ? 's' : ''} to queue`;
-        if (playlistName) {
-            msg += ` (Simultaneously adding to "${playlistName}")`;
+        const currentQueue = useDownloadQueueStore.getState().queue;
+        const newSongs = pendingDownloadSongs.filter(s => !currentQueue.find(q => q.id === s.id));
+        const duplicates = pendingDownloadSongs.length - newSongs.length;
+
+        if (newSongs.length > 0) {
+            addToQueue(newSongs, targetPlaylistId);
+            
+            let msg = `Added ${newSongs.length} song${newSongs.length > 1 ? 's' : ''} to queue`;
+            if (playlistName) {
+                msg += ` (Simultaneously adding to "${playlistName}")`;
+            }
+            setToast({ visible: true, message: msg, type: 'success' });
         }
-        
-        setToast({ visible: true, message: msg, type: 'success' });
+
+        if (duplicates > 0) {
+             // If we only had duplicates, or some duplicates
+             const msg = newSongs.length === 0 
+                ? 'Song already in queue!' 
+                : `Added ${newSongs.length}, skipped ${duplicates} duplicates`;
+             setToast({ visible: true, message: msg, type: newSongs.length === 0 ? 'error' : 'success' });
+        }
         
         // Cleanup
         setPendingDownloadSongs([]);
@@ -428,8 +441,10 @@ Only provide the JSON array, no other text.`;
                 try {
                     const results = await MultiSourceSearchService.searchMusic(query, item.query.artist);
                     if (results.length > 0) {
-                        item.result = results[0]; // Take best match
-                        item.status = 'found';
+                        // Prefer authentic result if marked
+                        const bestMatch = results.find(r => r.isAuthentic) || results[0];
+                        item.result = bestMatch;
+                        item.status = bestMatch.isAuthentic ? 'found' : 'found'; // keeping generic status, but we trust the service sorting
                     } else {
                         item.status = 'not_found';
                     }

@@ -100,9 +100,81 @@ export const PlaylistDetailScreen: React.FC = () => {
     seekTo,
   } = usePlayerStore();
   
+  const activeIsPlaying = currentPlaylistId === playlistId;
+
+  // Sort State
+  type SortOption = 'custom' | 'title' | 'artist' | 'date';
+  type SortDirection = 'asc' | 'desc';
+  
+  const [sortOption, setSortOption] = useState<SortOption>('custom');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [sortMenuVisible, setSortMenuVisible] = useState(false);
+  const [sortMenuAnchor, setSortMenuAnchor] = useState<{ x: number, y: number } | undefined>(undefined);
+  
+  // Persistence Key
+  const SORT_PREF_KEY = `playlist_sort_${playlistId}`;
+
+  // Load Sort Settings
+  useEffect(() => {
+     const loadSort = async () => {
+         try {
+             // We use require here to avoid top-level async issues if any, implies AsyncStorage
+             const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+             const saved = await AsyncStorage.getItem(SORT_PREF_KEY);
+             if (saved) {
+                 const { option, direction } = JSON.parse(saved);
+                 setSortOption(option);
+                 setSortDirection(direction);
+             }
+         } catch (e) {
+             console.log('Failed to load sort settings', e);
+         }
+     };
+     loadSort();
+  }, [playlistId]);
+
+  // Save Sort Settings
+  const saveSort = async (option: SortOption, direction: SortDirection) => {
+      try {
+          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+          await AsyncStorage.setItem(SORT_PREF_KEY, JSON.stringify({ option, direction }));
+      } catch (e) {
+          console.error('Failed to save sort settings', e);
+      }
+  };
+
+  const handleSortChange = (option: SortOption) => {
+      // If clicking same option, toggle direction
+      // If clicking different, set to Asc (or desc for date)
+      let newDirection: SortDirection = 'asc';
+      
+      if (option === sortOption) {
+          newDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+          // Default directions: Date -> Desc (Newest), Others -> Asc (A-Z)
+          if (option === 'date') newDirection = 'desc';
+          else newDirection = 'asc';
+      }
+      
+      setSortOption(option);
+      setSortDirection(newDirection);
+      saveSort(option, newDirection);
+      setSortMenuVisible(false);
+  };
+
+  const getSortLabel = () => {
+      const dirArrow = sortDirection === 'asc' ? '↑' : '↓';
+      switch(sortOption) {
+          case 'title': return `Alphabetical ${dirArrow}`;
+          case 'artist': return `Artist ${dirArrow}`;
+          case 'date': return `Recently Uploaded ${dirArrow}`;
+          default: return 'Custom Order';
+      }
+  };
+
   const lastUpdate = usePlaylistStore(state => state.lastUpdate);
 
-  const activeIsPlaying = currentPlaylistId === playlistId;
+
 
   // Local state for smoother scrubber updates (matches NowPlayingScreen logic)
   const [currentTime, setCurrentTime] = useState(0);
@@ -196,22 +268,55 @@ export const PlaylistDetailScreen: React.FC = () => {
     }, [loadData])
   );
 
-  // Derived State: Search
-  // Debounce could be done via Effect, but simple useMemo on filter is OK for < 500 items usually.
-  // For strict performance "No blocking main thread", we trust useMemo is fast enough for 100 items.
-  // If list is huge, we need a separate debounced state.
+  /* Sort Logic applied to Filtered List */
   const filteredSongs = useMemo(() => {
-    if (!searchQuery) return songs;
-    const lower = searchQuery.toLowerCase();
-    return songs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(lower) ||
-        s.artist?.toLowerCase().includes(lower)
-    );
-  }, [songs, searchQuery]);
+    let result = [...songs];
+    
+    // 1. Filter
+    if (searchQuery) {
+        const lower = searchQuery.toLowerCase();
+        result = result.filter(
+          (s) =>
+            s.title.toLowerCase().includes(lower) ||
+            s.artist?.toLowerCase().includes(lower)
+        );
+    }
+    
+    // 2. Sort
+    if (sortOption !== 'custom') {
+        result.sort((a, b) => {
+            let valA: string | number = '';
+            let valB: string | number = '';
+            
+            switch (sortOption) {
+                case 'title':
+                    valA = a.title.toLowerCase();
+                    valB = b.title.toLowerCase();
+                    break;
+                case 'artist':
+                    valA = (a.artist || '').toLowerCase();
+                    valB = (b.artist || '').toLowerCase();
+                    break;
+                case 'date':
+                    // Use dateCreated for "Recently Uploaded"
+                    valA = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+                    valB = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+                    break;
+            }
+            
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+    
+    return result;
+  }, [songs, searchQuery, sortOption, sortDirection]);
 
   // Dynamic Header Logic & Gradient
-  const activeSongInPlaylist = activeIsPlaying ? currentSong : null;
+  // Ensure the current song actually belongs to this playlist before showing it as active
+  const isSongInPlaylist = currentSong && songs.some(s => s.id === currentSong.id);
+  const activeSongInPlaylist = (activeIsPlaying && isSongInPlaylist) ? currentSong : null;
   
   // Calculate neighbors for CoverFlow
   const currentIndex = activeIsPlaying && currentSong ? songs.findIndex(s => s.id === currentSong.id) : -1;
@@ -412,7 +517,7 @@ export const PlaylistDetailScreen: React.FC = () => {
   // --- RENDERERS ---
 
   // Passing props to memoized component
-  const renderItem = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Song>) => {
+   const renderItem = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Song>) => {
     return (
       <PlaylistItem
         item={item}
@@ -424,6 +529,7 @@ export const PlaylistDetailScreen: React.FC = () => {
         isEditMode={isEditMode}
         onPress={handleSongPress}
         onDelete={handleDeleteSong}
+        displayIndex={getIndex ? getIndex() : 0}
       />
     );
   }, [currentSongId, isPlaying, isEditMode, handleSongPress, handleDeleteSong]); // Added isPlaying dependency
@@ -504,7 +610,7 @@ export const PlaylistDetailScreen: React.FC = () => {
           
           {/* Animated Header Title (Fades in when scrolled) */}
           {!isSearchActive && (
-              <Animated.Text style={[styles.stickyHeaderTitle, headerTitleStyle]} numberOfLines={1}>
+              <Animated.Text style={[styles.stickyHeaderTitle, headerTitleStyle]} numberOfLines={2}>
                   {playlistName}
               </Animated.Text>
           )}
@@ -598,7 +704,30 @@ export const PlaylistDetailScreen: React.FC = () => {
              )}
 
              <Text style={styles.playlistName}>{playlistName}</Text>
-             <Text style={styles.playlistMeta}>{songs.length} songs • {formatTotalDuration()}</Text>
+             <View style={styles.metaContainer}>
+                <Text style={styles.playlistMeta}>{songs.length} songs • {formatTotalDuration()}</Text>
+                {/* Sort Button */}
+                <Pressable 
+                    style={styles.sortButton}
+                    onPress={(e) => {
+                        const { pageX, pageY } = e.nativeEvent;
+                        setSortMenuAnchor({ x: pageX, y: pageY });
+                        setSortMenuVisible(true);
+                    }}
+                >
+                    <Ionicons 
+                        name={sortOption === 'custom' ? "filter" : "filter-circle"} 
+                        size={16} 
+                        color={sortOption === 'custom' ? "rgba(255,255,255,0.6)" : Colors.primary} 
+                    />
+                    <Text style={[
+                        styles.sortButtonText, 
+                        sortOption !== 'custom' && { color: Colors.primary }
+                    ]}>
+                        {getSortLabel()}
+                    </Text>
+                </Pressable>
+             </View>
 
              {/* Search Bar Removed from here */}
              
@@ -712,6 +841,35 @@ export const PlaylistDetailScreen: React.FC = () => {
         anchorPosition={menuPosition}
       />
 
+      <CustomMenu
+        visible={sortMenuVisible}
+        onClose={() => setSortMenuVisible(false)}
+        options={[
+            { 
+               label: 'Custom Order', 
+               icon: sortOption === 'custom' ? 'checkmark' : undefined, 
+               onPress: () => handleSortChange('custom') 
+            },
+            { 
+               label: `Alphabetical ${sortOption === 'title' ? (sortDirection === 'asc' ? '(A-Z)' : '(Z-A)') : ''}`, 
+               icon: sortOption === 'title' ? (sortDirection === 'asc' ? 'arrow-down' : 'arrow-up') : 'text',
+               onPress: () => handleSortChange('title') 
+            },
+            { 
+               label: `Recently Uploaded ${sortOption === 'date' ? (sortDirection === 'asc' ? '(Oldest)' : '(Newest)') : ''}`, 
+               icon: sortOption === 'date' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'time', 
+               onPress: () => handleSortChange('date') 
+            },
+            { 
+               label: `Artist ${sortOption === 'artist' ? (sortDirection === 'asc' ? '(A-Z)' : '(Z-A)') : ''}`, 
+               icon: sortOption === 'artist' ? (sortDirection === 'asc' ? 'arrow-down' : 'arrow-up') : 'person',
+               onPress: () => handleSortChange('artist') 
+            },
+        ]}
+        title="Sort Playlist"
+        anchorPosition={sortMenuAnchor}
+      />
+
       {/* Scroll To Top FAB */}
       <Animated.View 
         style={[
@@ -775,6 +933,7 @@ const styles = StyleSheet.create({
       color: '#fff',
       marginLeft: 16,
       textAlign: 'center',
+      marginRight: 16,
   },
   iconButton: {
     width: 40,
@@ -790,7 +949,7 @@ const styles = StyleSheet.create({
   listHeader: {
     alignItems: 'center',
     marginBottom: 20,
-    width: '100%', // Ensure header takes full width
+    width: '100%',
   },
   coverContainer: {
     shadowColor: '#000',
@@ -804,7 +963,7 @@ const styles = StyleSheet.create({
   inlinePlayerContainer: {
       marginBottom: 24,
       marginTop: 12,
-      width: '100%', // Ensure this takes full width of ListHeader
+      width: '100%',
   },
   coverArt: {
     width: 220,
@@ -837,9 +996,29 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   playlistMeta: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.6)',
-    marginBottom: 16,
+      color: 'rgba(255,255,255,0.6)',
+      fontSize: 14,
+      fontWeight: '500',
+  },
+  metaContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 4,
+      gap: 12,
+  },
+  sortButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255,255,255,0.1)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+      gap: 4,
+  },
+  sortButtonText: {
+      fontSize: 12,
+      color: 'rgba(255,255,255,0.8)',
+      fontWeight: '500',
   },
   searchPill: {
       flexDirection: 'row',
@@ -864,8 +1043,8 @@ const styles = StyleSheet.create({
   },
   searchInput: {
       flex: 1,
-      color: '#fff',
-      fontSize: 14
+      fontSize: 14,
+      color: '#000' 
   },
   controlsRow: {
     flexDirection: 'row',
@@ -876,11 +1055,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#FFFFFF', // WHITE BUTTON
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#FFF',
-    shadowOpacity: 0.2, // Softer shadow
+    shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 5,
   },
@@ -916,25 +1095,25 @@ const styles = StyleSheet.create({
   },
   scrubberContainer: {
       width: '100%',
-      paddingHorizontal: 40, // More padding = "Shorter" slider
+      paddingHorizontal: 40,
       marginBottom: 20,
   },
   timerRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      marginTop: 4, // Positive margin to sit below slider
+      marginTop: 4,
       width: '100%',
   },
   timerText: {
       fontSize: 12,
-      color: '#FFFFFF', // Solid white for visibility
+      color: '#FFFFFF',
       fontVariant: ['tabular-nums'],
   },
   inlineControlsRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 50, // Increased significantly from 32
+      gap: 50,
   },
   skipButton: {
       alignItems: 'center',

@@ -73,7 +73,7 @@ export const CustomMenu: React.FC<CustomMenuProps> = ({
               top: anchorPosition.y,
               right: anchorPosition.x > 200 ? 16 : undefined, // Align right if tapped on right side
               left: anchorPosition.x <= 200 ? 16 : undefined,
-              width: 250, // Smaller width for popover
+              width: 280, // Slightly wider for safer text fitting
             } : {}
           ]}
         >
@@ -104,6 +104,7 @@ export const CustomMenu: React.FC<CustomMenuProps> = ({
                       styles.optionLabel, 
                       option.isDestructive && styles.destructiveLabel
                     ]}
+                    numberOfLines={1} // Prevent excessively tall items, rely on truncation for extreme cases
                   >
                     {option.label}
                   </Text>
@@ -112,6 +113,7 @@ export const CustomMenu: React.FC<CustomMenuProps> = ({
                       name={option.icon} 
                       size={20} 
                       color={option.isDestructive ? '#FF453A' : '#FFF'} 
+                      style={{ marginLeft: 12 }} // Add spacing
                     />
                   )}
                 </Pressable>
@@ -185,6 +187,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '400',
     color: '#FFF',
+    flex: 1, // Allow text to take available space
   },
   destructiveLabel: {
     color: '#FF453A',
