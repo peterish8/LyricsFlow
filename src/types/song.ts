@@ -79,4 +79,20 @@ export interface UnifiedSong {
   selectedQuality?: { url: string; quality: string; format: string };
   selectedLyrics?: string;
   selectedCoverUri?: string;
+  isAuthentic?: boolean; // Whether song matches the exact requested artist
+}
+
+/**
+ * Playlist Interface
+ */
+export interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  coverImageUri?: string;
+  isDefault: boolean;    // true for "Liked Songs"
+  sortOrder: number;
+  dateCreated: string;
+  dateModified: string;
+  songCount?: number;    // computed from JOIN
 }

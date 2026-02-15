@@ -9,13 +9,14 @@ export interface QueueItem {
   progress: number;
   stageStatus?: string; // e.g. "Fetching Lyrics...", "Downloading Audio..."
   error?: string;
+  targetPlaylistId?: string;
 }
 
 interface DownloadQueueStore {
   queue: QueueItem[];
   isProcessing: boolean;
   
-  addToQueue: (songs: UnifiedSong[]) => void;
+  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string) => void;
   updateItem: (id: string, updates: Partial<QueueItem>) => void;
   removeItem: (id: string) => void;
   clearCompleted: () => void;
@@ -30,7 +31,7 @@ export const useDownloadQueueStore = create<DownloadQueueStore>((set) => ({
   queue: [],
   isProcessing: false,
 
-  addToQueue: (songs: UnifiedSong[]) => {
+  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string) => {
     set(state => {
       // Filter out duplicates
       const newItems = songs
@@ -40,7 +41,8 @@ export const useDownloadQueueStore = create<DownloadQueueStore>((set) => ({
           song: s,
           status: 'pending' as const,
           progress: 0,
-          stageStatus: 'Waiting...'
+          stageStatus: 'Waiting...',
+          targetPlaylistId // Add playlist ID if provided
         }));
       
       return {

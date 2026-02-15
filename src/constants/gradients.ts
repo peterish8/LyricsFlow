@@ -195,3 +195,23 @@ export const getGradientColors = (id: string): string[] => {
   const gradient = getGradientById(id);
   return gradient?.colors ?? GRADIENTS[0].colors;
 };
+
+// Start from Random index to avoid bias if IDs are sequential? No, simple hash.
+export const getGradientForSong = (song: { id: string; gradientId?: string }): string[] => {
+    // If specific gradient is set (and not the 'dynamic' placeholder), use it.
+    if (song.gradientId && song.gradientId !== 'dynamic' && getGradientById(song.gradientId)) {
+        return getGradientColors(song.gradientId);
+    }
+    
+    // Otherwise, generate one deterministically from Song ID
+    // Sum char codes to get integer
+    let hash = 0;
+    for (let i = 0; i < song.id.length; i++) {
+        hash = song.id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    // Skip index 0 ('dynamic' / black)
+    // Use modulo to pick from 1 to LENGTH-1
+    const index = (Math.abs(hash) % (GRADIENTS.length - 1)) + 1;
+    return GRADIENTS[index].colors;
+};

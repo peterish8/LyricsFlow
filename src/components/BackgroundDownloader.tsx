@@ -5,15 +5,42 @@ import { useSongsStore } from '../store/songsStore';
 import { MultiSourceLyricsService } from '../services/MultiSourceLyricsService';
 import { lyricaService } from '../services/LyricaService';
 import * as FileSystem from 'expo-file-system/legacy';
+import { usePlaylistStore } from '../store/playlistStore';
+import { useKeepAwake } from 'expo-keep-awake';
+
+// Wrapper component to conditionally use the hook
+const KeepAwakeController = () => {
+  useKeepAwake();
+  return null;
+};
 
 export const BackgroundDownloader = () => {
     const { queue, updateItem } = useDownloadQueueStore();
     const { addSong, fetchSongs } = useSongsStore();
     const activeDownloads = useRef<Set<string>>(new Set());
     const MAX_CONCURRENT = 1; // Only 1 download at a time
+    
+    // Prevent screen from sleeping while downloading
+    const hasActiveDownloads = queue.some(item => item.status === 'downloading' || item.status === 'pending');
+    
+    // Use the wrapper component to activate keep-awake only when needed
+    // This avoids hook rule violations and import errors for non-existent static methods
+
 
     useEffect(() => {
         let isActive = true;
+
+        // Cleanup: Remove IDs from activeDownloads that are no longer in the queue
+        // This handles the case where a user removes a currently downloading song
+        const queueIds = new Set(queue.map(q => q.id));
+        for (const activeId of activeDownloads.current) {
+            if (!queueIds.has(activeId)) {
+                console.log(`[BackgroundDownloader] Detected removal of active item: ${activeId}`);
+                // Stop the download to save bandwidth
+                downloadManager.pauseDownload(activeId); 
+                activeDownloads.current.delete(activeId);
+            }
+        }
 
         const processItem = async (item: any) => {
             // Check limits BEFORE adding to active set
@@ -95,7 +122,7 @@ export const BackgroundDownloader = () => {
                         
                         if (bestLyrics && bestLyrics.lyrics) {
                             const type = isSynced(bestLyrics.lyrics) ? 'Synced' : 'Plain';
-                            console.log(`[BackgroundDownloader] ✅ Found lyrics (${type}) via ${bestLyrics.source}`);
+                            console.log(`[BackgroundDownloader] ✅ Found lyrics (${type})`);
                             updateItem(item.id, { progress: 0.95, stageStatus: 'Saving lyrics...' });
                             
                             // Write to file
@@ -128,6 +155,20 @@ export const BackgroundDownloader = () => {
                 activeDownloads.current.delete(item.id);
                 console.log(`[BackgroundDownloader] Removed from active set. Active: ${activeDownloads.current.size}`);
 
+                // CRITICAL: Double check if item is still in queue (it might have been removed during download)
+                // We use the Ref of active downloads or check the store directly. 
+                // Since we removed it from activeDownloads above, we should check if it was cancelled
+                // But wait, we removed it from activeDownloads ourself!
+                // So we need to check if the store still has it?
+                // Actually, if the user invoked 'remove', the store updates 'queue' state.
+                const currentQueue = useDownloadQueueStore.getState().queue;
+                const isStillInQueue = currentQueue.some(q => q.id === item.id);
+                
+                if (!isStillInQueue) {
+                    console.log(`[BackgroundDownloader] Item ${item.id} was removed from queue. Aborting save.`);
+                    return;
+                }
+
                 console.log(`[BackgroundDownloader] Calling updateItem with status=completed...`);
                 updateItem(item.id, { status: 'completed', progress: 1, stageStatus: 'Done' });
                 
@@ -136,6 +177,17 @@ export const BackgroundDownloader = () => {
                 console.log(`[BackgroundDownloader] addSong completed, calling fetchSongs...`);
                 await fetchSongs();
                 console.log(`[BackgroundDownloader] fetchSongs completed`);
+
+                // 5. Add to Playlist if requested
+                if (item.targetPlaylistId) {
+                    try {
+                        console.log(`[BackgroundDownloader] Adding to playlist: ${item.targetPlaylistId}`);
+                        await usePlaylistStore.getState().addSongToPlaylist(item.targetPlaylistId, newSong.id);
+                        console.log(`[BackgroundDownloader] Added to playlist successfully`);
+                    } catch (e) {
+                         console.error(`[BackgroundDownloader] Failed to add to playlist:`, e);
+                    }
+                }
 
             } catch (error: any) {
                 console.error(`[BackgroundDownloader] ❌ Error for ${item.song.title}:`, error);
@@ -172,5 +224,9 @@ export const BackgroundDownloader = () => {
         };
     }, [queue]);
 
-    return null;
+    return (
+        <>
+            {hasActiveDownloads && <KeepAwakeController />}
+        </>
+    );
 };

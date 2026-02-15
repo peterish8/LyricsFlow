@@ -4,6 +4,7 @@ import { MultiSourceLyricsService } from '../services/MultiSourceLyricsService';
 import { useSongsStore } from './songsStore';
 import { lyricaService } from '../services/LyricaService';
 import * as FileSystem from 'expo-file-system/legacy';
+import { parseTimestampedLyrics } from '../utils/timestampParser';
 
 interface ScanJob {
   songId: string;
@@ -128,24 +129,28 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
 
             const results = await MultiSourceLyricsService.fetchLyricsParallel(searchTitle, searchArtist, nextJob.duration);
             
-            const synced = results.find(l => /\[\d{2}:\d{2}/.test(l.lyrics));
+            // Relaxed Regex: Match [00:00], (00:00), 00:00, 00.00
+            const synced = results.find(l => /[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(l.lyrics));
             
             if (synced) {
                 bestResult = synced;
                 finalType = 'synced';
-                updateJob(prev => ({ log: [...prev.log, `Synced lyrics found on attempt ${attempt}`] }));
+                updateJob(prev => ({ log: [...prev.log, `✅ Found synced lyrics (Attempt ${attempt})`] }));
                 break; 
             } else if (results.length > 0) {
                 if (!bestResult) bestResult = results[0];
-                updateJob(prev => ({ log: [...prev.log, `Only plain lyrics found via ${results[0].source}`] }));
+                updateJob(prev => ({ log: [...prev.log, `⚠️ Found plain lyrics (Attempt ${attempt})`] }));
             }
             
-            if (attempt < 3 && !synced) await new Promise(r => setTimeout(r, 1500));
+            if (attempt < 3 && !synced) {
+                 updateJob(prev => ({ log: [...prev.log, `Retrying with refined query...`] }));
+                 await new Promise(r => setTimeout(r, 1000)); // Reduced delay
+            }
         }
 
         // Apply Result
         if (bestResult) {
-             const type = /\[\d{2}:\d{2}/.test(bestResult.lyrics) ? 'synced' : 'plain';
+             const type = /[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(bestResult.lyrics) ? 'synced' : 'plain';
              
              try {
                  // Try 1: Save alongside audio file (Preferred)
@@ -172,29 +177,52 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
                  }
                  
                  // Update DB
-                 const parsedLyrics = lyricaService.parseLrc(bestResult.lyrics, nextJob.duration);
+                 // Use the standardized, permissive parser from utils
+                 const parsedLyrics = parseTimestampedLyrics(bestResult.lyrics);
                  console.log(`[Queue] Parsed ${parsedLyrics?.length} lines for ${nextJob.title}`);
                  
+                 if (parsedLyrics.length === 0) {
+                     console.warn('[Queue] Parsed 0 lines! Lyrics content:', bestResult.lyrics.substring(0, 100));
+                     // If parsing failed but we have text, fallback to saving as plain text lines
+                     if (bestResult.lyrics.trim().length > 0) {
+                        const fallbackLines = bestResult.lyrics.split('\n').map((line, idx) => ({
+                            timestamp: 0,
+                            text: line.trim(),
+                            lineOrder: idx
+                        })).filter(l => l.text.length > 0);
+                        
+                        if (fallbackLines.length > 0) {
+                            console.log(`[Queue] Fallback: Used ${fallbackLines.length} plain text lines.`);
+                            // Mutate parsedLyrics locally to use this fallback
+                            parsedLyrics.push(...fallbackLines);
+                        }
+                     }
+                 }
+                 
                  // Fetch latest song data to ensure we don't overwrite other fields
+                 // Use queries directly to avoid side effects of store.getSong()
                  const currentSong = await useSongsStore.getState().getSong(nextJob.songId);
                  
                  if (currentSong) {
+                    console.log(`[Queue] Updating song ${nextJob.songId} in store...`);
                     await useSongsStore.getState().updateSong({
                         ...currentSong,
                         lyrics: parsedLyrics,
                         lyricSource: bestResult.source as any
                     });
+                    console.log(`[Queue] Song updated successfully.`);
                     
                     updateJob(prev => ({ 
                         status: 'completed', 
                         resultType: type as any, 
-                        log: [...prev.log, `Saved ${type} lyrics to ${savedPath ? 'storage' : 'db only'}`] 
+                        log: [...prev.log, `Saved ${parsedLyrics.length} lines (${type})`] 
                     }));
                  } else {
+                    console.error(`[Queue] Song ${nextJob.songId} not found in DB`);
                     updateJob(prev => ({ status: 'failed', log: [...prev.log, `Song not found in DB`] }));
                  }
              } catch (saveError: any) {
-                 console.error("Save Error", saveError);
+                 console.error("Save Error Detail:", saveError);
                  updateJob(prev => ({ status: 'failed', log: [...prev.log, `Save failed: ${saveError.message}`] }));
              }
         } else {
@@ -205,6 +233,8 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
         // Or keep it marked as completed. 
         // Let's keep it in "completed" state so UI can show success checkmark.
         // Process next immediately
+        // ⚡ Add delay to prevent DB locking if processing many songs rapidly
+        await new Promise(r => setTimeout(r, 500));
       }
     } catch (e) {
         console.error("Queue Processor Error", e);

@@ -13,6 +13,7 @@ The latest v8 update transforms LuvLyrics into a production-grade media player w
 - **Native Hardware Sync**: Full Bluetooth, Lock Screen, and Control Center integration.
 - **Dynamic Island UI**: A premium, compact, right-aligned island player that sits perfectly with the brand header.
 - **Unified Lyric Selection**: Parallel fetching from **LRCLIB**, **JioSaavn**, and **Lyrica/Genius**.
+- **Instant Playback**: Zero-latency audio start using optimistic comparison and background hydration.
 - **On-Device Reliability**: Powered by a robust SQLite engine—runs 100% standalone.
 
 ---

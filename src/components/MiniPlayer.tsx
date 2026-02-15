@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { useNavigation } from '@react-navigation/native';
 import * as GestureHandler from 'react-native-gesture-handler';
+import SynchronizedLyrics from './SynchronizedLyrics';
+import IslandScrubber from './IslandScrubber';
 const { Gesture, GestureDetector } = GestureHandler;
 import Animated, { 
   useAnimatedStyle, 
@@ -39,11 +42,51 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const MiniPlayer: React.FC = () => {
   const player = usePlayer();
   const { currentSong, showTransliteration, loadedAudioId, setLoadedAudioId, hideMiniPlayer, setMiniPlayerHidden } = usePlayerStore();
-  const { miniPlayerStyle } = useSettingsStore();
+  const { miniPlayerStyle, libraryFocusMode } = useSettingsStore();
   const navigation = useNavigation();
   
   // Use store instead of navigation state to avoid root-level crashes
   const isNowPlaying = hideMiniPlayer;
+
+  // Optimistic Playback State
+  const [optimisticPlaying, setOptimisticPlaying] = useState(false);
+  
+  // Animation for Play/Pause Button
+  const playButtonScale = useSharedValue(1);
+
+  const animatedButtonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: playButtonScale.value }]
+  }));
+
+  // Sync optimistic state with real source of truth
+  useEffect(() => {
+    if (player) {
+      setOptimisticPlaying(player.playing);
+    }
+  }, [player?.playing]);
+
+  const togglePlay = (e?: any) => {
+      e?.stopPropagation();
+      if (!player) return;
+
+      // 1. Optimistic Update
+      const nextState = !optimisticPlaying;
+      setOptimisticPlaying(nextState);
+
+      // 2. Button Animation (Bounce In -> Out)
+      playButtonScale.value = withSequence(
+          withTiming(0.8, { duration: 100 }),
+          withSpring(1, { damping: 10, stiffness: 200 })
+      );
+
+      // 3. Actual Action
+      if (nextState) {
+          player.play();
+      } else {
+          player.pause();
+      }
+  };
+
   
   const [expanded, setExpanded] = useState(false);
   const [lyricExpanded, setLyricExpanded] = useState(false);
@@ -74,16 +117,23 @@ const MiniPlayer: React.FC = () => {
   // Create a "vignette" theme for island: Black -> Color -> Black
   const mainColor = gradientColors[1] || gradientColors[0];
 
+  // Seek Lock to prevent visual glitch
+  const isSeekingRef = useRef(false);
+  const seekLockTimeout = useRef<NodeJS.Timeout | null>(null);
+
   // Update time & Rotation Logic
   useEffect(() => {
     const interval = setInterval(() => {
-      if (player) {
+      if (player && !isSeekingRef.current) {
         setCurrentTime(player.currentTime);
         setDuration(player.duration);
       }
     }, 250);
     return () => clearInterval(interval);
   }, [player]);
+
+  // Track if this is the first song loore)
+  const isInitialLoad = useRef(true);
 
   // Audio Sync Logic: Auto-load song if it changes in the store
   useEffect(() => {
@@ -96,7 +146,16 @@ const MiniPlayer: React.FC = () => {
           console.log('[MiniPlayer] Syncing audio for:', currentSong.title);
           await player.replace(currentSong.audioUri);
           setLoadedAudioId(currentSong.id);
-          player.play();
+          
+          // On app startup (first load), don't auto-play
+          // On user-initiated song change, auto-play
+          if (isInitialLoad.current) {
+            isInitialLoad.current = false;
+            console.log('[MiniPlayer] Initial load - staying paused');
+          } else {
+            player.play();
+            console.log('[MiniPlayer] User selected song - auto-playing');
+          }
         } catch (error) {
           console.error('[MiniPlayer] Failed to sync audio:', error);
         }
@@ -149,7 +208,7 @@ const MiniPlayer: React.FC = () => {
     const currentWidth = interpolate(
       expansionProgress.value,
       [0, 1],
-      [width * 0.45, width - 24], // Expand to full width minus margin * 2 (12 + 12)
+      [width * 0.52, width - 24], // Expand to full width minus margin * 2 (12 + 12)
       Extrapolation.CLAMP
     );
 
@@ -211,20 +270,69 @@ const MiniPlayer: React.FC = () => {
     ? lyricsToUse[currentLyricIndex].text 
     : '';
 
-  // Auto-scroll lyrics effect
+  /* 
+     VISUAL HIGHLIGHT LAG 
+     User wants text to "come up" before highlighting.
+     - currentLyricIndex: Logic source (time based).
+     - visualLyricIndex: Render source (delayed to match scroll).
+  */
+  const [visualLyricIndex, setVisualLyricIndex] = useState(-1);
+
+  // Sync Visual Index + Scroll
   useEffect(() => {
-    if (!isUserScrolling.current && (lyricExpanded || fullLyricExpanded) && currentLyricIndex !== -1 && flatListRef.current && lyricsToUse?.length) {
-        try {
-            flatListRef.current.scrollToIndex({
-                index: currentLyricIndex,
-                animated: true,
-                viewPosition: 0.5
-            });
-        } catch (e) {
-            // Index might not be ready yet
-        }
+    // If not expanded, just sync immediately
+    if (!lyricExpanded && !fullLyricExpanded) {
+        setVisualLyricIndex(currentLyricIndex);
+        return;
+    }
+
+    // 1. Manual Scrolling? Instant Update.
+    if (isUserScrolling.current) {
+        setVisualLyricIndex(currentLyricIndex);
+        return;
+    }
+
+    if (currentLyricIndex !== -1 && flatListRef.current && lyricsToUse?.length) {
+        // 2. Trigger Scroll (Logic Index)
+        // Debounce slightly to ensure layout readiness
+        const scrollTimer = setTimeout(() => {
+             try {
+                flatListRef.current?.scrollToIndex({
+                    index: currentLyricIndex,
+                    animated: true,
+                    viewPosition: fullLyricExpanded ? 0.35 : 0.5 
+                });
+            } catch (e) { }
+        }, 50);
+
+        // 3. Delay Visual Update (Wait for Scroll)
+        // Standard scroll animation is ~300ms. We wait 400ms to be safe.
+        // This ensures the line moves UP while gray, then turns white at the destination.
+        const highlightTimer = setTimeout(() => {
+            setVisualLyricIndex(currentLyricIndex);
+        }, 400); 
+
+        return () => {
+            clearTimeout(scrollTimer);
+            clearTimeout(highlightTimer);
+        };
     }
   }, [currentLyricIndex, lyricExpanded, fullLyricExpanded]);
+
+  // FORCE scroll on mount/expand to fix "starts at top" bug
+  useEffect(() => {
+      if ((lyricExpanded || fullLyricExpanded) && flatListRef.current && currentLyricIndex !== -1) {
+          setTimeout(() => {
+             try {
+                flatListRef.current?.scrollToIndex({
+                    index: currentLyricIndex,
+                    animated: false, // Instant jump for initial open
+                    viewPosition: fullLyricExpanded ? 0.35 : 0.5
+                });
+            } catch (e) {}
+          }, 50); // Small delay for mount
+      }
+  }, [lyricExpanded, fullLyricExpanded]);
 
   const handleScrollBegin = () => {
     isUserScrolling.current = true;
@@ -238,11 +346,7 @@ const MiniPlayer: React.FC = () => {
     }, 3000);
   };
 
-  const togglePlay = (e?: any) => {
-    e?.stopPropagation();
-    if (!player) return;
-    player.playing ? player.pause() : player.play();
-  };
+
   
   const skipForward = (e?: any) => {
     e?.stopPropagation();
@@ -268,7 +372,7 @@ const MiniPlayer: React.FC = () => {
   };
 
   const panGesture = Gesture.Pan()
-    .activeOffsetY([-20, 20]) // Require 20px of vertical movement to activate
+    .activeOffsetY([-5, 5]) // Increased sensitivity (was 20)
     .simultaneousWithExternalGesture()
     .onUpdate((event: any) => {
       if (expanded) {
@@ -278,14 +382,20 @@ const MiniPlayer: React.FC = () => {
             lyricExpansionProgress.value = Math.min(event.translationY / 200, 1);
           }
         } else if (lyricExpanded && !fullLyricExpanded) {
-          // Stage 2 (Half) -> Stage 3 (Full) or back to Stage 1
-          if (event.translationY > 0) {
-            fullExpansionProgress.value = Math.min(event.translationY / 200, 1);
-          } else if (event.translationY < 0) {
-            lyricExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
-          }
+           // Stage 2 (Half) -> Stage 3 (Full)
+           // If dragging DOWN (positive), go to Full. 
+           // If dragging UP (negative), go back to Tray.
+           console.log('[PAN] Half mode - translationY:', event.translationY);
+           if (event.translationY > 0) {
+             fullExpansionProgress.value = Math.min(event.translationY / 200, 1);
+             console.log('[PAN] Expanding to full:', fullExpansionProgress.value);
+           } else {
+             // Dragging UP - return to Tray
+             lyricExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
+           }
         } else if (fullLyricExpanded) {
           // Stage 3 (Full) -> Stage 2 (Half)
+          // Only allow dragging UP to collapse
           if (event.translationY < 0) {
             fullExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
           }
@@ -307,13 +417,19 @@ const MiniPlayer: React.FC = () => {
           }
         } else if (lyricExpanded && !fullLyricExpanded) {
           // From Half: Go Full or back to Tray
+          console.log('[PAN END] Half mode - translation:', translation, 'velocity:', velocity);
           if (translation > 50 || velocity > 500) {
+            // Dragged DOWN -> Go Full
+            console.log('[PAN END] Triggering full expansion!');
             fullExpansionProgress.value = withSpring(1);
             runOnJS(setFullLyricExpanded)(true);
           } else if (translation < -50 || velocity < -500) {
+            // Dragged UP -> Go Tray
             lyricExpansionProgress.value = withSpring(0);
             runOnJS(setLyricExpanded)(false);
+            runOnJS(setFullLyricExpanded)(false);
           } else {
+            // Snap back to Half
             lyricExpansionProgress.value = withSpring(1);
             fullExpansionProgress.value = withSpring(0);
           }
@@ -330,23 +446,25 @@ const MiniPlayer: React.FC = () => {
     });
 
   const toggleExpand = () => {
-    // 1. Trigger the spring animation
-    expansionProgress.value = withSpring(expanded ? 0 : 1, {
-      damping: 14,    // Lower = more bounce
-      stiffness: 150, // Higher = snappier
-      mass: 0.6       // Lighter = faster
-    });
-    
-    // Reset lyric expanded if collapsing
+    // ✅ FIX: Tapping should collapse from ANY state, not open NowPlaying
     if (expanded) {
+      // Collapse everything back to closed
+      expansionProgress.value = withSpring(0);
       lyricExpansionProgress.value = withSpring(0);
       fullExpansionProgress.value = withSpring(0);
+      setExpanded(false);
       setLyricExpanded(false);
       setFullLyricExpanded(false);
+      return;
     }
-
-    // 2. Update state for content switching (allow small delay for smooth fade if needed)
-    setExpanded(!expanded);
+    
+    // Expand to opened (tray) state
+    expansionProgress.value = withSpring(1, {
+      damping: 14,
+      stiffness: 150,
+      mass: 0.6
+    });
+    setExpanded(true);
   };
 
   const openNowPlaying = () => {
@@ -362,6 +480,17 @@ const MiniPlayer: React.FC = () => {
       setFullLyricExpanded(false);
     }
   };
+
+  const handleLyricPress = useCallback((timestamp: number) => {
+      // Allow tapping specific line to expand too -> AND seek?
+      if (!fullLyricExpanded) {
+          runOnJS(setFullLyricExpanded)(true);
+          fullExpansionProgress.value = withSpring(1);
+      } else {
+          // Ensure seek works if fully expanded
+          usePlayerStore.getState().seekTo(timestamp);
+      }
+  }, [fullLyricExpanded, fullExpansionProgress]);
   
   if (!currentSong || isNowPlaying) return null;
   
@@ -369,7 +498,7 @@ const MiniPlayer: React.FC = () => {
     <View style={[
       styles.container, 
       isIsland ? styles.islandContainer : styles.barContainer,
-      isIsland && expanded && { marginHorizontal: 12 } // Expanded: Symmetric 12px. Collapsed: Standard right alignment
+      isIsland && expanded && { alignItems: 'center', marginHorizontal: 12, marginRight: 12 } // Expanded: Force Center & Symmetry. Override container margins.
     ]}>
       {/* ... (Progress Bar for Classic Mode Only) ... */}
       {!isIsland && (
@@ -401,14 +530,15 @@ const MiniPlayer: React.FC = () => {
         {isIsland && (
            <View style={[StyleSheet.absoluteFill, { borderRadius: expanded ? 40 : 30, overflow: 'hidden' }]}>
               {/* 1. Blurred Background Image */}
-               {currentSong.coverImageUri ? (
+               {!libraryFocusMode && currentSong.coverImageUri ? (
                   <Image 
                     source={{ uri: currentSong.coverImageUri }} 
                     style={StyleSheet.absoluteFill}
-                    blurRadius={40} // Heavy blur
+                    resizeMode="cover" // Ensure colors spread to edges
+                    blurRadius={22} // Reduced slightly for clearer center
                   />
                ) : (
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#222' }]} />
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
                )}
 
               {/* 2. Vignette / Dark Overlay to make text pop */}
@@ -424,11 +554,12 @@ const MiniPlayer: React.FC = () => {
         )}
         
         {/* Expanded View Content */}
+        {/* Expanded View Content */}
         {isIsland && expanded ? (
-            <GestureDetector gesture={panGesture}>
-                <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
-                    {/* Top Row: Vinyl + Info + Controls */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15, paddingBottom: 5 }}>
+            <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
+                {/* Top Row: Vinyl + Info + Controls */}
+                <GestureDetector gesture={panGesture}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15, paddingBottom: 5, backgroundColor: 'transparent' }}>
                         {/* Rotating Vinyl */}
                         <Animated.View style={[animatedVinylStyle, { marginRight: 12 }]}>
                             <Pressable onPress={openNowPlaying}>
@@ -451,13 +582,16 @@ const MiniPlayer: React.FC = () => {
                              <Pressable onPress={skipBackward} hitSlop={10}>
                                  <Ionicons name="play-skip-back" size={24} color="#fff" />
                              </Pressable>
-                             <Pressable onPress={togglePlay} hitSlop={10}>
-                                 <Ionicons name={player?.playing ? 'pause' : 'play'} size={32} color="#fff" />
+                             <Pressable onPress={togglePlay} hitSlop={20}>
+                                 <Animated.View style={animatedButtonStyle}>
+                                     <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={32} color="#fff" />
+                                 </Animated.View>
                              </Pressable>
                              <Pressable onPress={skipForward} hitSlop={10}>
-                                 <Ionicons name="play-skip-forward" size={24} color="#fff" />
+                                 <Ionicons name="play-forward" size={24} color="#fff" />
                              </Pressable>
                         </View>
+
                         
                         {/* Drag Handle Overlay for Stage 1/2 */}
                         {(!fullLyricExpanded) && (
@@ -473,79 +607,112 @@ const MiniPlayer: React.FC = () => {
                             }} />
                         )}
                     </View>
-                    
-                    {/* Bottom Row: Lyrics */}
-                    <View style={{ 
-                        flex: 1, 
-                        width: '100%',
-                        justifyContent: 'center', 
-                        alignItems: 'center',
-                        minHeight: 40,
-                        paddingHorizontal: 8,
-                        marginTop: (lyricExpanded || fullLyricExpanded) ? 10 : 0
-                    }}>
-                        {(lyricExpanded || fullLyricExpanded) ? (
-                            <View style={{ flex: 1, width: '100%', paddingBottom: 20 }}>
-                                <FlatList
-                                    ref={flatListRef}
-                                    data={lyricsToUse || []}
-                                    keyExtractor={(item, index) => `${index}`}
-                                    scrollEnabled={fullLyricExpanded} // Only allow manual scroll in full mode
-                                    renderItem={({ item, index }) => {
-                                        const isCurrent = index === currentLyricIndex;
-                                        return (
-                                            <Text 
-                                                style={{ 
-                                                    color: isCurrent ? '#fff' : 'rgba(255,255,255,0.4)', 
-                                                    fontSize: fullLyricExpanded ? (isCurrent ? 24 : 20) : (isCurrent ? 24 : 18), 
-                                                    fontWeight: isCurrent ? '700' : '400', 
-                                                    textAlign: 'center',
-                                                    marginVertical: fullLyricExpanded ? 10 : 6,
-                                                    textShadowColor: isCurrent ? 'rgba(0,0,0,0.5)' : 'transparent',
-                                                    textShadowOffset: { width: 0, height: 1 },
-                                                    textShadowRadius: 2
-                                                }}
-                                            >
-                                                {item.text}
-                                            </Text>
-                                        );
+                </GestureDetector>
+                
+                {/* Unified Lyrics Block with GestureDetector */}
+                <GestureDetector gesture={panGesture}>
+                    <Pressable 
+                        onPress={(e) => {
+                            e.stopPropagation();
+                            // If in Half Mode (and not Full), tap to expand
+                            if ((lyricExpanded || fullLyricExpanded) && !fullLyricExpanded) {
+                                runOnJS(setFullLyricExpanded)(true);
+                                fullExpansionProgress.value = withSpring(1);
+                            }
+                        }}
+                        style={{ 
+                            flex: 1, 
+                            width: '100%',
+                            justifyContent: 'center', 
+                            alignItems: 'center',
+                            minHeight: 40,
+                            paddingHorizontal: 8,
+                            marginTop: (lyricExpanded || fullLyricExpanded) ? 10 : 0
+                        }}
+                    >
+                        <View style={{ flex: 1, width: '100%' }}>
+                        {(!lyricExpanded && !fullLyricExpanded) ? (
+                            /* 1. TRAY MODE (Collapsed) - Single Line */
+                            <View style={{ width: '100%' }}>
+                                <Text 
+                                    style={{ 
+                                        color: '#fff', 
+                                        fontSize: 18, 
+                                        fontWeight: '700', 
+                                        textAlign: 'center',
+                                        textShadowColor: 'rgba(0,0,0,0.5)',
+                                        textShadowOffset: { width: 0, height: 1 },
+                                        textShadowRadius: 2
                                     }}
-                                    contentContainerStyle={{ paddingVertical: 10 }}
-                                    showsVerticalScrollIndicator={false}
-                                    onScrollBeginDrag={handleScrollBegin}
-                                    onMomentumScrollEnd={handleScrollEnd}
-                                    onScrollEndDrag={handleScrollEnd}
-                                    getItemLayout={(data, index) => ({
-                                        length: fullLyricExpanded ? 50 : 40, // Height of each line (rough estimate)
-                                        offset: (fullLyricExpanded ? 50 : 40) * index,
-                                        index,
-                                    })}
-                                />
+                                    numberOfLines={2}
+                                >
+                                    {!!currentLyricText ? currentLyricText : ''}
+                                </Text>
                             </View>
                         ) : (
-                            <Text 
-                                style={{ 
-                                    color: '#fff', 
-                                    fontSize: 18, 
-                                    fontWeight: '700', 
-                                    textAlign: 'center',
-                                    textShadowColor: 'rgba(0,0,0,0.5)',
-                                    textShadowOffset: { width: 0, height: 1 },
-                                    textShadowRadius: 2
-                                }}
-                                numberOfLines={2}
-                            >
-                                {!!currentLyricText ? currentLyricText : ''}
-                            </Text>
+                            /* 2. EXPANDED MODE (Half & Full) - Unified FlatList */
+                            <View style={{ flex: 1, width: '100%', paddingBottom: 20 }}>
+                                <SynchronizedLyrics 
+                                    lyrics={lyricsToUse || []}
+                                    currentTime={currentTime}
+                                    onLyricPress={handleLyricPress}
+                                    isUserScrolling={false} // Dynamic Island usually auto-scrolls.
+                                    // If user drags, SynchronizedLyrics handles it via internal refs if we didn't pass external ref logic.
+                                    // But here we want to allow scrolling ONLY if fullLyricExpanded.
+                                    scrollEnabled={fullLyricExpanded}
+                                    textStyle={{ 
+                                        color: '#fff', 
+                                        fontSize: 23, 
+                                        fontWeight: '800', 
+                                        textAlign: 'center',
+                                        textShadowColor: 'rgba(0,0,0,0.5)',
+                                        textShadowOffset: { width: 0, height: 1 },
+                                        textShadowRadius: 2
+                                    }}
+                                    activeLinePosition={0.35} // Slightly above mid area as requested
+                                    songTitle={currentSong?.title}
+                                    highlightColor={mainColor}
+                                    topSpacerHeight={120} // Reduced for miniplayer (was ~350+)
+                                    bottomSpacerHeight={120}
+                                />
+                            </View>
                         )}
-                    </View>
-                    {fullLyricExpanded && (
-                        <View style={{ height: 40, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                            <View style={{ width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2 }} />
                         </View>
-                    )}
-                </View>
-            </GestureDetector>
+
+                        {/* Smooth Time Scrubber - Bottom of Island */}
+                        {isIsland && expanded && (
+                             <View style={{ width: '100%', paddingHorizontal: 24, paddingBottom: 12 }}>
+                                <IslandScrubber 
+                                    currentTime={currentTime}
+                                    duration={duration > 0 ? duration : 1}
+                                    onSeek={(time) => {
+                                        if(player) {
+                                            // Lock updates
+                                            isSeekingRef.current = true;
+                                            setCurrentTime(time); // Optimistic
+
+                                            player.seekTo(time);
+                                            
+                                            // Unlock after delay
+                                            if (seekLockTimeout.current) clearTimeout(seekLockTimeout.current);
+                                            seekLockTimeout.current = setTimeout(() => {
+                                                isSeekingRef.current = false;
+                                            }, 1000);
+                                        }
+                                    }}
+                                    onScrubStart={() => {
+                                        // Optional: Pause updates or visuals
+                                        isUserScrolling.current = true; // Hijack scroll flag to pause lyrics?
+                                    }}
+                                    onScrubEnd={() => {
+                                        isUserScrolling.current = false;
+                                    }}
+                                />
+                             </View>
+                        )}
+                    </Pressable>
+                </GestureDetector>
+            </View>
         ) : (
             // COLLAPSED / CLASSIC VIEW
             <>
@@ -574,13 +741,15 @@ const MiniPlayer: React.FC = () => {
                 {/* Controls */}
                 {isIsland ? (
                    <View style={[styles.islandControls, { zIndex: 10 }]}>
-                      <Pressable onPress={togglePlay} hitSlop={10}>
-                        <Ionicons 
-                          name={player?.playing ? 'pause' : 'play'} 
-                          size={24} 
-                          color="#fff" 
-                        />
-                      </Pressable>
+                       <Pressable onPress={togglePlay} hitSlop={20}>
+                         <Animated.View style={animatedButtonStyle}>
+                             <Ionicons 
+                               name={optimisticPlaying ? 'pause' : 'play'} 
+                               size={24} 
+                               color="#fff" 
+                             />
+                         </Animated.View>
+                       </Pressable>
                    </View>
                 ) : (
                   /* Bar Mode Controls */
@@ -591,8 +760,10 @@ const MiniPlayer: React.FC = () => {
                     <Pressable onPress={skipBackward} style={styles.controlButton}>
                       <Ionicons name="play-back" size={20} color="#fff" />
                     </Pressable>
-                    <Pressable onPress={togglePlay} style={styles.playButton}>
-                      <Ionicons name={player?.playing ? 'pause' : 'play'} size={24} color="#fff" />
+                    <Pressable onPress={togglePlay} style={styles.playButton} hitSlop={20}>
+                      <Animated.View style={animatedButtonStyle}>
+                         <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={24} color="#fff" />
+                      </Animated.View>
                     </Pressable>
                     <Pressable onPress={skipForward} style={styles.controlButton}>
                       <Ionicons name="play-forward" size={20} color="#fff" />

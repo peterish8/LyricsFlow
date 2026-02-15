@@ -2,7 +2,17 @@
  * LyricFlow - Database CRUD Operations
  */
 
-import { closeDatabase, getDatabase, initDatabase } from './db';
+import { 
+  closeDatabase, 
+  getDatabase, 
+  initDatabase,
+  isNativeDbNullPointer,
+  withDbRetry,
+  withDbRead,
+  withDbWrite,
+  withDbSafe,
+  esc
+} from './db';
 import { Song, LyricLine } from '../types/song';
 import { normalizeLyrics } from '../utils/timestampParser';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -13,47 +23,9 @@ const log = (msg: string, data?: any) => {
   console.log(`${LOG_PREFIX} ${msg}`, data ?? '');
 };
 
-const isNativeDbNullPointer = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return false;
-  return /NativeDatabase\.(prepareAsync|execAsync)|NullPointerException/i.test(error.message);
-};
-
-const withDbRetry = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
-  try {
-    const db = await getDatabase();
-    return await operation(db);
-  } catch (error) {
-    log('Operation failed', error);
-    
-    if (!isNativeDbNullPointer(error)) {
-      throw error;
-    }
-
-    log('Detected native NPE, attempting recovery...');
-    await closeDatabase().catch(() => undefined);
-    await initDatabase();
-    const recoveredDb = await getDatabase();
-    log('Retrying operation after recovery...');
-    return operation(recoveredDb);
-  }
-};
-
-let dbOperationQueue: Promise<void> = Promise.resolve();
-
-const withSerializedDbAccess = async <T>(operation: () => Promise<T>): Promise<T> => {
-  const run = dbOperationQueue.then(operation);
-  dbOperationQueue = run.then(() => undefined).catch(() => undefined);
-  return run;
-};
-
-const withDbSafe = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
-  return withSerializedDbAccess(() => withDbRetry(operation));
-};
-
-const esc = (val: string) => val.replace(/'/g, "''");
 
 export const getAllSongs = async (): Promise<Song[]> => {
-  return withDbSafe(async (db) => {
+  return withDbRead(async (db) => {
     const songsRows = await db.getAllAsync<{
       id: string;
       title: string;
@@ -100,7 +72,7 @@ export const getAllSongs = async (): Promise<Song[]> => {
 };
 
 export const getHiddenSongs = async (): Promise<Song[]> => {
-  return withDbSafe(async (db) => {
+  return withDbRead(async (db) => {
     const songsRows = await db.getAllAsync<{
       id: string;
       title: string;
@@ -208,11 +180,11 @@ export const getSongById = async (id: string): Promise<Song | null> => {
 export const insertSong = async (song: Song): Promise<void> => {
   log(`insertSong() called for: ${song.title}`);
   
-  await withDbSafe(async (db) => {
+  await withDbWrite(async (db) => {
     log(`Inserting song: ${song.id}`);
     
     const sql = `
-      INSERT INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked, cover_image_uri)
+      INSERT OR REPLACE INTO songs (id, title, artist, album, gradient_id, duration, date_created, date_modified, play_count, scroll_speed, lyrics_align, text_case, audio_uri, is_liked, cover_image_uri)
       VALUES ('${song.id}', '${esc(song.title)}', ${song.artist ? `'${esc(song.artist)}'` : 'NULL'}, ${song.album ? `'${esc(song.album)}'` : 'NULL'}, '${song.gradientId}', ${song.duration}, '${song.dateCreated}', '${song.dateModified}', ${song.playCount}, ${song.scrollSpeed ?? 50}, '${song.lyricsAlign ?? 'left'}', '${song.textCase ?? 'titlecase'}', ${song.audioUri ? `'${esc(song.audioUri)}'` : 'NULL'}, ${song.isLiked ? 1 : 0}, ${song.coverImageUri ? `'${esc(song.coverImageUri)}'` : 'NULL'});
     `;
     
@@ -232,7 +204,7 @@ export const insertSong = async (song: Song): Promise<void> => {
 export const updateSong = async (song: Song): Promise<void> => {
   log(`updateSong() called for: ${song.title}`);
   
-  await withDbSafe(async (db) => {
+  await withDbWrite(async (db) => {
     log(`Updating song: ${song.id}`);
     
     await db.execAsync(`
@@ -247,8 +219,17 @@ export const updateSong = async (song: Song): Promise<void> => {
       const normalizedLyrics = normalizeLyrics(song.lyrics);
       log(`Normalized to ${normalizedLyrics.length} lines`);
       
-      for (const lyric of normalizedLyrics) {
-        await db.execAsync(`INSERT INTO lyrics (song_id, timestamp, text, line_order) VALUES ('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder});`);
+      // OPTIMIZATION: Batch Insert in Transaction to prevent locking
+      // Construct a single large INSERT statement (SQLite limit usually 1MB+, safe for lyrics)
+      if (normalizedLyrics.length > 0) {
+          const values = normalizedLyrics.map(lyric => 
+              `('${song.id}', ${lyric.timestamp}, '${esc(lyric.text)}', ${lyric.lineOrder})`
+          ).join(',');
+          
+          await db.execAsync(`
+             INSERT INTO lyrics (song_id, timestamp, text, line_order) 
+             VALUES ${values};
+          `);
       }
     }
     

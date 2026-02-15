@@ -167,7 +167,34 @@ async function searchGaana(query: string): Promise<UnifiedSong[]> {
     }
     
     const data = await response.json();
-    const results = data.results || data.data || [];
+    
+    // DEBUG: Log the keys to understand the structure
+    console.log('[Gaana] Response keys:', Object.keys(data));
+    
+    // Robust Parsing for Gaana API (Vercel Host)
+    let results: any[] = [];
+
+    if (Array.isArray(data)) {
+        results = data;
+    } else if (Array.isArray(data.songs)) {
+        results = data.songs;
+    } else if (Array.isArray(data.data)) {
+        results = data.data;
+    } else if (Array.isArray(data.results)) {
+        results = data.results;
+    } else if (Array.isArray(data.tracks)) {
+        results = data.tracks;
+    } else if (data.data && Array.isArray(data.data.songs)) {
+        results = data.data.songs; 
+    } else if (data.data && Array.isArray(data.data.results)) {
+        results = data.data.results;
+    }
+
+    // Ensure results is an array
+    if (!Array.isArray(results)) {
+      console.log(`[Gaana] Could not find array in response. Structure:`, JSON.stringify(data).substring(0, 150));
+      return [];
+    }
     
     if (results.length === 0) {
       console.log('[Gaana] No results found');
@@ -178,17 +205,17 @@ async function searchGaana(query: string): Promise<UnifiedSong[]> {
     
     // Normalize Gaana results to UnifiedSong format
     return results.map((track: any) => ({
-      id: `gaana-${track.id || track.seokey || Math.random()}`,
-      title: track.title || track.track_title || 'Unknown Title',
-      artist: track.artist || track.artists_name || track.artist_names || 'Unknown Artist',
+      id: `gaana-${track.id || track.seokey || Math.random().toString(36).substring(7)}`,
+      title: track.title || track.track_title || track.name || 'Unknown Title',
+      artist: track.artist || track.artists_name || track.artist_names || track.singers || 'Unknown Artist',
       album: track.album || track.album_title || '',
       duration: track.duration ? parseInt(track.duration) : undefined,
-      highResArt: track.artwork || track.artwork_large || track.image || track.artworkLink || '',
-      downloadUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || '',
-      streamUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || '',
+      highResArt: (track.artwork || track.artwork_large || track.image || track.artworkLink || '').replace('150x150', '500x500'),
+      downloadUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || track.url || '',
+      streamUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || track.url || '',
       hasLyrics: false, // Gaana API doesn't provide lyrics info
       source: 'Gaana' as const,
-    }));
+    })).filter(s => s.downloadUrl); // Ensure we only return playables
   } catch (error: any) {
     console.warn('[Gaana] Search failed:', error.message);
     return [];
@@ -396,71 +423,83 @@ async function searchAudiomack(query: string): Promise<UnifiedSong[]> {
     }
 }
 
-export async function searchMusic(query: string, onProgress?: (status: string) => void): Promise<UnifiedSong[]> {
-  console.log('[SearchEngine] 🚀 Starting Ultimate 5-Layer Search...');
+const isArtistMatch = (songArtist: string, targetArtist: string): boolean => {
+  if (!targetArtist) return false;
+  const s = songArtist.toLowerCase();
+  const t = targetArtist.toLowerCase();
+  return s.includes(t) || t.includes(s);
+};
+
+export async function searchMusic(query: string, artistName?: string, onProgress?: (status: string) => void): Promise<UnifiedSong[]> {
+  console.log('[SearchEngine] 🚀 Starting Ultimate Search (Waterfall Mode)...');
   onProgress?.('Searching JioSaavn (Layer 1)...');
 
-  // LAYER 1: JioSaavn (The Official 320kbps Standard)
-  try {
-      let results = await searchSaavn(query);
-      if (results.length > 0) {
-          console.log('[SearchEngine] ✅ Layer 1 (Saavn) SUCCESS');
-          return results;
-      }
-      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EMPTY/FAILED, falling to Layer 1.1...');
-  } catch (e) {
-      console.log('[SearchEngine] ⚠️ Layer 1 (Saavn) EXCEPTION, falling to Layer 1.1...');
-  }
+  let saavnResults: UnifiedSong[] = [];
+  let foundAuthentic = false;
 
-  // LAYER 1.1: Gaana (Secondary Indian Music Source)
-  onProgress?.('Saavn failed. Trying Gaana (Layer 1.1)...');
+  // LAYER 1: JioSaavn (Primary)
   try {
-      const results = await searchGaana(query);
-      if (results.length > 0) {
-          console.log('[SearchEngine] ✅ Layer 1.1 (Gaana) SUCCESS');
-          return results;
-      }
-      console.log('[SearchEngine] ⚠️ Layer 1.1 (Gaana) EMPTY/FAILED, falling to Layer 2...');
-  } catch (e) {
-      console.log('[SearchEngine] ⚠️ Layer 1.1 (Gaana) EXCEPTION, falling to Layer 2...');
-  }
-
-  // LAYER 2: Wynk Music (Backup Official)
-  onProgress?.('Gaana failed. Trying Wynk Music (Layer 2)...');
-  try {
-      const results = await searchWynk(query);
-      if (results.length > 0) {
-          console.log('[SearchEngine] ✅ Layer 2 (Wynk) SUCCESS');
-          return results;
-      }
-  } catch (e) {}
-  
-  // LAYER 3: NetEase (Global Catalog)
-  onProgress?.('Wynk failed. Trying NetEase (Layer 3)...');
-  try {
-      const results = await searchNetEase(query);
-      if (results.length > 0) {
-          console.log('[SearchEngine] ✅ Layer 3 (NetEase) SUCCESS');
-          return results;
-      }
-  } catch (e) {}
-
-  // LAYER 4: SoundCloud & Audiomack (The UGC / Remix Final Fallback)
-  onProgress?.('Searching global remix databases (Layer 4)...');
-  try {
-      console.log('[SearchEngine] 🏁 Layer 4: Racing SoundCloud + Audiomack...');
+      saavnResults = await searchSaavn(query);
       
-      const fallbackResults = await Promise.any([
-        searchSoundCloud(query).then(res => { if (!res.length) throw new Error(); return res; }),
-        searchAudiomack(query).then(res => { if (!res.length) throw new Error(); return res; })
-      ]);
-      
-      console.log(`[SearchEngine] ✅ Layer 4 (UGC) SUCCESS: ${fallbackResults[0].source}`);
-      return fallbackResults;
-  } catch (error) {
-    console.error('[SearchEngine] ALL LAYERS FAILED.');
-    return [];
+      // Mark Authenticity and Check
+      if (saavnResults.length > 0) {
+          saavnResults = saavnResults.map(s => {
+              const isAuth = artistName ? isArtistMatch(s.artist, artistName) : false;
+              if (isAuth) foundAuthentic = true;
+              return { ...s, isAuthentic: isAuth };
+          });
+          
+          if (foundAuthentic) {
+               console.log('[SearchEngine] ✅ Found AUTHENTIC match in Saavn. Stopping here.');
+               return saavnResults;
+          }
+          
+          console.log('[SearchEngine] ⚠️ Saavn results found, but NO authentic match. Asking Gaana...');
+      } else {
+          console.log('[SearchEngine] ⚠️ Saavn EMPTY, falling to Gaana...');
+      }
+  } catch (e) {
+      console.log('[SearchEngine] ⚠️ Saavn EXCEPTION, falling to Gaana...');
   }
+
+  // LAYER 1.1: Gaana (Secondary)
+  onProgress?.('Searching Gaana (Layer 1.1)...');
+  try {
+      let gaanaResults = await searchGaana(query);
+      
+      if (gaanaResults.length > 0) {
+          console.log(`[SearchEngine] ✅ Gaana found ${gaanaResults.length} songs`);
+          
+          if (saavnResults.length > 0) {
+             console.log(`[SearchEngine] Merging Saavn (${saavnResults.length}) + Gaana (${gaanaResults.length})`);
+             // Deduplicate by title + artist to avoid showing same song twice
+             const combined = [...saavnResults];
+             const existingIds = new Set(combined.map(s => s.id));
+             
+             for (const gSong of gaanaResults) {
+                 // Simple dedup based on approximate title match could be better, but ID is safe
+                 if (!existingIds.has(gSong.id)) {
+                     combined.push(gSong);
+                 }
+             }
+             return combined;
+          }
+          
+          return gaanaResults;
+      }
+  } catch (e) {
+      console.log('[SearchEngine] ⚠️ Gaana EXCEPTION...');
+  }
+
+  // Fallback: If we have ANY Saavn results (even if not authentic), return them now
+  if (saavnResults.length > 0) {
+      console.log(`[SearchEngine] ⚠️ Returning ${saavnResults.length} Saavn results (Authenticity check failed, but better than nothing)`);
+      return saavnResults;
+  }
+
+  // ALL LAYERS FAILED (Strict Mode: Only Saavn and Gaana)
+  console.error('[SearchEngine] ALL LAYERS FAILED. (Saavn Public -> Saavn Hosted -> Gaana Hosted)');
+  return [];
 }
 
 // Named export for compatibility

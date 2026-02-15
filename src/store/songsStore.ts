@@ -110,11 +110,24 @@ export const useSongsStore = create<SongsState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await queries.updateSong(song);
-      await get().fetchSongs();
-      if (get().currentSong?.id === song.id) {
-        set({ currentSong: song, isLoading: false });
-      } else {
-        set({ isLoading: false });
+      
+      // OPTIMIZATION: Update local state instead of re-fetching entire library
+      set(state => {
+          const newSongs = state.songs.map(s => s.id === song.id ? song : s);
+          return {
+              songs: newSongs,
+              // Update currentSong ONLY if it matches (and avoid side effects if not)
+              currentSong: state.currentSong?.id === song.id ? song : state.currentSong,
+              isLoading: false
+          };
+      });
+
+      // ✅ Sync with playerStore: Update active song (e.g. lyrics found)
+      const { usePlayerStore } = await import('./playerStore');
+      const playerState = usePlayerStore.getState();
+      if (playerState.currentSong?.id === song.id) {
+          console.log('[STORE] Syncing update to playerStore:', song.title);
+          playerState.updateCurrentSong(song);
       }
     } catch (error) {
       set({ 
@@ -208,29 +221,37 @@ export const useSongsStore = create<SongsState>((set, get) => ({
     }
   },
 
-  // Toggle like status
+  // Toggle like status (Delegates to PlaylistStore)
   toggleLike: async (songId: string) => {
     try {
-      const song = await queries.getSongById(songId);
-      if (song) {
+      const { usePlaylistStore } = await import('./playlistStore');
+      await usePlaylistStore.getState().toggleLiked(songId);
+      
+      // Update local state for immediate feedback (optimistic)
+      // The DB update is handled by playlistStore
+      set((state) => {
+        const songIndex = state.songs.findIndex(s => s.id === songId);
+        if (songIndex === -1) return state;
+        
+        const song = state.songs[songIndex];
         const updatedSong = { ...song, isLiked: !song.isLiked };
-        await queries.updateSong(updatedSong);
+        const newSongs = [...state.songs];
+        newSongs[songIndex] = updatedSong;
         
-        // Update local state for immediate feedback
-        set((state) => ({
-          songs: state.songs.map(s => s.id === songId ? updatedSong : s),
+        return {
+          songs: newSongs,
           currentSong: state.currentSong?.id === songId ? updatedSong : state.currentSong
-        }));
+        };
+      });
 
-        // ✅ IMPORTANT: Sync with playerStore so NowPlayingScreen (which uses playerStore) updates immediately
-        const { usePlayerStore } = await import('./playerStore');
-        const playerState = usePlayerStore.getState();
-        if (playerState.currentSong?.id === songId) {
-          playerState.updateCurrentSong({ isLiked: updatedSong.isLiked });
-        }
-        
-        console.log(`[STORE] Toggled like for ${song.title}: ${updatedSong.isLiked}`);
+      // Sync with playerStore
+      const { usePlayerStore } = await import('./playerStore');
+      const playerState = usePlayerStore.getState();
+      if (playerState.currentSong?.id === songId) {
+        // flipping the boolean blindly here is fine for optimistic UI
+        playerState.updateCurrentSong({ isLiked: !playerState.currentSong.isLiked });
       }
+
     } catch (error) {
       console.error('[STORE] Toggle like error:', error);
       set({ error: error instanceof Error ? error.message : 'Failed to toggle like' });

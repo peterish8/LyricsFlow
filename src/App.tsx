@@ -4,7 +4,7 @@
 
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -23,33 +23,61 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initialize = async () => {
-      try {
-        // Initialize Audio Mode for background/remote controls
-        await setAudioModeAsync({
-          allowsRecording: false,
-          shouldPlayInBackground: true,
-          playsInSilentMode: true,
-          interruptionMode: 'doNotMix',
-        });
+      let retries = 3;
+      let lastError: Error | null = null;
 
-        // Initialize database
-        await initDatabase();
-        
-        // Fetch initial songs
-        await fetchSongs();
-        
-        // Restore Last Played Song
-        const lastPlayed = await import('./database/queries').then(m => m.getLastPlayedSong());
-        if (lastPlayed) {
-            usePlayerStore.getState().setInitialSong(lastPlayed);
+      while (retries > 0) {
+        try {
+          console.log(`[APP] Initialization attempt ${4 - retries}/3...`);
+
+          // Initialize Audio Mode for background/remote controls
+          await setAudioModeAsync({
+            allowsRecording: false,
+            shouldPlayInBackground: true,
+            playsInSilentMode: true,
+            interruptionMode: 'doNotMix',
+          });
+
+          // Initialize database
+          await initDatabase();
+          
+          // Fetch initial songs
+          await fetchSongs();
+          
+          // Restore Last Played Song
+          const lastPlayed = await import('./database/queries').then(m => m.getLastPlayedSong());
+          if (lastPlayed) {
+              usePlayerStore.getState().setInitialSong(lastPlayed);
+          }
+
+          console.log('[APP] Initialization successful');
+          setIsReady(true);
+          
+          // Run playlist migration AFTER UI renders (prevents startup freeze)
+          import('react-native').then(({ InteractionManager }) => {
+            InteractionManager.runAfterInteractions(async () => {
+              const { migratePlaylistData } = await import('./database/db');
+              await migratePlaylistData();
+            });
+          });
+          
+          return; // Success - exit retry loop
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error('Unknown error');
+          console.error(`[APP] Initialization error (attempt ${4 - retries}/3):`, err);
+          
+          retries--;
+          if (retries > 0) {
+            console.log(`[APP] Retrying in 2 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         }
-
-        setIsReady(true);
-      } catch (err) {
-        console.error('Initialization error:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-        setIsReady(true);
       }
+
+      // All retries failed
+      console.error('[APP] Initialization failed after 3 attempts');
+      setError(lastError?.message || 'Failed to initialize app. Please check your network connection and restart.');
+      setIsReady(true); // Allow app to render with error state
     };
 
     initialize();
@@ -60,6 +88,27 @@ const App: React.FC = () => {
       <View style={styles.loadingContainer}>
         <StatusBar style="light" backgroundColor={Colors.background} />
         <ActivityIndicator size="large" color="#fff" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar style="light" backgroundColor={Colors.background} />
+        <Text style={styles.errorText}>⚠️ Initialization Failed</Text>
+        <Text style={styles.errorMessage}>{error}</Text>
+        <Pressable 
+          style={styles.retryButton}
+          onPress={() => {
+            setError(null);
+            setIsReady(false);
+            // Force re-mount to trigger useEffect
+            setTimeout(() => {}, 0);
+          }}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -87,6 +136,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.background,
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ff6b6b',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  retryButton: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

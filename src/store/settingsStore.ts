@@ -27,15 +27,20 @@ interface SettingsState {
   showTimeRemaining: boolean;
   playInMiniPlayerOnly: boolean;
   miniPlayerStyle: 'bar' | 'island'; // New setting
+  navBarStyle: 'classic' | 'modern-pill'; // NEW: Navbar style
   autoHideControls: boolean; // Toggle for hiding controls after 3.5s
   libraryBackgroundMode: 'daily' | 'aurora' | 'current'; // New setting for dynamic background
   animateBackground: boolean; // Toggle for background movement
+  libraryFocusMode: boolean; // Toggle for "Focus Mode" (Black Background)
   
   // Library
   defaultView: ViewMode;
   defaultSort: SortOption;
   showThumbnails: boolean;
   
+  // Persistence
+  playlistHistory: Record<string, string>; // playlistId -> lastSongId
+
   // Actions
   setTheme: (theme: Theme) => void;
   setDefaultGradient: (gradientId: string) => void;
@@ -47,12 +52,18 @@ interface SettingsState {
   setShowTimeRemaining: (show: boolean) => void;
   setPlayInMiniPlayerOnly: (enabled: boolean) => void;
   setMiniPlayerStyle: (style: 'bar' | 'island') => void; // New action
+  setNavBarStyle: (style: 'classic' | 'modern-pill') => void; // NEW: Navbar action
   setAutoHideControls: (enabled: boolean) => void;
   setLibraryBackgroundMode: (mode: 'daily' | 'aurora' | 'current') => void;
   setAnimateBackground: (enabled: boolean) => void;
+  setLibraryFocusMode: (enabled: boolean) => void;
   setDefaultView: (view: ViewMode) => void;
   setDefaultSort: (sort: SortOption) => void;
   setShowThumbnails: (show: boolean) => void;
+  
+  // History Actions
+  updatePlaylistHistory: (playlistId: string, songId: string) => void;
+
   resetToDefaults: () => void;
 }
 
@@ -67,9 +78,11 @@ const DEFAULT_SETTINGS = {
   showTimeRemaining: true,
   playInMiniPlayerOnly: false,
   miniPlayerStyle: 'island' as const, // Default to island as requested "like it was before"
+  navBarStyle: 'classic' as const, // Default to classic navbar
   autoHideControls: true, // Default enabled
   libraryBackgroundMode: 'daily' as const, // Default to daily top
   animateBackground: true, // Default enable animation
+  libraryFocusMode: false, // Default disabled
   defaultView: 'grid' as ViewMode,
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
@@ -94,14 +107,25 @@ export const useSettingsStore = create<SettingsState>()(
       setShowTimeRemaining: (showTimeRemaining) => set({ showTimeRemaining }),
       setPlayInMiniPlayerOnly: (playInMiniPlayerOnly) => set({ playInMiniPlayerOnly }),
       setMiniPlayerStyle: (miniPlayerStyle) => set({ miniPlayerStyle }),
+      setNavBarStyle: (navBarStyle) => set({ navBarStyle }),
       setAutoHideControls: (autoHideControls) => set({ autoHideControls }),
       setLibraryBackgroundMode: (libraryBackgroundMode) => set({ libraryBackgroundMode }),
       setAnimateBackground: (animateBackground: boolean) => set({ animateBackground }),
+      setLibraryFocusMode: (libraryFocusMode: boolean) => set({ libraryFocusMode }),
       
       // Library actions
       setDefaultView: (defaultView) => set({ defaultView }),
       setDefaultSort: (defaultSort) => set({ defaultSort }),
       setShowThumbnails: (showThumbnails) => set({ showThumbnails }),
+      
+      // History implementation
+      playlistHistory: {},
+      updatePlaylistHistory: (playlistId: string, songId: string) => set((state) => ({
+          playlistHistory: {
+              ...state.playlistHistory,
+              [playlistId]: songId
+          }
+      })),
       
       // Reset
       resetToDefaults: () => set(DEFAULT_SETTINGS),

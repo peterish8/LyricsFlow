@@ -109,14 +109,17 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
       } else {
         // First tap: Play in mini player
         setCurrentSong(song);
-        usePlayerStore.getState().loadSong(song.id);
+        usePlayerStore.getState().setInitialSong(song);
+        usePlayerStore.getState().loadSong(song.id); // Fetch full lyrics immediately
       }
     } else {
       // Default: Always navigate
+      // Default: Always navigate
       setCurrentSong(song);
       setMiniPlayerHidden(true);
-      navigation.navigate('NowPlaying', { songId: song.id });
+      usePlayerStore.getState().setInitialSong(song); // Added setInitialSong for consistency
       usePlayerStore.getState().loadSong(song.id);
+      navigation.navigate('NowPlaying', { songId: song.id });
     }
   }, [navigation, setCurrentSong, playInMiniPlayerOnly, playerCurrentSong?.id]);
 

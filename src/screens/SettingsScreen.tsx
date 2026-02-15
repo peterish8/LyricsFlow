@@ -359,7 +359,7 @@ const SettingsScreen: React.FC<Props> = () => {
 
   return (
     <View style={styles.container}>
-      <AuroraHeader palette="settings" />
+      {/* AuroraHeader removed */}
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content}>
           {/* Profile Section */}
@@ -436,6 +436,14 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.miniPlayerStyle === 'island' ? 'Dynamic Island' : 'Classic Bar'}
               onPress={() => settings.setMiniPlayerStyle(
                 settings.miniPlayerStyle === 'island' ? 'bar' : 'island'
+              )}
+            />
+            <SettingsRow
+              icon="navigate-outline"
+              label="Navigation Bar Style"
+              value={settings.navBarStyle === 'modern-pill' ? 'Modern Pill' : 'Classic'}
+              onPress={() => settings.setNavBarStyle(
+                settings.navBarStyle === 'modern-pill' ? 'classic' : 'modern-pill'
               )}
             />
             <SettingsRowSwitch

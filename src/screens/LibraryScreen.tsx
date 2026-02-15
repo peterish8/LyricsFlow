@@ -30,7 +30,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { useDailyStatsStore } from '../store/dailyStatsStore';
 import { 
-  AuroraHeader, SongCard, CustomMenu, MiniPlayer, Toast, DownloadQueueModal 
+  AuroraHeader, SongCard, CustomMenu, MiniPlayer, Toast, DownloadQueueModal, ModernDeleteModal 
 } from '../components';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
 import { CoverArtSearchScreen } from './CoverArtSearchScreen';
@@ -46,330 +46,6 @@ import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
 // import { TasksModal } from '../components/TasksModal';
 
 type Props = TabScreenProps<'Library'>;
-
-const LibraryScreen: React.FC<Props> = ({ navigation }) => {
-  const songs = useSongsStore(state => state.songs);
-  const fetchSongs = useSongsStore(state => state.fetchSongs);
-  const setCurrentSong = useSongsStore(state => state.setCurrentSong);
-  const updateSong = useSongsStore(state => state.updateSong);
-  const libraryCurrentSong = useSongsStore(state => state.currentSong);
-  const getSong = useSongsStore(state => state.getSong);
-  const deleteSong = useSongsStore(state => state.deleteSong);
-  const toggleLike = useSongsStore(state => state.toggleLike);
-  const hideSong = useSongsStore(state => state.hideSong);
-  
-  const playerCurrentSong = usePlayerStore(state => state.currentSong);
-  const { recentArts, addRecentArt } = useArtHistoryStore();
-  const libraryBackgroundMode = useSettingsStore(state => state.libraryBackgroundMode);
-  const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
-  const miniPlayerStyle = useSettingsStore(state => state.miniPlayerStyle);
-  const isIsland = miniPlayerStyle === 'island';
-  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
-  
-  // Visibility Management: Ensure MiniPlayer is VISIBLE when Home is focused
-  useFocusEffect(
-    useCallback(() => {
-      setMiniPlayerHidden(false);
-    }, [setMiniPlayerHidden])
-  );
-  
-  // Bottom Sheet State
-  const [showBottomSheet, setShowBottomSheet] = React.useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
-  const gradientOpacity = React.useRef(new Animated.Value(1)).current;
-  
-  const [activeThemeColors, setActiveThemeColors] = React.useState<string[] | undefined>(undefined);
-  const [activeImageUri, setActiveImageUri] = React.useState<string | null>(null);
-  
-  const [artMenuVisible, setArtMenuVisible] = React.useState(false);
-  const [artMenuAnchor, setArtMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
-  const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
-  const [recentArtVisible, setRecentArtVisible] = React.useState(false);
-  const [showCoverSearch, setShowCoverSearch] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [showQueueModal, setShowQueueModal] = React.useState(false);
-  
-  const downloadQueue = useDownloadQueueStore(state => state.queue);
-  const activeDownloadsCount = downloadQueue.filter(i => i.status === 'downloading' || i.status === 'pending' || i.status === 'staging').length;
-
-  const scanQueue = useLyricsScanQueueStore(state => state.queue);
-  const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
-
-  // Wrapper for feedback
-  const handleAddToQueue = useCallback((song: Song) => {
-      const existing = scanQueue.find(j => j.songId === song.id);
-      if (existing) {
-         if (existing.status === 'failed') {
-            // Allow retry
-         } else {
-            setToast({ visible: true, message: `Already searching for "${song.title}"`, type: 'info' });
-            return;
-         }
-      }
-  
-      addToScanQueue(song);
-      Vibration.vibrate(50); // Light haptic
-      setToast({ visible: true, message: `Searching lyrics for "${song.title}"...`, type: 'success' });
-  }, [addToScanQueue, scanQueue]);
-
-
-  // const { tasks } = useTasksStore();
-  // const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
-  // const activeTasksCount = 0;
-
-  useEffect(() => {
-    fetchSongs();
-  }, []);
-
-  // Dynamic Background Logic
-  useEffect(() => {
-    const updateTheme = async () => {
-      let colors: string[] | undefined = undefined;
-      let image: string | null = null;
-
-      if (libraryBackgroundMode === 'current') {
-         // USE PLAYER STORE for "Current" mode to be responsive
-         if (playerCurrentSong) {
-             image = playerCurrentSong.coverImageUri || null;
-             // Only fallback to colors if no image
-             if (!image && playerCurrentSong.gradientId) {
-                 if (playerCurrentSong.gradientId === 'dynamic') {
-                      colors = ['#f7971e', '#ffd200', '#ff6b35']; 
-                 } else {
-                      colors = getGradientColors(playerCurrentSong.gradientId);
-                 }
-             }
-         }
-      } else if (libraryBackgroundMode === 'daily') {
-         const topSongId = useDailyStatsStore.getState().getTopSongOfYesterday();
-         if (topSongId) {
-            const song = songs.find(s => s.id === topSongId) || await getSong(topSongId);
-            if (song) {
-                 image = song.coverImageUri || null;
-                 if (!image && song.gradientId) {
-                     if (song.gradientId === 'dynamic') {
-                          colors = ['#f7971e', '#ffd200', '#ff6b35']; 
-                     } else {
-                          colors = getGradientColors(song.gradientId);
-                     }
-                 }
-            }
-         }
-         // Fallback to Today's Top
-         if (!colors && !image) {
-             const todayTopId = useDailyStatsStore.getState().getTopSongOfToday();
-             if (todayTopId) {
-                const song = songs.find(s => s.id === todayTopId) || await getSong(todayTopId);
-                if (song) {
-                    image = song.coverImageUri || null;
-                    if (!image && song.gradientId) {
-                        if (song.gradientId === 'dynamic') {
-                            colors = ['#f7971e', '#ffd200', '#ff6b35']; 
-                        } else {
-                            colors = getGradientColors(song.gradientId);
-                        }
-                    }
-                }
-             }
-         }
-      }
-      
-      setActiveThemeColors(colors);
-      setActiveImageUri(image);
-    };
-    updateTheme();
-  }, [libraryBackgroundMode, playerCurrentSong?.id, playerCurrentSong?.coverImageUri, songs.length]);
-  
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      fetchSongs();
-    });
-    return unsubscribe;
-  }, [navigation]);
-
-
-  // Removed Scrollable Header - User prefers icons in "All Songs" section
-
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await fetchSongs();
-    setRefreshing(false);
-  }, [fetchSongs]);
-  
-  const handleDeleteSong = async () => {
-    if (!selectedSongForArt) return;
-    
-    try {
-        console.log('[Library] Deleting song:', selectedSongForArt.title);
-        await deleteSong(selectedSongForArt.id);
-        setShowDeleteConfirm(false);
-        setShowBottomSheet(false);
-        setToast({ visible: true, message: 'Song deleted', type: 'success' });
-    } catch (error) {
-        console.error('[Library] Delete failed:', error);
-        setToast({ visible: true, message: 'Failed to delete song', type: 'error' });
-    }
-  };
-
-  const handleSongPress = useCallback((song: Song) => {
-    // Check if the song is already the current one in the player
-    const isCurrentlyPlaying = playerCurrentSong?.id === song.id;
-
-    if (playInMiniPlayerOnly) {
-      if (isCurrentlyPlaying) {
-        // Second tap on the same song: Open NowPlayingScreen
-        setMiniPlayerHidden(true);
-        navigation.navigate('NowPlaying', { songId: song.id });
-      } else {
-        // First tap or different song: Just start playing in mini player
-        setCurrentSong(song);
-        usePlayerStore.getState().loadSong(song.id);
-      }
-    } else {
-      // Default: Always navigate to NowPlayingScreen
-      setCurrentSong(song);
-      setMiniPlayerHidden(true);
-      navigation.navigate('NowPlaying', { songId: song.id });
-      usePlayerStore.getState().loadSong(song.id);
-    }
-  }, [navigation, setCurrentSong, playInMiniPlayerOnly, playerCurrentSong?.id]);
-
-  const handleSongLongPress = useCallback((song: Song, event?: any) => {
-    // Show bottom sheet for cover art options
-    setSelectedSongForArt(song);
-    setShowBottomSheet(true);
-  }, []);
-
-  const handleAddPress = useCallback(() => {
-    navigation.navigate('AddEditLyrics', {});
-  }, [navigation]);
-  
-  const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0].uri && selectedSongForArt) {
-        const uri = result.assets[0].uri;
-        const updatedSong = {
-          ...selectedSongForArt,
-          coverImageUri: uri,
-          dateModified: new Date().toISOString(),
-        };
-        await updateSong(updatedSong);
-        addRecentArt(uri);
-        setShowBottomSheet(false);
-        fetchSongs();
-      }
-    } catch (error) {
-      console.error('Cover art save failed:', error);
-      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
-    }
-  };
-
-  const selectRecentArt = async (uri: string) => {
-    if (selectedSongForArt) {
-      try {
-        const updatedSong = {
-          ...selectedSongForArt,
-          coverImageUri: uri,
-          dateModified: new Date().toISOString(),
-        };
-        await updateSong(updatedSong);
-        setShowBottomSheet(false);
-        fetchSongs();
-      } catch (error) {
-        console.error('Recent art apply failed:', error);
-        setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
-      }
-    }
-  };
-
-  const artOptions = [
-    {
-      label: 'Choose from Gallery',
-      icon: 'image-outline' as const,
-      onPress: pickImage,
-    },
-    {
-       label: 'Search Web',
-       icon: 'globe-outline' as const,
-       onPress: () => {
-           setArtMenuVisible(false);
-           setShowCoverSearch(true);
-       }
-    },
-    ...(recentArts.length > 0 ? [{
-      label: 'Recent Art',
-      icon: 'time-outline' as const,
-      onPress: () => {
-        setArtMenuVisible(false);
-        setTimeout(() => setRecentArtVisible(true), 100);
-      },
-    }] : []),
-    {
-      label: 'Delete Song',
-      icon: 'trash-outline' as const,
-      onPress: async () => {
-        setArtMenuVisible(false);
-        if (selectedSongForArt) {
-          Alert.alert(
-            'Delete Song',
-            `Delete "${selectedSongForArt.title}"? This cannot be undone.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  const { deleteSong } = useSongsStore.getState();
-                  await deleteSong(selectedSongForArt.id);
-                  fetchSongs();
-                },
-              },
-            ]
-          );
-        }
-      },
-    },
-  ];
-
-  // const topSongs = songs.slice(0, 2);
-  // const otherSongs = songs.slice(2);
-
-  // const renderSong = ({ item, index }: { item: Song; index: number }) => (
-  //   <View style={[styles.cardWrapper, index % 2 === 0 && styles.cardLeft]}>
-  //     <SongCard
-  //       id={item.id}
-  //       title={item.title}
-  //       artist={item.artist}
-  //       album={item.album}
-  //       gradientId={item.gradientId}
-  //       coverImageUri={item.coverImageUri}
-  //       onPress={() => handleSongPress(item)}
-  //     />
-  //   </View>
-  // );
-
-  const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Ionicons name="musical-notes-outline" size={80} color={Colors.textSecondary} />
-      <Text style={styles.emptyTitle}>No songs yet</Text>
-      <Text style={styles.emptySubtitle}>
-        Add your first song with timestamped lyrics
-      </Text>
-      <Pressable style={styles.addButton} onPress={handleAddPress}>
-        <Ionicons name="add" size={20} color="#000" />
-        <Text style={styles.addButtonText}>Add Lyrics</Text>
-      </Pressable>
-    </View>
-  );
 
 // Extract SongListItem to a memoized component to improve performance
 const SongListItem = React.memo(({ 
@@ -505,12 +181,11 @@ const SongListItem = React.memo(({
                     <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
-                        {isCompleted && (
+                        {(song.lyrics && song.lyrics.length > 0) || isCompleted ? (
                             <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={{ marginLeft: 4 }} />
-                        )}
-                        {scanJob?.status === 'failed' && (
+                        ) : scanJob?.status === 'failed' ? (
                             <Ionicons name="alert-circle" size={12} color={Colors.error} style={{ marginLeft: 4 }} />
-                        )}
+                        ) : null}
                     </View>
                   </View>
                   
@@ -525,6 +200,325 @@ const SongListItem = React.memo(({
         </Swipeable>
     );
 });
+
+const LibraryScreen: React.FC<Props> = ({ navigation }) => {
+  const songs = useSongsStore(state => state.songs);
+  const fetchSongs = useSongsStore(state => state.fetchSongs);
+  const setCurrentSong = useSongsStore(state => state.setCurrentSong);
+  const updateSong = useSongsStore(state => state.updateSong);
+  const libraryCurrentSong = useSongsStore(state => state.currentSong);
+  const getSong = useSongsStore(state => state.getSong);
+  const deleteSong = useSongsStore(state => state.deleteSong);
+  const toggleLike = useSongsStore(state => state.toggleLike);
+  const hideSong = useSongsStore(state => state.hideSong);
+  
+  const playerCurrentSong = usePlayerStore(state => state.currentSong);
+  const { recentArts, addRecentArt } = useArtHistoryStore();
+  const libraryBackgroundMode = useSettingsStore(state => state.libraryBackgroundMode);
+  const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
+  const miniPlayerStyle = useSettingsStore(state => state.miniPlayerStyle);
+  const isIsland = miniPlayerStyle === 'island';
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  
+  // Visibility Management: Ensure MiniPlayer is VISIBLE when Home is focused
+  useFocusEffect(
+    useCallback(() => {
+      setMiniPlayerHidden(false);
+    }, [setMiniPlayerHidden])
+  );
+  
+  // Bottom Sheet State
+  const [showBottomSheet, setShowBottomSheet] = React.useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const gradientOpacity = React.useRef(new Animated.Value(1)).current;
+  
+  const [activeThemeColors, setActiveThemeColors] = React.useState<string[] | undefined>(undefined);
+  const [activeImageUri, setActiveImageUri] = React.useState<string | null>(null);
+  
+  const [artMenuVisible, setArtMenuVisible] = React.useState(false);
+  const [artMenuAnchor, setArtMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
+  const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
+  const [recentArtVisible, setRecentArtVisible] = React.useState(false);
+  const [showCoverSearch, setShowCoverSearch] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [showQueueModal, setShowQueueModal] = React.useState(false);
+  
+  const downloadQueue = useDownloadQueueStore(state => state.queue);
+  const activeDownloadsCount = downloadQueue.filter(i => i.status === 'downloading' || i.status === 'pending' || i.status === 'staging').length;
+
+  const scanQueue = useLyricsScanQueueStore(state => state.queue);
+  const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
+
+  // Wrapper for feedback
+  const handleAddToQueue = useCallback((song: Song) => {
+      const existing = scanQueue.find(j => j.songId === song.id);
+      if (existing) {
+         if (existing.status === 'failed') {
+            // Allow retry
+         } else {
+            setToast({ visible: true, message: `Already searching for "${song.title}"`, type: 'info' });
+            return;
+         }
+      }
+  
+      addToScanQueue(song);
+      Vibration.vibrate(50); // Light haptic
+      setToast({ visible: true, message: `Searching lyrics for "${song.title}"...`, type: 'success' });
+  }, [addToScanQueue, scanQueue]);
+
+
+  // const { tasks } = useTasksStore();
+  // const activeTasksCount = tasks.filter(t => t.status === 'queued' || t.status === 'processing').length;
+  // const activeTasksCount = 0;
+
+  // Removed duplicate fetchSongs on mount - focus listener handles it
+  // useEffect(() => {
+  //   fetchSongs();
+  // }, []);
+
+  // Dynamic Background Logic
+  useEffect(() => {
+    const updateTheme = async () => {
+      let colors: string[] | undefined = undefined;
+      let image: string | null = null;
+
+      if (libraryBackgroundMode === 'current') {
+         // USE PLAYER STORE for "Current" mode to be responsive
+         if (playerCurrentSong) {
+             image = playerCurrentSong.coverImageUri || null;
+             // Only fallback to colors if no image
+             if (!image && playerCurrentSong.gradientId) {
+                 if (playerCurrentSong.gradientId === 'dynamic') {
+                      colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                 } else {
+                      colors = getGradientColors(playerCurrentSong.gradientId);
+                 }
+             }
+         }
+      } else if (libraryBackgroundMode === 'daily') {
+         const topSongId = useDailyStatsStore.getState().getTopSongOfYesterday();
+         if (topSongId) {
+            const song = songs.find(s => s.id === topSongId) || await getSong(topSongId);
+            if (song) {
+                 image = song.coverImageUri || null;
+                 if (!image && song.gradientId) {
+                     if (song.gradientId === 'dynamic') {
+                          colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                     } else {
+                          colors = getGradientColors(song.gradientId);
+                     }
+                 }
+            }
+         }
+         // Fallback to Today's Top
+         if (!colors && !image) {
+             const todayTopId = useDailyStatsStore.getState().getTopSongOfToday();
+             if (todayTopId) {
+                const song = songs.find(s => s.id === todayTopId) || await getSong(todayTopId);
+                if (song) {
+                    image = song.coverImageUri || null;
+                    if (!image && song.gradientId) {
+                        if (song.gradientId === 'dynamic') {
+                            colors = ['#f7971e', '#ffd200', '#ff6b35']; 
+                        } else {
+                            colors = getGradientColors(song.gradientId);
+                        }
+                    }
+                }
+             }
+         }
+      }
+      
+      setActiveThemeColors(colors);
+      setActiveImageUri(image);
+    };
+    updateTheme();
+  }, [libraryBackgroundMode, playerCurrentSong?.id, playerCurrentSong?.coverImageUri, songs.length]);
+  
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchSongs();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+
+  // Removed Scrollable Header - User prefers icons in "All Songs" section
+
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchSongs();
+    setRefreshing(false);
+  }, [fetchSongs]);
+  
+  const handleDeleteSong = async () => {
+    if (!selectedSongForArt) return;
+    
+    try {
+        console.log('[Library] Deleting song:', selectedSongForArt.title);
+        const { deleteSong: storeDeleteSong } = useSongsStore.getState();
+        await storeDeleteSong(selectedSongForArt.id);
+        setShowDeleteConfirm(false);
+        setShowBottomSheet(false);
+        setToast({ visible: true, message: 'Song deleted', type: 'success' });
+    } catch (error) {
+        console.error('[Library] Delete failed:', error);
+        setToast({ visible: true, message: 'Failed to delete song', type: 'error' });
+    }
+  };
+
+  const handleSongPress = useCallback((song: Song) => {
+    // Check if the song is already the current one in the player using getState() to avoid re-creating callback
+    const currentId = usePlayerStore.getState().currentSongId;
+    const isCurrentlyPlaying = currentId === song.id;
+
+    // OPTIMIZATION: Small delay to allow "Press Out" animation to finish visually
+    // before locking the thread with Navigation & State Updates.
+    setTimeout(() => {
+        if (playInMiniPlayerOnly) {
+        if (isCurrentlyPlaying) {
+            // Second tap on the same song: Open NowPlayingScreen
+            setMiniPlayerHidden(true);
+            navigation.navigate('NowPlaying', { songId: song.id });
+        } else {
+            // First tap or different song: Just start playing in mini player
+            setCurrentSong(song);
+            usePlayerStore.getState().setInitialSong(song);
+            // Fetch full details (lyrics) immediately
+            usePlayerStore.getState().loadSong(song.id);
+        }
+        } else {
+        // Default: Always navigate to NowPlayingScreen
+        setMiniPlayerHidden(true);
+        
+        if (isCurrentlyPlaying) {
+             // Just navigate to existing playback
+             navigation.navigate('NowPlaying', { songId: song.id });
+        } else {
+             // Start playing new song
+             // OPTIMIZATION: Set data immediately so player has content while verifying
+             usePlayerStore.getState().setInitialSong(song);
+             usePlayerStore.getState().loadSong(song.id); // Fetch full lyrics immediately
+             navigation.navigate('NowPlaying', { songId: song.id });
+        }
+        }
+    }, 75); // 75ms delay for visual feedback
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly]); // Removed playerCurrentSong?.id dependency
+
+  const handleSongLongPress = useCallback((song: Song, event?: any) => {
+    // Show bottom sheet for cover art options
+    setSelectedSongForArt(song);
+    setShowBottomSheet(true);
+  }, []);
+
+  const handleAddPress = useCallback(() => {
+    navigation.navigate('AddEditLyrics', {});
+  }, [navigation]);
+  
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0].uri && selectedSongForArt) {
+        const uri = result.assets[0].uri;
+        const updatedSong = {
+          ...selectedSongForArt,
+          coverImageUri: uri,
+          dateModified: new Date().toISOString(),
+        };
+        await updateSong(updatedSong);
+        addRecentArt(uri);
+        setShowBottomSheet(false);
+        fetchSongs();
+      }
+    } catch (error) {
+      console.error('Cover art save failed:', error);
+      setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
+    }
+  };
+
+  const selectRecentArt = async (uri: string) => {
+    if (selectedSongForArt) {
+      try {
+        const updatedSong = {
+          ...selectedSongForArt,
+          coverImageUri: uri,
+          dateModified: new Date().toISOString(),
+        };
+        await updateSong(updatedSong);
+        setShowBottomSheet(false);
+        fetchSongs();
+      } catch (error) {
+        console.error('Recent art apply failed:', error);
+        setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
+      }
+    }
+  };
+
+  const artOptions = [
+    {
+      label: 'Choose from Gallery',
+      icon: 'image-outline' as const,
+      onPress: pickImage,
+    },
+    {
+       label: 'Search Web',
+       icon: 'globe-outline' as const,
+       onPress: () => {
+           setArtMenuVisible(false);
+           setShowCoverSearch(true);
+       }
+    },
+    ...(recentArts.length > 0 ? [{
+      label: 'Recent Art',
+      icon: 'time-outline' as const,
+      onPress: () => {
+        setArtMenuVisible(false);
+        setTimeout(() => setRecentArtVisible(true), 100);
+      },
+    }] : []),
+    {
+      label: 'Delete Song',
+      icon: 'trash-outline' as const,
+        onPress: async () => {
+        setArtMenuVisible(false);
+        if (selectedSongForArt) {
+          setShowDeleteConfirm(true); // Trigger custom modal instead of Alert
+        }
+      },
+    },
+  ];
+
+  const renderEmpty = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="musical-notes-outline" size={80} color={Colors.textSecondary} />
+      <Text style={styles.emptyTitle}>No songs yet</Text>
+      <Text style={styles.emptySubtitle}>
+        Add your first song with timestamped lyrics
+      </Text>
+      <Pressable style={styles.addButton} onPress={handleAddPress}>
+        <Ionicons name="add" size={20} color="#000" />
+        <Text style={styles.addButtonText}>Add Lyrics</Text>
+      </Pressable>
+    </View>
+  );
+
+  const renderItem = useCallback(({ item }: { item: Song }) => (
+    <SongListItem 
+        song={item} 
+        onPress={handleSongPress} 
+        onLongPress={handleSongLongPress}
+        scanQueue={scanQueue}
+        addToScanQueue={handleAddToQueue}
+    />
+  ), [handleSongPress, handleSongLongPress, scanQueue, handleAddToQueue]);
 
   return (
     <View style={styles.container}>
@@ -543,15 +537,7 @@ const SongListItem = React.memo(({
           key="library-list"
           data={songs}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <SongListItem 
-                song={item} 
-                onPress={handleSongPress} 
-                onLongPress={handleSongLongPress}
-                scanQueue={scanQueue}
-                addToScanQueue={handleAddToQueue}
-            />
-          )}
+          renderItem={renderItem}
           contentContainerStyle={[
              styles.listContent,
              isIsland && { paddingTop: 20 } // Reduced gap to bring covers up
@@ -650,6 +636,14 @@ const SongListItem = React.memo(({
               duration: 200,
               useNativeDriver: true,
             }).start();
+            
+            // Toggle Focus Mode (Black Background) on scroll
+            // If scrolled down > 150px, turn everything black
+            const shouldBeFocused = offsetY > 150;
+            const currentMode = useSettingsStore.getState().libraryFocusMode;
+            if (currentMode !== shouldBeFocused) {
+               useSettingsStore.getState().setLibraryFocusMode(shouldBeFocused);
+            }
           }}
           scrollEventThrottle={16}
         />
@@ -694,6 +688,14 @@ const SongListItem = React.memo(({
           </View>
         </Pressable>
       </Modal>
+
+      <ModernDeleteModal
+        visible={showDeleteConfirm}
+        title="Delete Song"
+        message={`Delete "${selectedSongForArt?.title}"? This cannot be undone.`}
+        onConfirm={handleDeleteSong}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
 
       {/* Bottom Sheet for Cover Art Options */}
       <Modal

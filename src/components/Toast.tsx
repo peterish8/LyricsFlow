@@ -101,7 +101,7 @@ export const Toast: React.FC<ToastProps> = ({
   // Dynamic Styles based on position preference
   // User requested "want down near tonav bar" - implies minimal offset.
   const positionStyle = isIsland ? {
-      bottom: insets.bottom + 10, // Very close to bottom safe area
+      bottom: insets.bottom + 90, // Adjusted to be above Tab Bar
       right: 20, 
       minWidth: 200,
       maxWidth: 300, 

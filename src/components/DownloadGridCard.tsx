@@ -89,7 +89,12 @@ export const DownloadGridCard = memo(({
             onArtistPress();
         }}>
             <Text style={styles.artist} numberOfLines={1}>
-                {song.artist} <Ionicons name="arrow-forward-circle-outline" size={12} color={Colors.primary} />
+                {song.artist}{' '}
+                {song.isAuthentic && (
+                    <Ionicons name="checkmark-circle" size={12} color={Colors.primary} />
+                )}
+                {' '}
+                <Ionicons name="arrow-forward-circle-outline" size={12} color={Colors.primary} />
             </Text>
         </Pressable>
         

@@ -100,6 +100,46 @@ class LyricaService {
                   return `${timestamp} ${line.text || ''}`;
                 })
                 .join('\n');
+            } else if (Array.isArray(finalLyrics)) {
+               // 🚨 Fix: If 'lyrics' comes as an actual Array (pre-parsed JSON)
+               console.log(`[Lyrica] Detected Array in lyrics field, converting to LRC`);
+               try {
+                   finalLyrics = finalLyrics.map((line: any) => {
+                      const ms = line.start_time || 0;
+                      const minutes = Math.floor(ms / 60000);
+                      const seconds = Math.floor((ms % 60000) / 1000);
+                      const hundredths = Math.floor((ms % 1000) / 10);
+                      const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
+                      return `${timestamp} ${line.text || ''}`;
+                   }).join('\n');
+               } catch (e) {
+                   console.warn('[Lyrica] Failed to convert Array lyrics', e);
+                   finalLyrics = ''; // Fallback
+               }
+            } else if (typeof finalLyrics === 'string' && (finalLyrics.trim().startsWith('[') || finalLyrics.trim().startsWith('{'))) {
+               // 🚨 Fix: If 'lyrics' comes as a stringified JSON array/object
+               try {
+                  const parsedJson = JSON.parse(finalLyrics);
+                  if (Array.isArray(parsedJson)) {
+                       console.log(`[Lyrica] Detected JSON string in lyrics field, converting to LRC`);
+                       finalLyrics = parsedJson.map((line: any) => {
+                          const ms = line.start_time || 0;
+                          const minutes = Math.floor(ms / 60000);
+                          const seconds = Math.floor((ms % 60000) / 1000);
+                          const hundredths = Math.floor((ms % 1000) / 10);
+                          const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
+                          return `${timestamp} ${line.text || ''}`;
+                       }).join('\n');
+                  }
+               } catch (e) {
+                   // Not a valid JSON, probably just lyrics starting with [ or { (e.g. "[Intro]")
+                   // Ignore error and treat as plain text
+                   // BUT if it looks like the complex JSON array we saw, discard it to avoid passing raw JSON
+                   if (finalLyrics.trim().startsWith('[{"')) {
+                       console.warn('[Lyrica] Failed to parse JSON lyrics string, discarding to prevent errors');
+                       finalLyrics = null; 
+                   }
+               }
             }
 
             if (finalLyrics) {

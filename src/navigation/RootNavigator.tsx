@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Colors } from '../constants/colors';
@@ -15,21 +15,32 @@ import TabNavigator from './TabNavigator';
 import NowPlayingScreen from '../screens/NowPlayingScreen';
 import AddEditLyricsScreen from '../screens/AddEditLyricsScreen';
 import SearchScreen from '../screens/SearchScreen';
+import PlaylistDetailScreen from '../screens/PlaylistDetailScreen';
 import { AudioDownloaderScreen } from '../screens/AudioDownloaderScreen';
 import { YoutubeBrowserScreen } from '../screens/YoutubeBrowserScreen';
 import { MiniPlayer } from '../components';
 import { BackgroundDownloader } from '../components/BackgroundDownloader';
+import { CreatePlaylistModal } from '../components/CreatePlaylistModal';
+import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const RootNavigator: React.FC = () => {
+  const navigationRef = useNavigationContainerRef();
+  const [currentRoute, setCurrentRoute] = React.useState<string | undefined>();
+
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onStateChange={() => {
+        const route = navigationRef.getCurrentRoute();
+        setCurrentRoute(route?.name);
+      }}
+    >
       <View style={{ flex: 1 }}>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
-            contentStyle: { backgroundColor: Colors.background },
             animation: 'slide_from_bottom',
           }}
         >
@@ -39,32 +50,39 @@ export const RootNavigator: React.FC = () => {
             component={NowPlayingScreen}
             options={{
               presentation: 'fullScreenModal',
-              animation: 'slide_from_bottom',
             }}
           />
           <Stack.Screen
             name="AddEditLyrics"
             component={AddEditLyricsScreen}
-            options={{
-              presentation: 'modal',
-              animation: 'slide_from_bottom',
-            }}
           />
           <Stack.Screen
             name="Search"
             component={SearchScreen}
+          />
+          <Stack.Screen
+            name="CreatePlaylist"
+            component={CreatePlaylistModal}
             options={{
-              presentation: 'fullScreenModal',
-              animation: 'slide_from_right',
+              presentation: 'transparentModal',
+              animation: 'fade',
             }}
+          />
+          <Stack.Screen
+            name="AddToPlaylist"
+            component={AddToPlaylistModal}
+            options={{
+              presentation: 'transparentModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="PlaylistDetail"
+            component={PlaylistDetailScreen}
           />
           <Stack.Screen
             name="AudioDownloader"
             component={AudioDownloaderScreen}
-            options={{
-              presentation: 'modal',
-              animation: 'slide_from_bottom',
-            }}
           />
           <Stack.Screen
             name="YoutubeBrowser"
@@ -76,7 +94,8 @@ export const RootNavigator: React.FC = () => {
           />
         </Stack.Navigator>
         
-        <MiniPlayer />
+        {/* Hide MiniPlayer on Reels tab */}
+        {currentRoute !== 'Reels' && <MiniPlayer />}
         <BackgroundDownloader />
       </View>
     </NavigationContainer>

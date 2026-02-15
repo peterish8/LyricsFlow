@@ -4,6 +4,8 @@
 
 import * as SQLite from 'expo-sqlite';
 
+export { migratePlaylistData } from './db_migration';
+
 const DATABASE_NAME = 'lyricflow.db';
 const LOG_PREFIX = '[DB]';
 
@@ -106,6 +108,8 @@ export const initDatabase = async (): Promise<void> => {
  */
 const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> => {
   await database.execAsync(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
     PRAGMA foreign_keys = ON;
     
     CREATE TABLE IF NOT EXISTS songs (
@@ -135,10 +139,32 @@ const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> 
       FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
     );
     
+    CREATE TABLE IF NOT EXISTS playlists (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      cover_image_uri TEXT,
+      is_default INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      date_created TEXT NOT NULL,
+      date_modified TEXT NOT NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS playlist_songs (
+      playlist_id TEXT NOT NULL,
+      song_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      PRIMARY KEY (playlist_id, song_id),
+      FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+      FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
+    );
+    
     CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title);
     CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
     CREATE INDEX IF NOT EXISTS idx_lyrics_song_id ON lyrics(song_id);
     CREATE INDEX IF NOT EXISTS idx_lyrics_timestamp ON lyrics(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, sort_order);
   `);
   
   // Migration: Add lyrics_align if missing
@@ -229,3 +255,57 @@ export const closeDatabase = async (): Promise<void> => {
 
   initPromise = null;
 };
+
+// ==========================================
+// SHARED DB HELPERS
+// ==========================================
+
+export const isNativeDbNullPointer = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return /NativeDatabase\.(prepareAsync|execAsync)|NullPointerException/i.test(error.message);
+};
+
+export const withDbRetry = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
+  try {
+    const database = await getDatabase();
+    return await operation(database);
+  } catch (error) {
+    log('Operation failed', error);
+    
+    if (!isNativeDbNullPointer(error)) {
+      throw error;
+    }
+
+    log('Detected native NPE, attempting recovery...');
+    await closeDatabase().catch(() => undefined);
+    await initDatabase();
+    const recoveredDb = await getDatabase();
+    log('Retrying operation after recovery...');
+    return operation(recoveredDb);
+  }
+};
+
+let dbOperationQueue: Promise<void> = Promise.resolve();
+
+const withSerializedDbAccess = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const result = dbOperationQueue.then(operation);
+  // Append catch to ensure queue continues even if op fails
+  dbOperationQueue = result.then(() => {}).catch(() => {});
+  return result;
+};
+
+// READS can be parallel (mostly), but WRITES must be serialized
+export const withDbRead = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
+    return withDbRetry(operation);
+};
+
+export const withDbWrite = async <T>(operation: (db: Awaited<ReturnType<typeof getDatabase>>) => Promise<T>): Promise<T> => {
+  return withSerializedDbAccess(() => withDbRetry(operation));
+};
+
+// ALIAS: For backward compatibility with other query functions not yet updated
+export const withDbSafe = withDbWrite;
+
+
+export const esc = (val: string) => val.replace(/'/g, "''");
+

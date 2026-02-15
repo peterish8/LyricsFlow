@@ -61,6 +61,13 @@ The app implements a robust, tiered lyric fetching system.
 - **Hardware & Lock Screen Sync**: Fully integrated with the device media session via `expo-audio`, supporting Bluetooth remote commands and system metadata updates.
 - **High-Performance Scaling**: Designed for large local libraries with instant search and low-latency navigation.
 
+### Instant Playback Architecture ⚡
+To achieve <100ms startup times, the app uses an **Optimistic UI pattern**:
+- **Problem**: Waiting for a full database query (lyrics, metadata, stems) delays audio start by 300-500ms.
+- **Solution**: The `loadSong` action in `playerStore.ts` immediately dehydrates the song from the `songsStore` memory cache and starts playback instantly.
+- **Background Hydration**: Full lyrics and metadata are fetched asynchronously from SQLite and merged into the active state without interrupting playback.
+- **Memoization**: The Library list uses strict `React.memo` and stable callbacks to ensure that tapping a song does not trigger a re-render of the entire list, preserving the "ripple" animation frames.
+
 ---
 
 ## 📂 Directory Architecture

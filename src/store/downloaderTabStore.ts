@@ -1,15 +1,29 @@
 import { create } from 'zustand';
 import { UnifiedSong } from '../types/song';
 
+export interface BulkItem {
+  id: string;
+  query: { title: string; artist: string };
+  result: UnifiedSong | null;
+  status: 'pending' | 'searching' | 'found' | 'not_found';
+}
+
 interface SearchTab {
   id: string;
   query: string;
+  titleQuery: string;   // Per-tab title search text
+  artistQuery: string;  // Per-tab artist search text
   results: UnifiedSong[];
   remixResults?: UnifiedSong[]; // Separate remix/cover results for artist search
   scrollPosition: number;
   isSearching: boolean;
   status: string;
   selectedSongs: string[]; // IDs of selected songs in this tab
+  
+  // Bulk Mode State
+  mode: 'search' | 'bulk';
+  bulkItems: BulkItem[];
+  bulkPlaylistName: string;
 }
 
 interface DownloaderTabStore {
@@ -31,11 +45,16 @@ export const useDownloaderTabStore = create<DownloaderTabStore>((set, get) => ({
   tabs: [{
     id: 'default',
     query: '',
+    titleQuery: '',
+    artistQuery: '',
     results: [],
     scrollPosition: 0,
     isSearching: false,
     status: '',
-    selectedSongs: []
+    selectedSongs: [],
+    mode: 'search',
+    bulkItems: [],
+    bulkPlaylistName: ''
   }],
   activeTabId: 'default',
 
@@ -43,11 +62,16 @@ export const useDownloaderTabStore = create<DownloaderTabStore>((set, get) => ({
     const newTab: SearchTab = {
       id: Date.now().toString(),
       query: initialQuery,
+      titleQuery: '',
+      artistQuery: initialQuery, // If created from artist click, set artist field
       results: [],
       scrollPosition: 0,
       isSearching: false,
       status: '',
-      selectedSongs: []
+      selectedSongs: [],
+      mode: 'search',
+      bulkItems: [],
+      bulkPlaylistName: ''
     };
     set(state => ({
       tabs: [...state.tabs, newTab],
@@ -69,11 +93,16 @@ export const useDownloaderTabStore = create<DownloaderTabStore>((set, get) => ({
               tabs: [{
                 id: 'default',
                 query: '',
+                titleQuery: '',
+                artistQuery: '',
                 results: [],
                 scrollPosition: 0,
                 isSearching: false,
                 status: '',
-                selectedSongs: []
+                selectedSongs: [],
+                mode: 'search',
+                bulkItems: [],
+                bulkPlaylistName: ''
               }],
               activeTabId: 'default'
           };
@@ -98,12 +127,13 @@ export const useDownloaderTabStore = create<DownloaderTabStore>((set, get) => ({
       set(state => ({
           tabs: state.tabs.map(tab => {
               if (tab.id !== tabId) return tab;
-              const isSelected = tab.selectedSongs.includes(songId);
+              const selectedSongs = tab.selectedSongs || [];
+              const isSelected = selectedSongs.includes(songId);
               return {
                   ...tab,
                   selectedSongs: isSelected 
-                    ? tab.selectedSongs.filter(id => id !== songId)
-                    : [...tab.selectedSongs, songId]
+                    ? selectedSongs.filter(id => id !== songId)
+                    : [...selectedSongs, songId]
               };
           })
       }));
@@ -120,8 +150,16 @@ export const useDownloaderTabStore = create<DownloaderTabStore>((set, get) => ({
       const allSelected: { song: UnifiedSong, tabId: string }[] = [];
       
       state.tabs.forEach(tab => {
-          tab.selectedSongs.forEach(songId => {
-              const song = tab.results.find(s => s.id === songId);
+          (tab.selectedSongs || []).forEach(songId => {
+              // Check in regular search results
+              let song = tab.results.find(s => s.id === songId);
+              
+              // Also check in bulk items if not found
+              if (!song && tab.bulkItems) {
+                  const bulkItem = tab.bulkItems.find(i => i.result?.id === songId);
+                  if (bulkItem) song = bulkItem.result || undefined;
+              }
+
               if (song) {
                   allSelected.push({ song, tabId: tab.id });
               }

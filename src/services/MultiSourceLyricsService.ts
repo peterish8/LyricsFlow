@@ -12,43 +12,68 @@ export const MultiSourceLyricsService = {
     
     fetchLyricsParallel: async (title: string, artist: string, duration?: number): Promise<LyricaResult[]> => {
         try {
-            let lyricaResult: LyricaResult | null = null;
-            let saavnResult: LyricaResult | null = null;
-
-            // 1. Lyrica Service (Wraps Lyrica Slow -> Fast -> Plain)
-            const lyricaPromise = lyricaService.fetchLyrics(title, artist)
-                .then(res => {
-                    if (res) lyricaResult = res;
-                })
-                .catch(e => console.warn('[LyricsEngine] Lyrica failed:', e));
-
-            // 2. JioSaavn Service
-            const saavnPromise = JioSaavnLyricsService.getLyrics(title, artist, duration)
-                .then(res => {
-                    if (res) {
-                        saavnResult = {
-                            lyrics: res.lyrics,
-                            source: `JioSaavn (${res.source})`,
-                            metadata: res.metadata
-                        } as LyricaResult;
+            // We want to return AS SOON AS we find "Synced" lyrics.
+            // But we also want to collect all results if only "Plain" lyrics are found, to choose the best one.
+            
+            const results: LyricaResult[] = [];
+            let finishedCount = 0;
+            const totalSources = 2; // Lyrica + Saavn
+            
+            return new Promise((resolve) => {
+                const checkCompletion = () => {
+                    finishedCount++;
+                    if (finishedCount >= totalSources) {
+                        // All done, return whatever we have
+                        resolve(results); 
                     }
-                })
-                .catch(e => console.warn('[LyricsEngine] JioSaavn failed:', e));
+                };
 
-            // Race: All finished OR 8s timeout (User requested "Lyrica Slow", so give it time)
-            await Promise.race([
-                Promise.all([lyricaPromise, saavnPromise]),
-                new Promise(resolve => setTimeout(resolve, 8000))
-            ]);
+                // 1. Lyrica Service
+                lyricaService.fetchLyrics(title, artist)
+                    .then(res => {
+                        if (res) {
+                            results.push(res);
+                            // If we found SYNCED lyrics, stop waiting and return immediately!
+                            if (/[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(res.lyrics)) {
+                                console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via Lyrica');
+                                resolve([res]); // Return just this one (or we could wait for others but why?)
+                                return;
+                            }
+                        }
+                    })
+                    .catch(e => console.warn('[LyricsEngine] Lyrica failed:', e))
+                    .finally(checkCompletion);
 
-            // Construct results with explicit priority: Lyrica > JioSaavn
-            // This ensures logic downstream (which picks first synced) will prefer Lyrica
-            const validResults: LyricaResult[] = [];
-            if (lyricaResult) validResults.push(lyricaResult);
-            if (saavnResult) validResults.push(saavnResult!);
+                // 2. JioSaavn Service
+                JioSaavnLyricsService.getLyrics(title, artist, duration)
+                    .then(res => {
+                        if (res) {
+                            const result = {
+                                lyrics: res.lyrics,
+                                source: `JioSaavn (${res.source})`,
+                                metadata: res.metadata
+                            } as LyricaResult;
+                            results.push(result);
+                            
+                            // If we found SYNCED lyrics and haven't resolved yet
+                            if (/[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(res.lyrics)) {
+                                console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via Saavn');
+                                resolve([results[0]]); // Return just this one (or we could wait for others but why?)
+                                return;
+                            }
+                        }
+                    })
+                    .catch(e => console.warn('[LyricsEngine] JioSaavn failed:', e))
+                    .finally(checkCompletion);
 
-            console.log(`[LyricsEngine] Found ${validResults.length} lyric sources for "${title}". Lyrica found: ${!!lyricaResult}`);
-            return validResults;
+                // 3. Timeout (8s) - redundancy in case logic fails
+                setTimeout(() => {
+                    if (finishedCount < totalSources) {
+                        console.log('[LyricsEngine] Timeout reached, returning collected results');
+                        resolve(results);
+                    }
+                }, 8000);
+            });
 
         } catch (error) {
              console.error('[LyricsEngine] Critical failure in fetchLyricsParallel:', error);

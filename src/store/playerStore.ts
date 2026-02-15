@@ -8,6 +8,19 @@ interface PlayerState {
   loadedAudioId: string | null; // Tracks what is actually loaded in the player
   showTransliteration: boolean;
   hideMiniPlayer: boolean;
+  miniPlayerHiddenSources: Set<string>;
+  
+  // Playlist queue management
+  playlistQueue: Song[] | null;
+  currentPlaylistId: string | null;
+  currentQueueIndex: number;
+  
+  // Playback State (for UI updates)
+  position: number;
+  duration: number;
+  isPlaying: boolean;
+  setIsPlaying: (playing: boolean) => void;
+  
   // Controls exposed by PlayerContext
   play: () => void;
   pause: () => void;
@@ -20,17 +33,38 @@ interface PlayerState {
   updateCurrentSong: (updates: Partial<Song>) => void;
   toggleShowTransliteration: () => void;
   setMiniPlayerHidden: (hidden: boolean) => void;
+  setMiniPlayerHiddenSource: (source: string, hidden: boolean) => void;
+  updateProgress: (position: number, duration: number) => void;
+  
+  // Playlist queue actions
+  setPlaylistQueue: (playlistId: string, songs: Song[], startIndex: number) => void;
+  removeFromQueue: (songId: string) => void;
+  nextInPlaylist: () => void;
+  previousInPlaylist: () => void;
+  clearPlaylistQueue: () => void;
+  
   reset: () => void;
 }
 
-export const usePlayerStore = create<PlayerState>((set) => ({
+export const usePlayerStore = create<PlayerState>((set, get) => ({
   currentSongId: null,
   currentSong: null,
   loadedAudioId: null,
   showTransliteration: false,
   hideMiniPlayer: false,
+  miniPlayerHiddenSources: new Set(),
+  
+  // Playlist queue state
+  playlistQueue: null,
+  currentPlaylistId: null,
+  currentQueueIndex: -1,
+  
+  position: 0,
+  duration: 0,
+  isPlaying: false,
   
   // Default no-ops
+  setIsPlaying: (playing: boolean) => set({ isPlaying: playing }),
   play: () => console.warn('Player not initialized'),
   pause: () => console.warn('Player not initialized'),
   seekTo: () => console.warn('Player not initialized'),
@@ -42,10 +76,32 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   }),
   
   loadSong: async (songId: string) => {
-    // We need to import the query function. The prompt uses 'queries.getSongById'.
-    // Assuming getSongById is exported from '../database/queries'
-    const song = await queries.getSongById(songId);
-    set({ currentSongId: songId, currentSong: song });
+    // 1. Optimistic Update: Get metadata + audioUri from Memory (Instant)
+    const { useSongsStore } = await import('./songsStore');
+    const { useSettingsStore } = await import('./settingsStore'); // Dynamic import to avoid cycles
+    
+    // Save history if in a playlist
+    const state = get();
+    if (state.currentPlaylistId && songId) {
+        useSettingsStore.getState().updatePlaylistHistory(state.currentPlaylistId, songId);
+    }
+    
+    const cachedSong = useSongsStore.getState().songs.find(s => s.id === songId);
+
+    if (cachedSong) {
+        // Update UI & Audio immediately with cached data
+        // Reset loadedAudioId to null to force MiniPlayer to sync new audio
+        set({ currentSongId: songId, currentSong: cachedSong, loadedAudioId: null });
+    }
+
+    // 2. Background Fetch: Get full lyrics from DB
+    // This can take time, but UI/Audio are already running!
+    const fullSong = await queries.getSongById(songId);
+    
+    if (fullSong && get().currentSongId === songId) {
+         // Merge full details (lyrics) into current state
+         set({ currentSong: fullSong }); 
+    }
   },
 
   setInitialSong: (song: Song) => {
@@ -61,7 +117,134 @@ export const usePlayerStore = create<PlayerState>((set) => ({
 
   toggleShowTransliteration: () => set((state) => ({ showTransliteration: !state.showTransliteration })),
   
-  setMiniPlayerHidden: (hidden: boolean) => set({ hideMiniPlayer: hidden }),
+  setMiniPlayerHidden: (hidden: boolean) => {
+      // Legacy support: treats as 'global' or 'manual' override
+      get().setMiniPlayerHiddenSource('manual', hidden);
+  },
 
-  reset: () => set({ currentSongId: null, currentSong: null, loadedAudioId: null }),
+  setMiniPlayerHiddenSource: (source: string, hidden: boolean) => set((state) => {
+      const newSources = new Set(state.miniPlayerHiddenSources);
+      if (hidden) {
+          newSources.add(source);
+      } else {
+          newSources.delete(source);
+      }
+      return { 
+          miniPlayerHiddenSources: newSources,
+          hideMiniPlayer: newSources.size > 0 
+      };
+  }),
+
+  updateProgress: (position, duration) => set({ position, duration }),
+
+  // Playlist queue management
+  setPlaylistQueue: (playlistId: string, songs: Song[], startIndex: number) => {
+    const startSongId = songs[startIndex]?.id;
+    set({ 
+      playlistQueue: songs,
+      currentPlaylistId: playlistId,
+      currentQueueIndex: startIndex,
+      currentSong: songs[startIndex],
+      currentSongId: startSongId || null,
+      isPlaying: true // FORCE PLAY
+    });
+    console.log(`[PLAYER] Set playlist queue: ${playlistId}, ${songs.length} songs, starting at ${startIndex}`);
+    
+    // Fetch full song details (lyrics) for the starting song
+    if (startSongId) {
+        get().loadSong(startSongId);
+        get().play(); // Execute Play
+    }
+  },
+  
+  removeFromQueue: (songId: string) => {
+    // ... existing implementation ...
+    const state = get();
+    if (!state.playlistQueue) return;
+    
+    const newQueue = state.playlistQueue.filter(s => s.id !== songId);
+    const currentIndex = state.currentQueueIndex;
+    
+    // If currently playing song was removed, stop playback
+    if (state.currentSong?.id === songId) {
+      console.log('[PLAYER] Currently playing song removed from queue, clearing');
+      set({ 
+        playlistQueue: newQueue.length > 0 ? newQueue : null,
+        currentSong: null,
+        currentSongId: null,
+        currentQueueIndex: -1
+      });
+      return;
+    }
+    
+    // Adjust index if song before current was removed
+    const removedIndex = state.playlistQueue.findIndex(s => s.id === songId);
+    const newIndex = removedIndex < currentIndex ? currentIndex - 1 : currentIndex;
+    
+    set({ 
+      playlistQueue: newQueue.length > 0 ? newQueue : null,
+      currentQueueIndex: newIndex,
+      currentPlaylistId: newQueue.length > 0 ? state.currentPlaylistId : null
+    });
+    
+    console.log(`[PLAYER] Removed ${songId} from queue, ${newQueue.length} songs remaining`);
+  },
+  
+  nextInPlaylist: () => {
+    const state = get();
+    if (!state.playlistQueue || state.playlistQueue.length === 0) return;
+    
+    const nextIndex = (state.currentQueueIndex + 1) % state.playlistQueue.length;
+    const nextSong = state.playlistQueue[nextIndex];
+    
+    set({ 
+      currentQueueIndex: nextIndex,
+      currentSong: nextSong,
+      currentSongId: nextSong.id,
+      isPlaying: true // FORCE PLAY
+    });
+    
+    // Trigger audio load
+    get().loadSong(nextSong.id);
+    get().play(); // Execute Play
+    console.log(`[PLAYER] Next in playlist: ${nextSong.title}`);
+  },
+  
+  previousInPlaylist: () => {
+    const state = get();
+    if (!state.playlistQueue || state.playlistQueue.length === 0) return;
+    
+    const prevIndex = (state.currentQueueIndex - 1 + state.playlistQueue.length) % state.playlistQueue.length;
+    const prevSong = state.playlistQueue[prevIndex];
+    
+    set({ 
+      currentQueueIndex: prevIndex,
+      currentSong: prevSong,
+      currentSongId: prevSong.id,
+      isPlaying: true // FORCE PLAY
+    });
+    
+    // Trigger audio load
+    get().loadSong(prevSong.id);
+    get().play(); // Execute Play
+    console.log(`[PLAYER] Previous in playlist: ${prevSong.title}`);
+  },
+  
+  clearPlaylistQueue: () => {
+    set({ 
+      playlistQueue: null,
+      currentPlaylistId: null,
+      currentQueueIndex: -1
+    });
+    console.log('[PLAYER] Cleared playlist queue');
+  },
+
+  reset: () => set({ 
+    currentSongId: null, 
+    currentSong: null, 
+    loadedAudioId: null,
+    playlistQueue: null,
+    currentPlaylistId: null,
+    currentQueueIndex: -1
+  }),
 }));

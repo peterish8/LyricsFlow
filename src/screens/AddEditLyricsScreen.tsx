@@ -62,13 +62,13 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const isEditing = !!songId;
 
   const { getSong, addSong, updateSong } = useSongsStore();
-  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  const setMiniPlayerHiddenSource = usePlayerStore(state => state.setMiniPlayerHiddenSource);
 
   // Visibility Management: Hide MiniPlayer when Editor is open
   useEffect(() => {
-    setMiniPlayerHidden(true);
-    return () => setMiniPlayerHidden(false);
-  }, [setMiniPlayerHidden]);
+    setMiniPlayerHiddenSource('Editor', true);
+    return () => setMiniPlayerHiddenSource('Editor', false);
+  }, [setMiniPlayerHiddenSource]);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -192,31 +192,41 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       return;
     }
 
-    // Parse and Update (with estimated timestamps if plain text)
+    // ✅ FIX: If synced lyrics exist, parse & auto-insert timestamps!
     let parsedLines = LrcLibService.parseLrc(finalLyrics, result.duration);
     
-    // If it was plain text/Genius, convert using helper if no brackets found
-    if (result.source === 'Genius' || result.type === 'plain') {
-       if (!finalLyrics.includes('[')) {
-          parsedLines = GeniusService.convertToLyricLines(finalLyrics);
-       }
+    // Check if the lyrics are actually synced (have timestamps)
+    const hasSyncedTimestamps = result.syncedLyrics && result.syncedLyrics.includes('[');
+    
+    if (hasSyncedTimestamps) {
+      // ✅ AUTO-INSERT: Synced lyrics found, apply timestamps immediately!
+      setLyricsText(lyricsToRawText(parsedLines));
+      
+      setToastMessage(`✨ Synced Lyrics Auto-Applied from ${result.source}`);
+      setToastType('success');
+      setShowToast(true);
+      
+      console.log('[MAGIC] Auto-inserted synced timestamps, no re-fetch needed!');
+    } else {
+      // Plain text/Genius - convert using helper if no brackets found
+      if (result.source === 'Genius' || result.type === 'plain') {
+         if (!finalLyrics.includes('[')) {
+            parsedLines = GeniusService.convertToLyricLines(finalLyrics);
+         }
+      }
+
+      setLyricsText(lyricsToRawText(parsedLines));
+      
+      setToastMessage(`Lyrics Loaded from ${result.source}`);
+      setToastType('success');
+      setShowToast(true);
     }
 
-    setLyricsText(lyricsToRawText(parsedLines));
-    
-
     // Update Song Metadata if needed
-    // We update source to track where it came from
     const duration = result.duration ? result.duration : 0;
     if (duration > 0) {
       setDurationText(formatTime(duration));
     }
-    // but main save happens on "Save" button. 
-    // However, user expects lyrics to be "applied".
-    
-    setToastMessage(`Lyrics Loaded from ${result.source}`);
-    setToastType('success');
-    setShowToast(true);
   };
 
   const handleSave = async () => {

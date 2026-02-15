@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet, Image, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing, withSequence } from 'react-native-reanimated';
 import * as GestureHandler from 'react-native-gesture-handler';
 const { Gesture, GestureDetector, FlatList } = GestureHandler;
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { useSongsStore } from '../store/songsStore';
 import Scrubber from '../components/Scrubber';
 import CustomMenu from '../components/CustomMenu';
 import { RootStackScreenProps } from '../types/navigation';
+import { useFocusEffect } from '@react-navigation/native';
 import * as queries from '../database/queries';
 import { getGradientColors } from '../constants/gradients';
 import { AuroraHeader } from '../components/AuroraHeader';
@@ -21,6 +22,7 @@ import { Toast } from '../components/Toast';
 import { useSettingsStore } from '../store/settingsStore';
 import VinylRecord from '../components/VinylRecord';
 import InstrumentalWaveform from '../components/InstrumentalWaveform';
+import SynchronizedLyrics from '../components/SynchronizedLyrics';
 
 const { width } = Dimensions.get('window');
 
@@ -28,7 +30,7 @@ type Props = RootStackScreenProps<'NowPlaying'>;
 
 const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const player = usePlayer();
-  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong, setMiniPlayerHidden } = usePlayerStore();
+  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong, setMiniPlayerHiddenSource } = usePlayerStore();
   const toggleLike = useSongsStore(state => state.toggleLike);
   const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
   const { songId } = route.params;
@@ -44,11 +46,16 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [showLyrics, setShowLyrics] = useState(true); // Issue  5: Lyrics toggle state
   
-  // Visibility Management: Hide MiniPlayer when NowPlaying is open
-  useEffect(() => {
-    setMiniPlayerHidden(true);
-    return () => setMiniPlayerHidden(false);
-  }, [setMiniPlayerHidden]);
+  // Visibility Management: Hide MiniPlayer when NowPlaying is open (and focused)
+  useFocusEffect(
+    React.useCallback(() => {
+      setMiniPlayerHiddenSource('NowPlaying', true);
+      return () => {
+         // Only unhide if we are actually leaving the NowPlaying context entirely
+         setMiniPlayerHiddenSource('NowPlaying', false);
+      };
+    }, [setMiniPlayerHiddenSource])
+  );
   
   // Issue 6: Vinyl rotation
   const vinylRotation = useSharedValue(0);
@@ -114,23 +121,76 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     setMenuVisible(true);
   };
 
-  const bgRotation = useSharedValue(0);
-  const bgScale = useSharedValue(1.2); 
+  // Shared Values for 3 Blobs
+  const blob1TranslateX = useSharedValue(0);
+  const blob1TranslateY = useSharedValue(0);
+  const blob1Scale = useSharedValue(1);
+
+  const blob2TranslateX = useSharedValue(0);
+  const blob2TranslateY = useSharedValue(0);
+  const blob2Scale = useSharedValue(1);
+
+  const blob3TranslateX = useSharedValue(0);
+  const blob3TranslateY = useSharedValue(0);
+  const blob3Scale = useSharedValue(1);
 
   useEffect(() => {
     if (animateBackground) {
-        // Slowing down significantly: 20s -> 60s
-        bgRotation.value = withRepeat(withTiming(10, { duration: 60000, easing: Easing.inOut(Easing.ease) }), -1, true); 
-        // 15s -> 45s for scale breathing
-        bgScale.value = withRepeat(withTiming(1.5, { duration: 45000, easing: Easing.inOut(Easing.ease) }), -1, true); 
+        // Massive Blobs (Lava Lamp)
+        // BLOB 1: Top-Left -> Bottom-Right
+        blob1TranslateX.value = withRepeat(withTiming(width * 0.5, { duration: 45000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob1TranslateY.value = withRepeat(withTiming(width * 0.3, { duration: 55000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob1Scale.value = withRepeat(withTiming(1.2, { duration: 60000, easing: Easing.inOut(Easing.ease) }), -1, true);
+
+        // BLOB 2: Bottom-Right -> Top-Left
+        blob2TranslateX.value = withRepeat(withTiming(-width * 0.5, { duration: 50000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob2TranslateY.value = withRepeat(withTiming(-width * 0.4, { duration: 62000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob2Scale.value = withRepeat(withTiming(1.3, { duration: 58000, easing: Easing.inOut(Easing.ease) }), -1, true);
+
+        // BLOB 3: Center Pulse
+        blob3TranslateX.value = withRepeat(withTiming(-width * 0.2, { duration: 38000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob3TranslateY.value = withRepeat(withTiming(width * 0.2, { duration: 42000, easing: Easing.inOut(Easing.ease) }), -1, true);
+        blob3Scale.value = withRepeat(withTiming(1.4, { duration: 48000, easing: Easing.inOut(Easing.ease) }), -1, true);
+
     } else {
-        bgRotation.value = withTiming(0);
-        bgScale.value = withTiming(1.2);
+        // Reset to default
+        blob1TranslateX.value = withTiming(0);
+        blob1TranslateY.value = withTiming(0);
+        blob1Scale.value = withTiming(1);
+        
+        blob2TranslateX.value = withTiming(0);
+        blob2TranslateY.value = withTiming(0);
+        blob2Scale.value = withTiming(1);
+
+        blob3TranslateX.value = withTiming(0);
+        blob3TranslateY.value = withTiming(0);
+        blob3Scale.value = withTiming(1);
     }
   }, [animateBackground]);
 
-  const bgAnimatedStyle = useAnimatedStyle(() => ({
-       transform: [{ scale: bgScale.value }, { rotate: `${bgRotation.value}deg` }]
+  // Animated Styles
+  const blob1Style = useAnimatedStyle(() => ({
+       transform: [
+           { translateX: blob1TranslateX.value },
+           { translateY: blob1TranslateY.value },
+           { scale: blob1Scale.value }
+       ]
+  }));
+
+  const blob2Style = useAnimatedStyle(() => ({
+       transform: [
+           { translateX: blob2TranslateX.value },
+           { translateY: blob2TranslateY.value },
+           { scale: blob2Scale.value }
+       ]
+  }));
+
+  const blob3Style = useAnimatedStyle(() => ({
+       transform: [
+           { translateX: blob3TranslateX.value },
+           { translateY: blob3TranslateY.value },
+           { scale: blob3Scale.value }
+       ]
   }));
   
   // Issue 6: Vinyl rotation animation (spins when playing, stops when paused)
@@ -155,34 +215,55 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        setIsLoading(true);
-        // Always load metadata first
-        await loadSong(songId); 
-        const song = await queries.getSongById(songId);
+        // OPTIMIZATION: Don't set isLoading=true initially if we have metadata
+        // This prevents the UI from flickering "Loading..." if we already have the song title/art
+        if (!currentSong) setIsLoading(true);
+
+        // 1. Immediate Audio Check (using data from Library/Store)
+        const targetSongId = songId; // Lock ID
         
-        if (!song?.audioUri) {
+        // If we have the song in store but no audioUri, we MUST fetch it.
+        // But usually Library passes a valid object.
+        let songToPlay = currentSong?.id === targetSongId ? currentSong : null;
+
+        // If store is empty/wrong, fetch DB immediately
+        if (!songToPlay || !songToPlay.audioUri) {
+             console.log('[NowPlaying] Fetching song from DB...');
+             songToPlay = await queries.getSongById(targetSongId);
+        }
+
+        if (!songToPlay?.audioUri) {
           Alert.alert('No Audio', 'This song has no audio file attached');
           setIsLoading(false);
           return;
         }
 
-        // ✅ Check if the PLAYER already has this audio loaded
-        // We also check if player.duration > 0 to ensure it's not a stale/empty player instance
-        if (loadedAudioId === songId && player?.duration && player.duration > 0) {
-           console.log('[NowPlaying] Audio already loaded & valid for', songId);
+        // 2. Play Audio (Priority)
+        // Check if ALREADY loaded
+        if (loadedAudioId === targetSongId && player?.duration && player.duration > 0) {
+           console.log('[NowPlaying] Audio already loaded & valid');
            setIsLoading(false);
-           // Ensure it plays if we tapped it (Auto-resume)
-           if (!player.playing) {
-             player.play();
-           }
-           return;
+           if (!player.playing) player.play();
+        } else {
+           // Load new
+           console.log('[NowPlaying] Loading audio:', songToPlay.title);
+           await player?.replace(songToPlay.audioUri); // This is the heavy op
+           setLoadedAudioId(targetSongId);
+           player?.play();
+           setIsLoading(false);
         }
-        
-        // ✅ Load new audio
-        await player?.replace(song.audioUri);
-        setLoadedAudioId(songId); // Mark as loaded
-        player?.play();
-        setIsLoading(false);
+
+        // 3. Hydrate Lyrics (Background)
+        // If the initial song didn't have lyrics (common from Library list), fetch them now
+        // We do this AFTER audio starts to avoid delaying playback
+        if (!songToPlay.lyrics || songToPlay.lyrics.length === 0) {
+            console.log('[NowPlaying] Hydrating lyrics in background...');
+            const fullSong = await queries.getSongById(targetSongId);
+            if (fullSong && fullSong.lyrics.length > 0) {
+                updateCurrentSong({ lyrics: fullSong.lyrics, lyricSource: (fullSong.lyricSource || 'plain') as any });
+            }
+        }
+
       } catch (error) {
         console.error('Failed to load song:', error);
         Alert.alert('Error', 'Could not load audio file.');
@@ -192,7 +273,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     load();
   }, [songId]);
 
-  // ✅ Sync Time & Playback State
+  // âœ… Sync Time & Playback State
   useEffect(() => {
     if (!player) return;
 
@@ -226,7 +307,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                 ? player.duration 
                 : (currentSong?.duration || 180);
              
-             console.log(`[NowPlaying] ⚠️ Detected collapsed lyrics. Auto-generating timestamps for ${duration}s`);
+             console.log(`[NowPlaying] âš ï¸ Detected collapsed lyrics. Auto-generating timestamps for ${duration}s`);
              
              // Auto-distribute
              const newLyrics = rawLyrics.map((line, index) => ({
@@ -245,7 +326,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
      return rawLyrics;
   }, [currentSong?.lyrics, currentSong?.transliteratedLyrics, showTransliteration, player?.duration, currentSong?.duration]);
 
-  // ✅ Determine if lyrics are "Linear" (Plain/Teleprompter)
+  // âœ… Determine if lyrics are "Linear" (Plain/Teleprompter)
   const isLinear = React.useMemo(() => {
      if (!processedLyrics || processedLyrics.length <= 10) return false;
      
@@ -266,10 +347,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [processedLyrics]);
 
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
-  const isUserScrolling = useRef(false); // ✅ Track user interaction
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // ✅ Track timeout to clear it
+  const isUserScrolling = useRef(false); // âœ… Track user interaction
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // âœ… Track timeout to clear it
 
-  // ✅ Auto-Scroll & Sync Logic
+  // âœ… Auto-Scroll & Sync Logic
   useEffect(() => {
     if (!processedLyrics || processedLyrics.length === 0) return;
 
@@ -287,7 +368,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     // SCROLL LOGIC
-    // ✅ Skip auto-scroll if user is interacting
+    // âœ… Skip auto-scroll if user is interacting
     if (isLinear && flatListRef.current && contentHeightRef.current > 0 && !isUserScrolling.current) {
         // SMOOTH SCROLL (Teleprompter Mode)
         // Calculate offset based on song progress %
@@ -320,27 +401,34 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     // STANDARD SYNCED SCROLL (Jump to line)
-    if (!isLinear && index !== -1 && flatListRef.current && !isUserScrolling.current) {
-      // Only scroll if significantly changed or user isn't scrolling?
-      // Standard jump
-      flatListRef.current.scrollToIndex({
-        index,
-        animated: true,
-        viewPosition: 0.3, // Position in upper third for better reading
-      });
-    }
+    // Handled internally by SynchronizedLyrics component now.
   }, [currentTime, currentSong, processedLyrics, isLinear, activeLyricIndex]);
 
-  // ✅ Playback Controls
-  const togglePlay = async () => {
+  // âœ… Playback Controls
+  const playButtonScale = useSharedValue(1);
+
+  const togglePlay = () => {
     resetHideTimer();
     if (!player) return;
+
+    // 1. Instant Bounce Animation
+    playButtonScale.value = withSequence(
+        withTiming(0.8, { duration: 100 }), 
+        withTiming(1, { duration: 100 })
+    );
+
+    // 2. Optimistic UI Update (Fire & Forget)
+    // We assume it will succeed.If check fails, the listener will correct it.
     if (player.playing) {
-      await player.pause();
+      player.pause(); 
     } else {
-      await player.play();
+      player.play();
     }
   };
+
+  const playButtonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: playButtonScale.value }] 
+  }));
 
   const skipForward = async () => {
     resetHideTimer();
@@ -369,7 +457,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       player.play(); // Ensure playback continues
   };
 
-  // ✅ Scroll Handler for Linear Lyrics (Decouples Highlight from Time)
+  // âœ… Scroll Handler for Linear Lyrics (Decouples Highlight from Time)
   const handleScroll = (event: any) => {
       if (!isLinear || !processedLyrics || processedLyrics.length === 0) return;
 
@@ -398,7 +486,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       }
   };
 
-  // ✅ Use Loaded Audio ID
+  // âœ… Use Loaded Audio ID
   useEffect(() => {
     // Already implemented in previous step, ensuring it persists
   }, []);
@@ -428,21 +516,40 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
        
        {isDynamicTheme && currentSong?.coverImageUri ? (
           <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}>
-            {/* Animated.View wrapper - Animated.Image with blurRadius doesn't animate on Android */}
-            <Animated.View style={[{ position: 'absolute', top: '-25%', left: '-25%', width: '150%', height: '150%' }, bgAnimatedStyle]}>
-               <Image 
-                 source={{ uri: currentSong.coverImageUri }} 
-                 style={{ width: '100%', height: '100%', opacity: 0.6 }} 
-                 blurRadius={100} 
-                 resizeMode="cover"
-               />
-               <Image 
-                 source={{ uri: currentSong.coverImageUri }} 
-                 style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.3 }} 
-                 blurRadius={50} 
-                 resizeMode="cover"
-               />
-            </Animated.View>
+             {/* Background Base (Darkened) */}
+             <Image 
+                  source={{ uri: currentSong.coverImageUri }} 
+                  style={[StyleSheet.absoluteFill, { opacity: 0.15 }]} 
+                  blurRadius={120} 
+                  resizeMode="cover"
+             />
+
+             {/* Blob 1: Top Left - MASSIVE */}
+             <Animated.View style={[{ position: 'absolute', top: -width * 0.5, left: -width * 0.5, width: width * 2, height: width * 2, borderRadius: width }, blob1Style]}>
+                <Image 
+                  source={{ uri: currentSong.coverImageUri }} 
+                  style={{ width: '100%', height: '100%', opacity: 0.4 }} 
+                  blurRadius={100} 
+                />
+             </Animated.View>
+             
+             {/* Blob 2: Bottom Right - MASSIVE */}
+             <Animated.View style={[{ position: 'absolute', bottom: -width * 0.5, right: -width * 0.5, width: width * 2, height: width * 2, borderRadius: width }, blob2Style]}>
+                <Image 
+                  source={{ uri: currentSong.coverImageUri }} 
+                  style={{ width: '100%', height: '100%', opacity: 0.35 }} 
+                  blurRadius={110} 
+                />
+             </Animated.View>
+
+             {/* Blob 3: Center - MASSIVE */}
+             <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: width * 1.8, height: width * 1.8, borderRadius: width }, blob3Style]}>
+                <Image 
+                  source={{ uri: currentSong.coverImageUri }} 
+                  style={{ width: '100%', height: '100%', opacity: 0.25 }} 
+                  blurRadius={90} 
+                />
+             </Animated.View>
             <LinearGradient
                 colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.5)', '#000']}
                 locations={[0.2, 0.7, 1.0]}
@@ -586,96 +693,23 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
        <View style={styles.contentArea}>
            {showLyrics ? (
              // Lyrics List
-             <FlatList
-             ref={flatListRef}
-             data={processedLyrics}
-             keyExtractor={(item, index) => `${item.timestamp}-${index}`}
-             contentContainerStyle={styles.lyricsContainer}
-             showsVerticalScrollIndicator={false}
-             // Issue 1: Removed scroll triggers so auto-scroll doesn't wake controls
-             scrollEventThrottle={16} 
-             onScroll={handleScroll}
-             // ✅ Handle Manual Scroll Interaction (Pause Auto-Scroll)
-             // Enabled for BOTH Linear and Synced to prevent fighting
-             onScrollBeginDrag={() => { 
-                isUserScrolling.current = true;
-                if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+          <SynchronizedLyrics 
+             lyrics={processedLyrics || []}
+             currentTime={currentTime}
+             onLyricPress={handleLyricTap}
+             isUserScrolling={isUserScrolling.current}
+             onScrollStateChange={(isScrolling) => {
+                 isUserScrolling.current = isScrolling;
+                 if (!isScrolling) {
+                     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+                     scrollTimeoutRef.current = setTimeout(() => {
+                         isUserScrolling.current = false;
+                     }, 4000);
+                 } else {
+                     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+                 }
              }}
-             onScrollEndDrag={() => { 
-                // Only start timer if NO momentum is expected
-                scrollTimeoutRef.current = setTimeout(() => { 
-                    isUserScrolling.current = false; 
-                }, 4000); 
-             }}
-             onMomentumScrollBegin={() => { 
-                isUserScrolling.current = true; 
-                if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-             }}
-             onMomentumScrollEnd={() => { 
-                scrollTimeoutRef.current = setTimeout(() => { 
-                    isUserScrolling.current = false; 
-                }, 4000); 
-             }}
-             renderItem={({ item, index }) => {
-               const activeIndex = activeLyricIndex;
-               const distance = Math.abs(index - activeIndex);
-               const isGlowing = distance === 0;
-               let opacity = 1.0;
-
-               // --- SPLIT LOGIC STATES ---
-               if (isLinear) {
-                  // [LINEAR STATE] - Teleprompter Mode
-                  // Focus purely on the center line
-                  if (activeIndex !== -1) {
-                      if (distance === 0) opacity = 1.0;
-                      else opacity = 0.5; 
-                  }
-               } else {
-                  // [SYNCED STATE] - Karaoke Mode
-                  // Focus on active line, but maybe keep it distinct?
-                  // User requested "only currently active... highlighted" (active=1.0, others=0.5)
-                  if (activeIndex !== -1) {
-                      if (distance === 0) opacity = 1.0;
-                      else opacity = 0.5; // Single line focus
-                  }
-               }
-
-               // Hide completely if opacity is 0 
-               if (opacity === 0) {
-                   // Optimization
-               }
-     
-               return (
-                 <Pressable 
-                   onPress={() => !isLinear && handleLyricTap(item.timestamp)}
-                   style={[
-                       styles.lyricLine, 
-                       isGlowing && styles.activeLyricLine,
-                       { opacity } // Dynamic Opacity
-                      ]}
-                      disabled={isLoading || isLinear}
-                    >
-                      <View style={[
-                          styles.lyricTextContainer, 
-                          !item.text.trim() && styles.instrumentalContainer 
-                      ]}>
-                         {!item.text.trim() ? (
-                            <View style={styles.instrumentalContent}>
-                               <InstrumentalWaveform active={isGlowing} />
-                            </View>
-                         ) : (
-                            <Text style={[
-                              styles.lyricText,
-                              isGlowing && styles.activeLyric
-                            ]}>
-                              {item.text}
-                            </Text>
-                         )}
-                  </View>
-                </Pressable>
-              );
-            }}
-            ListHeaderComponent={
+             headerContent={
                 <View style={styles.topSpacer}>
                     {/* Main Cover Art Header - Interactive */}
                     <Pressable 
@@ -694,12 +728,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                         )}
                     </Pressable>
                 </View>
-            }
-            ListFooterComponent={<View style={{ height: 200 }} />} // Space at bottom
-            onContentSizeChange={(w, h) => {
-                contentHeightRef.current = h;
-            }}
-            onScrollToIndexFailed={() => {}}
+             }
           />
           ) : (
             // Issue 6: Vinyl Record Display (when lyrics are hidden)
@@ -753,11 +782,13 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Pressable>
                   
                   <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
-                    <Ionicons 
-                      name={player?.playing ? 'pause' : 'play'} 
-                      size={40} 
-                      color="#000"
-                    />
+                    <Animated.View style={playButtonStyle}>
+                        <Ionicons 
+                          name={player?.playing ? 'pause' : 'play'} 
+                          size={32} 
+                          color="#000" 
+                        />
+                    </Animated.View>
                   </Pressable>
                   
                   <Pressable onPress={skipForward} style={styles.controlBtn}>
@@ -790,30 +821,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                          ]}
                          hitSlop={15}
                        >
-                         <View style={[
-                           styles.heartGlow,
-                           {
-                             shadowColor: (isDynamicTheme && currentSong?.coverImageUri) 
-                               ? '#FFD700' // Vibrant Dynamic Fallback (Gold)
-                               : getGradientColors(currentSong?.gradientId || 'aurora')[1],
-                             shadowOpacity: currentSong?.isLiked ? 1 : 0.4,
-                             shadowRadius: currentSong?.isLiked ? 20 : 5,
-                             elevation: currentSong?.isLiked ? 12 : 2,
-                             backgroundColor: currentSong?.isLiked 
-                               ? (isDynamicTheme && currentSong?.coverImageUri ? 'rgba(255, 215, 0, 0.2)' : `${getGradientColors(currentSong?.gradientId || 'aurora')[1]}33`)
-                               : 'transparent',
-                             borderRadius: 22,
-                             padding: 6,
-                           }
-                         ]}>
                            <Ionicons 
                              name={currentSong?.isLiked ? "heart" : "heart-outline"} 
                              size={30} 
-                             color={currentSong?.isLiked 
-                               ? ((isDynamicTheme && currentSong?.coverImageUri) ? '#FFD700' : getGradientColors(currentSong?.gradientId || 'aurora')[1])
-                               : "rgba(255,255,255,0.7)"} 
+                             color="#fff"
                            />
-                         </View>
                        </Pressable>
                    </View>
                 </View>

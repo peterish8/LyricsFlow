@@ -1,7 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, StyleSheet, LayoutChangeEvent, TextInput } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useSharedValue, runOnJS } from 'react-native-reanimated';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  runOnJS, 
+  useDerivedValue,
+  withSpring,
+  useAnimatedProps
+} from 'react-native-reanimated';
+
+Animated.addWhitelistedNativeProps({ text: true });
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 
 interface ScrubberProps {
   currentTime: number; // seconds
@@ -10,66 +20,104 @@ interface ScrubberProps {
 }
 
 const Scrubber: React.FC<ScrubberProps> = ({ currentTime, duration, onSeek }) => {
-  const scrubberWidth = useSharedValue(0);
+  const width = useSharedValue(0);
+  const isScrubbing = useSharedValue(false);
+  const scrubProgress = useSharedValue(0);
   
-  // ✅ Safe progress calculation
-  const progress = duration > 0 && !isNaN(currentTime) && currentTime >= 0
-    ? Math.min(Math.max(currentTime / duration, 0), 1)
-    : 0;
-  
+  // Sync shared value with props when NOT scrubbing
+  useDerivedValue(() => {
+    if (!isScrubbing.value && duration > 0) {
+      scrubProgress.value = currentTime / duration;
+    }
+  }, [currentTime, duration]);
+
+  const onLayout = (e: LayoutChangeEvent) => {
+    width.value = e.nativeEvent.layout.width;
+  };
+
   const formatTime = (seconds: number): string => {
-    // ✅ Handle invalid values
+    'worklet';
     if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    // manual padStart for worklet
+    const secsStr = secs < 10 ? `0${secs}` : `${secs}`;
+    return `${mins}:${secsStr}`;
   };
-  
-  // Drag gesture
+
   const panGesture = Gesture.Pan()
+    .onStart(() => {
+      isScrubbing.value = true;
+    })
     .onUpdate((e) => {
-      if (scrubberWidth.value > 0 && duration > 0) {
-        const position = Math.max(0, Math.min(e.x, scrubberWidth.value));
-        const percentage = position / scrubberWidth.value;
-        const newTime = percentage * duration;
-        // ✅ Validate before calling onSeek
-        if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
-          runOnJS(onSeek)(newTime);
-        }
+      if (width.value > 0) {
+        const newProgress = Math.max(0, Math.min(1, e.x / width.value));
+        scrubProgress.value = newProgress;
       }
+    })
+    .onEnd((e) => {
+      const finalTime = scrubProgress.value * duration;
+      runOnJS(onSeek)(finalTime);
+      isScrubbing.value = false;
     });
-  
-  // Tap gesture
+
   const tapGesture = Gesture.Tap().onEnd((e) => {
-    if (scrubberWidth.value > 0 && duration > 0) {
-      const position = Math.max(0, Math.min(e.x, scrubberWidth.value));
-      const percentage = position / scrubberWidth.value;
-      const newTime = percentage * duration;
-      // ✅ Validate before calling onSeek
-      if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
-        runOnJS(onSeek)(newTime);
-      }
+    if (width.value > 0) {
+       const newProgress = Math.max(0, Math.min(1, e.x / width.value));
+       scrubProgress.value = newProgress;
+       const finalTime = newProgress * duration;
+       runOnJS(onSeek)(finalTime);
     }
   });
   
   const composedGesture = Gesture.Race(panGesture, tapGesture);
-  
-  const handleLayout = (e: LayoutChangeEvent) => {
-    scrubberWidth.value = e.nativeEvent.layout.width;
-  };
-  
+
+  const animatedFillStyle = useAnimatedStyle(() => ({
+    width: `${scrubProgress.value * 100}%`
+  }));
+
+  const animatedThumbStyle = useAnimatedStyle(() => ({
+    left: `${scrubProgress.value * 100}%`,
+    transform: [{ scale: withSpring(isScrubbing.value ? 1.5 : 1) }]
+  }));
+
+  // Reanimated Props for smooth text updates on UI thread
+  const animatedCurrentTimeProps = useAnimatedProps(() => {
+    const time = scrubProgress.value * duration;
+    return {
+      text: formatTime(time)
+    } as any;
+  });
+
+  // Display static duration
+  const durationText = formatTime(duration);
+
   return (
     <View style={styles.container}>
       <GestureDetector gesture={composedGesture}>
-        <View style={styles.track} onLayout={handleLayout}>
-          <View style={[styles.fill, { width: `${progress * 100}%` }]} />
-          <View style={[styles.thumb, { left: `${progress * 100}%` }]} />
+        {/* Hit Slop Area */}
+        <View style={styles.hitArea} onLayout={onLayout}>
+           <View style={styles.track}>
+             <Animated.View style={[styles.fill, animatedFillStyle]} />
+             <Animated.View style={[styles.thumb, animatedThumbStyle]} />
+           </View>
         </View>
       </GestureDetector>
       
       <View style={styles.timeContainer}>
-        <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-        <Text style={styles.timeText}>{formatTime(duration)}</Text>
+        {/* Animated Current Time */}
+        <AnimatedTextInput 
+          editable={false}
+          style={styles.timeText} 
+          animatedProps={animatedCurrentTimeProps}
+          value={formatTime(currentTime)} // Fallback / Initial
+        />
+        {/* Static Duration */}
+        <TextInput 
+          editable={false}
+          style={styles.timeText} 
+          value={durationText}
+        />
       </View>
     </View>
   );
@@ -78,13 +126,18 @@ const Scrubber: React.FC<ScrubberProps> = ({ currentTime, duration, onSeek }) =>
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 10,
+  },
+  hitArea: {
+    height: 40, 
+    justifyContent: 'center',
   },
   track: {
     height: 4,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.2)', 
     borderRadius: 2,
     position: 'relative',
+    overflow: 'visible',
   },
   fill: {
     height: '100%',
@@ -99,16 +152,24 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -4,
     marginLeft: -6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
   },
   timeContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: -8, 
   },
   timeText: {
     fontSize: 12,
-    color: '#888',
+    color: 'rgba(255,255,255,0.6)',
+    fontVariant: ['tabular-nums'],
+    padding: 0,
+    margin: 0,
   },
 });
 
-export default Scrubber;
+export default React.memo(Scrubber);

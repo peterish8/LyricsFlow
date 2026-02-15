@@ -152,8 +152,18 @@ export const lyricsToRawText = (lyrics: LyricLine[]): string => {
   return lyrics
     .map((line) => {
       const minutes = Math.floor(line.timestamp / 60);
-      const seconds = (line.timestamp % 60).toFixed(2); // Keep milliseconds
-      const timeStr = `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(5, '0')}]`;
+      const seconds = (line.timestamp % 60);
+      
+      // Format seconds to be 05.50 (2 digits, dot, 2 digits)
+      // timestamp is in SECONDS (float).
+      // So 5.5 -> 05.50
+      const secondsInt = Math.floor(seconds);
+      const milliseconds = Math.round((seconds - secondsInt) * 100);
+      
+      const secondsStr = secondsInt.toString().padStart(2, '0');
+      const msStr = milliseconds.toString().padStart(2, '0');
+      
+      const timeStr = `[${minutes.toString().padStart(2, '0')}:${secondsStr}.${msStr}]`;
       return `${timeStr} ${line.text}`;
     })
     .join('\n');
