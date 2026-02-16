@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { 
     View, Text, StyleSheet, TextInput, Pressable, 
     ActivityIndicator, Dimensions, ScrollView, FlatList, SectionList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+// Safe area dimensions removed as unused in this block
+
 // useSongStaging removed as unused
 import { Colors } from '../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,7 +19,7 @@ import { Audio } from 'expo-av';
 // ImageSearchService removed as unused
 
 // New Architecture Imports
-import { useDownloaderTabStore } from '../store/downloaderTabStore';
+import { useDownloaderTabStore, SearchTab } from '../store/downloaderTabStore';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
 import { 
     DownloadGridCard, 
@@ -31,10 +32,142 @@ import * as Clipboard from 'expo-clipboard';
 import { usePlaylistStore } from '../store/playlistStore';
 import { BulkItem } from '../store/downloaderTabStore';
 
-// width constant removed as unused (Dimensions still kept for other potential uses or removed if entirely unused)
-Dimensions.get('window');
+// Safe area dimensions removed as unused in this block
 
-export const AudioDownloaderScreen = ({ navigation }: any) => {
+
+// --- Types & Components ---
+
+interface TabBarProps {
+    tabs: SearchTab[];
+    activeTabId: string;
+    setActiveTab: (id: string) => void;
+    closeTab: (id: string) => void;
+    createTab: (query: string) => void;
+}
+
+
+const TabBar: React.FC<TabBarProps> = memo(({ tabs, activeTabId, setActiveTab, closeTab, createTab }) => (
+    <View style={styles.tabBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarScroll}>
+            {tabs.map(tab => (
+                <Pressable 
+                    key={tab.id}
+                    style={[styles.tabItem, tab.id === activeTabId && styles.activeTabItem]}
+                    onPress={() => setActiveTab(tab.id)}
+                >
+                    <Text style={[styles.tabText, tab.id === activeTabId && styles.activeTabText]} numberOfLines={1}>
+                        {tab.query || 'New Tab'}
+                    </Text>
+                    {tabs.length > 1 && (
+                        <Pressable onPress={() => closeTab(tab.id)} style={styles.closeTabBtn}>
+                            <Ionicons name="close" size={14} color="#999" />
+                        </Pressable>
+                    )}
+                </Pressable>
+            ))}
+            <Pressable style={styles.newTabBtn} onPress={() => createTab('')}>
+                <Ionicons name="add" size={20} color="#fff" />
+            </Pressable>
+        </ScrollView>
+    </View>
+));
+
+interface ScrollableHeaderProps extends TabBarProps {
+    searchMode: 'title' | 'artist';
+    setSearchMode: (mode: 'title' | 'artist') => void;
+    selectionMode: boolean;
+    setSelectionMode: (mode: boolean) => void;
+    activeTabMode: 'search' | 'bulk';
+    updateTab: (id: string, updates: Partial<SearchTab>) => void;
+}
+
+const ScrollableHeader: React.FC<ScrollableHeaderProps> = memo(({ 
+    searchMode, setSearchMode, selectionMode, setSelectionMode, 
+    tabs, activeTabId, setActiveTab, closeTab, createTab,
+    activeTabMode, updateTab 
+}) => (
+    <View>
+        <View style={styles.headerContainer}>
+            <View style={styles.controlsRow}>
+                <View style={styles.segmentedControl}>
+                    <Pressable 
+                        style={[styles.segmentBtn, searchMode === 'title' && styles.segmentBtnActive]}
+                        onPress={() => setSearchMode('title')}
+                    >
+                        <Text style={[styles.segmentText, searchMode === 'title' && styles.segmentTextActive]}>Title</Text>
+                    </Pressable>
+                    <Pressable 
+                        style={[styles.segmentBtn, searchMode === 'artist' && styles.segmentBtnActive]}
+                        onPress={() => setSearchMode('artist')}
+                    >
+                        <Text style={[styles.segmentText, searchMode === 'artist' && styles.segmentTextActive]}>Artist</Text>
+                    </Pressable>
+                </View>
+
+                <Pressable 
+                    style={[styles.actionIconBtn, selectionMode && styles.actionIconBtnActive]} 
+                    onPress={() => setSelectionMode(!selectionMode)}
+                >
+                     <Ionicons name={selectionMode ? "checkmark-circle" : "checkmark-circle-outline"} size={20} color={selectionMode ? "#fff" : Colors.primary} />
+                </Pressable>
+            </View>
+        </View>
+
+        <TabBar 
+            tabs={tabs} 
+            activeTabId={activeTabId} 
+            setActiveTab={setActiveTab} 
+            closeTab={closeTab} 
+            createTab={createTab} 
+        />
+
+        <View style={styles.modeSwitch}>
+            <Pressable 
+                style={[styles.modeBtn, activeTabMode !== 'bulk' && styles.activeModeBtn]}
+                onPress={() => updateTab(activeTabId, { mode: 'search' })}
+            >
+                <Text style={[styles.modeText, activeTabMode !== 'bulk' && styles.activeModeText]}>Search</Text>
+            </Pressable>
+            <Pressable 
+                style={[styles.modeBtn, activeTabMode === 'bulk' && styles.activeModeBtn]}
+                onPress={() => updateTab(activeTabId, { mode: 'bulk' })}
+            >
+                <Text style={[styles.modeText, activeTabMode === 'bulk' && styles.activeModeText]}>Bulk Import</Text>
+            </Pressable>
+        </View>
+    </View>
+));
+
+interface BulkHeaderProps extends ScrollableHeaderProps {
+    bulkPlaylistName: string;
+    setBulkPlaylistName: (name: string) => void;
+}
+
+const BulkHeader: React.FC<BulkHeaderProps> = memo((props) => (
+    <View>
+        <ScrollableHeader {...props} />
+        <View style={styles.bulkTitleContainer}>
+            <Text style={styles.label}>3. NAME YOUR PLAYLIST</Text>
+            <TextInput
+                style={styles.playlistInput}
+                value={props.bulkPlaylistName}
+                onChangeText={props.setBulkPlaylistName}
+                placeholder="My Awesome Playlist"
+                placeholderTextColor="#555"
+            />
+        </View>
+    </View>
+));
+
+interface AudioDownloaderProps {
+    navigation: {
+        goBack: () => void;
+        navigate: (screen: string, params?: Record<string, unknown>) => void;
+    };
+}
+
+
+export const AudioDownloaderScreen: React.FC<AudioDownloaderProps> = ({ navigation }) => {
     // Global Stores
     const { 
         tabs, activeTabId, 
@@ -70,37 +203,37 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     const [swapModalVisible, setSwapModalVisible] = useState(false);
     const [swapTargetItem, setSwapTargetItem] = useState<BulkItem | null>(null);
 
-    // Effect to sync local state with active tab
+    // Effect to sync local state ONLY when switching tabs
     useEffect(() => {
         if (activeTab) {
-            setJsonInput(activeTab.bulkItems ? JSON.stringify(activeTab.bulkItems.map(i => i.query), null, 2) : '');
+            setJsonInput((activeTab.bulkItems && activeTab.bulkItems.length > 0) ? JSON.stringify(activeTab.bulkItems.map(i => i.query), null, 2) : '');
             setBulkPlaylistName(activeTab.bulkPlaylistName || '');
         }
-    }, [activeTabId, activeTab, updateTab]);
+    }, [activeTabId]); // Only sync when the ID changes
 
-    // Wrap setters to also persist to tab store
+    // Wrap setters - ONLY local state update while typing
     const setTitleQuery = (val: string) => {
         setTitleQueryLocal(val);
-        updateTab(activeTabId, { titleQuery: val });
     };
     const setArtistQuery = (val: string) => {
         setArtistQueryLocal(val);
-        updateTab(activeTabId, { artistQuery: val });
     };
 
-    // Sync search fields when switching tabs
+    // Sync search fields ONLY when switching tabs
     useEffect(() => {
         if (activeTab) {
             setTitleQueryLocal(activeTab.titleQuery || '');
             setArtistQueryLocal(activeTab.artistQuery || '');
-            // Switch to artist mode if artist query exists
+            // Switch search mode based on content
             if (activeTab.artistQuery && !activeTab.titleQuery) {
                 setSearchMode('artist');
             } else {
                 setSearchMode('title');
             }
         }
-    }, [activeTabId, activeTab]);
+    }, [activeTabId]); // Only sync when the ID changes
+    
+    // Preview Audio State
     
     // Animated values removed as unused in Unified UI
 
@@ -115,7 +248,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     // Sync ref with state
     useEffect(() => {
         previewSoundRef.current = previewSound;
-    }, [previewSound, previewSoundRef]);
+    }, [previewSound]); // Correct: only depend on state value
 
     // Cleanup on unmount
     useEffect(() => {
@@ -129,7 +262,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     }, [setMiniPlayerHidden]);
 
     // Filter Results for Artist Search
-    const filterResults = (results: UnifiedSong[], query: string): {
+    const filterResults = useCallback((results: UnifiedSong[], query: string): {
         exactMatches: UnifiedSong[];
         remixesAndCovers: UnifiedSong[];
     } => {
@@ -149,10 +282,10 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
         });
         
         return { exactMatches, remixesAndCovers };
-    };
+    }, []);
 
     // Handle Search
-    const handleSearch = async () => {
+    const handleSearch = useCallback(async () => {
         // Construct query from dual fields
         let finalQuery = '';
         
@@ -166,7 +299,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
         
         if (!finalQuery.trim()) return;
         
-        // Update Tab State
+        // Update Tab State AND sync typing fields to store
         updateTab(activeTabId, { 
             isSearching: true, 
             status: 'Searching...', 
@@ -213,11 +346,11 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
                 });
             }
             
-        } catch {
+        } catch (_error) {
             updateTab(activeTabId, { isSearching: false, status: 'Search failed.' });
             setToast({ visible: true, message: 'Search failed', type: 'error' });
         }
-    };
+    }, [activeTabId, titleQuery, artistQuery, updateTab]);
 
     // Handle Preview
     const handlePreviewToggle = async (song: UnifiedSong) => {
@@ -407,7 +540,7 @@ Only provide the JSON array, no other text.`;
             const parsed = JSON.parse(jsonInput);
             if (!Array.isArray(parsed)) throw new Error('Not an array');
 
-            const bulkItems: BulkItem[] = parsed.map((item: any, index: number) => ({
+            const bulkItems: BulkItem[] = parsed.map((item: { title?: string; artist?: string }, index: number) => ({
                 id: `bulk-${Date.now()}-${index}`,
                 query: { title: item.title || '', artist: item.artist || '' },
                 result: null,
@@ -585,104 +718,8 @@ Only provide the JSON array, no other text.`;
     
     // --- End Bulk Logic ---
 
-    // Render Tab Bar
-    const renderTabBar = useCallback(() => (
-        <View style={styles.tabBar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 8}}>
-                {tabs.map(tab => (
-                    <Pressable 
-                        key={tab.id}
-                        style={[styles.tabItem, tab.id === activeTabId && styles.activeTabItem]}
-                        onPress={() => setActiveTab(tab.id)}
-                    >
-                        <Text style={[styles.tabText, tab.id === activeTabId && styles.activeTabText]} numberOfLines={1}>
-                            {tab.query || 'New Tab'}
-                        </Text>
-                        {tabs.length > 1 && (
-                            <Pressable onPress={() => closeTab(tab.id)} style={{marginLeft: 6}}>
-                                <Ionicons name="close" size={14} color="#999" />
-                            </Pressable>
-                        )}
-                    </Pressable>
-                ))}
-                <Pressable style={styles.newTabBtn} onPress={() => createTab('')}>
-                    <Ionicons name="add" size={20} color="#fff" />
-                </Pressable>
-            </ScrollView>
-        </View>
-    ), [tabs, activeTabId, setActiveTab, closeTab, createTab]);
+    // --- End Bulk Logic ---
 
-    const renderScrollableHeader = useCallback(() => (
-        <View>
-            <View style={styles.headerContainer}>
-            {/* Unified Search Section */}
-            {/* Mode Switcher + Action Button */}
-            <View style={styles.controlsRow}>
-                 {/* Segmented Control */}
-                <View style={styles.segmentedControl}>
-                    <Pressable 
-                        style={[styles.segmentBtn, searchMode === 'title' && styles.segmentBtnActive]}
-                        onPress={() => setSearchMode('title')}
-                    >
-                        <Text style={[styles.segmentText, searchMode === 'title' && styles.segmentTextActive]}>Title</Text>
-                    </Pressable>
-                    <Pressable 
-                        style={[styles.segmentBtn, searchMode === 'artist' && styles.segmentBtnActive]}
-                        onPress={() => setSearchMode('artist')}
-                    >
-                        <Text style={[styles.segmentText, searchMode === 'artist' && styles.segmentTextActive]}>Artist</Text>
-                    </Pressable>
-                </View>
-
-                {/* Quick Actions - Select Multiple */}
-                <Pressable 
-                    style={[styles.actionIconBtn, selectionMode && { backgroundColor: Colors.primary, borderColor: Colors.primary }]} 
-                    onPress={() => setSelectionMode(!selectionMode)}
-                >
-                     <Ionicons name={selectionMode ? "checkmark-circle" : "checkmark-circle-outline"} size={20} color={selectionMode ? "#fff" : Colors.primary} />
-                </Pressable>
-            </View>
-            </View>
-
-            {/* Tab Bar */}
-            {renderTabBar()}
-
-            {/* Mode Switcher (Per Tab) */}
-            <View style={styles.modeSwitch}>
-                <Pressable 
-                    style={[styles.modeBtn, activeTab.mode !== 'bulk' && styles.activeModeBtn]}
-                    onPress={() => updateTab(activeTabId, { mode: 'search' })}
-                >
-                    <Text style={[styles.modeText, activeTab.mode !== 'bulk' && styles.activeModeText]}>Search</Text>
-                </Pressable>
-                <Pressable 
-                    style={[styles.modeBtn, activeTab.mode === 'bulk' && styles.activeModeBtn]}
-                    onPress={() => updateTab(activeTabId, { mode: 'bulk' })}
-                >
-                    <Text style={[styles.modeText, activeTab.mode === 'bulk' && styles.activeModeText]}>Bulk Import</Text>
-                </Pressable>
-            </View>
-        </View>
-    ), [searchMode, selectionMode, renderTabBar, activeTab.mode, activeTabId, updateTab]);
-
-    const renderBulkHeader = useCallback(() => (
-        <View>
-            {renderScrollableHeader()}
-            <View style={{paddingHorizontal: 16, marginBottom: 16}}>
-                <Text style={styles.label}>3. NAME YOUR PLAYLIST</Text>
-                <TextInput
-                    style={styles.playlistInput}
-                    value={bulkPlaylistName}
-                    onChangeText={(t) => {
-                        setBulkPlaylistName(t);
-                        updateTab(activeTabId, { bulkPlaylistName: t });
-                    }}
-                    placeholder="My Awesome Playlist"
-                    placeholderTextColor="#555"
-                />
-            </View>
-        </View>
-    ), [renderScrollableHeader, bulkPlaylistName, activeTabId, updateTab]);
 
     return (
         <View style={styles.container}>
@@ -730,7 +767,19 @@ Only provide the JSON array, no other text.`;
                         <View style={styles.bulkContainer}>
                              {(!activeTab.bulkItems || activeTab.bulkItems.length === 0) ? (
                                 <ScrollView>
-                                    {renderScrollableHeader()}
+                                    <ScrollableHeader 
+                                        searchMode={searchMode}
+                                        setSearchMode={setSearchMode}
+                                        selectionMode={selectionMode}
+                                        setSelectionMode={setSelectionMode}
+                                        tabs={tabs}
+                                        activeTabId={activeTabId}
+                                        setActiveTab={setActiveTab}
+                                        closeTab={closeTab}
+                                        createTab={createTab}
+                                        activeTabMode={activeTab.mode}
+                                        updateTab={updateTab}
+                                    />
                                     <View style={{paddingHorizontal: 16}}>
                                         <Text style={styles.label}>1. GET JSON FROM AI</Text>
                                         <Pressable style={styles.copyPromptBtn} onPress={copyPromptToClipboard}>
@@ -761,7 +810,26 @@ Only provide the JSON array, no other text.`;
                                 <>
                                     <FlatList
                                         data={activeTab.bulkItems}
-                                        ListHeaderComponent={renderBulkHeader}
+                                        ListHeaderComponent={
+                                            <BulkHeader 
+                                                searchMode={searchMode}
+                                                setSearchMode={setSearchMode}
+                                                selectionMode={selectionMode}
+                                                setSelectionMode={setSelectionMode}
+                                                tabs={tabs}
+                                                activeTabId={activeTabId}
+                                                setActiveTab={setActiveTab}
+                                                closeTab={closeTab}
+                                                createTab={createTab}
+                                                activeTabMode={activeTab.mode}
+                                                updateTab={updateTab}
+                                                bulkPlaylistName={bulkPlaylistName}
+                                                setBulkPlaylistName={(t) => {
+                                                    setBulkPlaylistName(t);
+                                                    updateTab(activeTabId, { bulkPlaylistName: t });
+                                                }}
+                                            />
+                                        }
                                         keyExtractor={(item) => item.id}
                                         numColumns={2}
                                         contentContainerStyle={{ paddingBottom: 100 }}
@@ -846,7 +914,19 @@ Only provide the JSON array, no other text.`;
                         // REGULAR SEARCH VIEW
                         activeTab.isSearching ? (
                         <ScrollView contentContainerStyle={{flexGrow: 1}}>
-                            {renderScrollableHeader()}
+                            <ScrollableHeader 
+                                searchMode={searchMode}
+                                setSearchMode={setSearchMode}
+                                selectionMode={selectionMode}
+                                setSelectionMode={setSelectionMode}
+                                tabs={tabs}
+                                activeTabId={activeTabId}
+                                setActiveTab={setActiveTab}
+                                closeTab={closeTab}
+                                createTab={createTab}
+                                activeTabMode={activeTab.mode}
+                                updateTab={updateTab}
+                            />
                             <View style={styles.center}>
                                 <ActivityIndicator size="large" color={Colors.primary} />
                                 <Text style={styles.statusText}>{activeTab.status}</Text>
@@ -855,7 +935,21 @@ Only provide the JSON array, no other text.`;
                     ) : activeTab.results.length > 0 || (activeTab.remixResults && activeTab.remixResults.length > 0) ? (
                         activeTab.remixResults && activeTab.remixResults.length > 0 ? (
                             <SectionList
-                                ListHeaderComponent={renderScrollableHeader}
+                                ListHeaderComponent={
+                                    <ScrollableHeader 
+                                        searchMode={searchMode}
+                                        setSearchMode={setSearchMode}
+                                        selectionMode={selectionMode}
+                                        setSelectionMode={setSelectionMode}
+                                        tabs={tabs}
+                                        activeTabId={activeTabId}
+                                        setActiveTab={setActiveTab}
+                                        closeTab={closeTab}
+                                        createTab={createTab}
+                                        activeTabMode={activeTab.mode}
+                                        updateTab={updateTab}
+                                    />
+                                }
                                 sections={[
                                     ...(activeTab.results.length > 0 ? [{
                                         title: 'OFFICIAL TRACKS',
@@ -912,7 +1006,21 @@ Only provide the JSON array, no other text.`;
                             />
                         ) : (
                             <FlatList
-                                ListHeaderComponent={renderScrollableHeader}
+                                ListHeaderComponent={
+                                    <ScrollableHeader 
+                                        searchMode={searchMode}
+                                        setSearchMode={setSearchMode}
+                                        selectionMode={selectionMode}
+                                        setSelectionMode={setSelectionMode}
+                                        tabs={tabs}
+                                        activeTabId={activeTabId}
+                                        setActiveTab={setActiveTab}
+                                        closeTab={closeTab}
+                                        createTab={createTab}
+                                        activeTabMode={activeTab.mode}
+                                        updateTab={updateTab}
+                                    />
+                                }
                                 data={activeTab.results}
                                 keyExtractor={(item) => item.id}
                                 numColumns={2}
@@ -933,7 +1041,19 @@ Only provide the JSON array, no other text.`;
                         )
                     ) : (
                         <ScrollView contentContainerStyle={{flexGrow: 1}}>
-                            {renderScrollableHeader()}
+                            <ScrollableHeader 
+                                searchMode={searchMode}
+                                setSearchMode={setSearchMode}
+                                selectionMode={selectionMode}
+                                setSelectionMode={setSelectionMode}
+                                tabs={tabs}
+                                activeTabId={activeTabId}
+                                setActiveTab={setActiveTab}
+                                closeTab={closeTab}
+                                createTab={createTab}
+                                activeTabMode={activeTab.mode}
+                                updateTab={updateTab}
+                            />
                             <View style={styles.center}>
                                 <Ionicons name="musical-notes-outline" size={64} color="#333" />
                                 <Text style={styles.emptyText}>
@@ -1128,6 +1248,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginLeft: 8
     },
+    tabBarScroll: {
+        paddingHorizontal: 8
+    },
+    closeTabBtn: {
+        marginLeft: 6
+    },
+    actionIconBtnActive: {
+        backgroundColor: Colors.primary, 
+        borderColor: Colors.primary
+    },
+    bulkTitleContainer: {
+        paddingHorizontal: 16, 
+        marginBottom: 16
+    },
+
     
     // Mode Switcher
     modeSwitch: {

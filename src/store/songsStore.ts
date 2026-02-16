@@ -195,11 +195,18 @@ export const useSongsStore = create<SongsState>((set, get) => ({
   
   // Set current song for Now Playing
   setCurrentSong: (song: Song | null) => {
-    set({ currentSong: song });
-    // Update play stats if song is selected
     if (song) {
-      queries.updatePlayStats(song.id).catch(console.error);
-      useDailyStatsStore.getState().incrementDailyPlay(song.id);
+        const now = new Date().toISOString();
+        set(state => ({
+            currentSong: song,
+            // Optimistically update lastPlayed in the list to trigger immediate UI update
+            songs: state.songs.map(s => s.id === song.id ? { ...s, lastPlayed: now } : s)
+        }));
+        
+        queries.updatePlayStats(song.id).catch(console.error);
+        useDailyStatsStore.getState().incrementDailyPlay(song.id);
+    } else {
+        set({ currentSong: null });
     }
   },
   

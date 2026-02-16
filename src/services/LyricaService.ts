@@ -20,7 +20,7 @@ export interface LyricaResult {
 }
 
 class LyricaService {
-  async fetchLyrics(song: string, artist: string): Promise<LyricaResult | null> {
+  async fetchLyrics(song: string, artist: string, syncedOnly: boolean = false, duration?: number): Promise<LyricaResult | null> {
     try {
       // Clean song title - remove file extensions and extra metadata
       let cleanSong = song
@@ -40,71 +40,107 @@ class LyricaService {
         cleanSong = parts.slice(1).join(' - ').trim();
       }
       
-      console.log('[Lyrica] Cleaned - Artist:', cleanArtist, 'Song:', cleanSong);
+      console.log('[Lyrica] Cleaned - Artist:', cleanArtist, 'Song:', cleanSong, 'Duration:', duration);
       
       // Priority: Synced (slow) > Synced (fast) > Plain text
       // User request: "synced slow , then synced fats then plain"
-      const strategies = [
+      let strategies = [
         { timestamps: true, fast: false, label: 'synced-slow' },
         { timestamps: true, fast: true, label: 'synced-fast' },
         { timestamps: false, fast: false, label: 'plain' },
       ];
+
+      if (syncedOnly) {
+        strategies = strategies.filter(s => s.timestamps);
+        console.log('[Lyrica] Synced-only mode active');
+      }
       
       for (const strategy of strategies) {
-        const url = `${BASE_URL}/?artist=${encodeURIComponent(cleanArtist)}&song=${encodeURIComponent(cleanSong)}&timestamps=${strategy.timestamps}&fast=${strategy.fast}&metadata=true`;
+        let url = `${BASE_URL}/?artist=${encodeURIComponent(cleanArtist)}&song=${encodeURIComponent(cleanSong)}&timestamps=${strategy.timestamps}&fast=${strategy.fast}&metadata=true`;
+        if (duration) url += `&duration=${Math.floor(duration)}`;
         
         console.log(`[Lyrica] Trying ${strategy.label}`);
         
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        const result = await this.executeFetch(url, strategy.label);
+        if (result) return result;
+      }
+      
+      console.log('[Lyrica] All strategies exhausted');
+      return null;
+    } catch (error) {
+      console.error('[Lyrica] Fetch error:', error);
+      return null;
+    }
+  }
 
-        try {
-          const response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json',
-            },
-          });
+  private async executeFetch(url: string, label: string): Promise<LyricaResult | null> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-          clearTimeout(timeoutId);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+        },
+      });
 
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.log(`[Lyrica] ${strategy.label} HTTP ${response.status}:`, errorText);
-            continue;
-          }
+      clearTimeout(timeoutId);
 
-          const data = await response.json();
-          console.log(`[Lyrica] ${strategy.label} response:`, JSON.stringify(data));
-          
-          if (data.status === 'success') {
-            let finalLyrics = data.data?.lyrics;
+      if (!response.ok) {
+        const errorText = await response.text();
+        const truncatedError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+        console.log(`[Lyrica] ${label} HTTP ${response.status}:`, truncatedError);
+        return null;
+      }
 
-            // Handle structured timed lyrics if plaintext is missing
-            if (!finalLyrics && data.data?.timestamped) {
-               console.log(`[Lyrica] Found 'timestamped' field, using as lyrics`);
-               finalLyrics = data.data.timestamped;
-            }
+      const data = await response.json();
+      
+      if (data.status === 'success' && data.data) {
+        let finalLyrics = data.data.lyrics;
 
-            // Handle structured timed lyrics array if plaintext is missing
-            if (!finalLyrics && Array.isArray(data.data?.timed_lyrics)) {
-              console.log(`[Lyrica] Converting ${data.data.timed_lyrics.length} timed lines to LRC`);
-              finalLyrics = data.data.timed_lyrics
-                .map((line: any) => {
+        // Reject HTML content immediately
+        if (typeof finalLyrics === 'string' && (finalLyrics.includes('<div') || finalLyrics.includes('<html') || finalLyrics.includes('<!DOCTYPE'))) {
+            console.warn(`[Lyrica] ${label} returned HTML instead of lyrics, rejecting.`);
+            return null;
+        }
+
+        // Handle structured timed lyrics if plaintext is missing
+        if (!finalLyrics && data.data.timestamped) {
+          finalLyrics = data.data.timestamped;
+        }
+
+        // Handle structured timed lyrics array if plaintext is missing
+        if (!finalLyrics && Array.isArray(data.data.timed_lyrics)) {
+          finalLyrics = data.data.timed_lyrics
+            .map((line: any) => {
+              const ms = line.start_time || 0;
+              const minutes = Math.floor(ms / 60000);
+              const seconds = Math.floor((ms % 60000) / 1000);
+              const hundredths = Math.floor((ms % 1000) / 10);
+              const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
+              return `${timestamp} ${line.text || ''}`;
+            })
+            .join('\n');
+        } else if (Array.isArray(finalLyrics)) {
+           try {
+               finalLyrics = finalLyrics.map((line: any) => {
                   const ms = line.start_time || 0;
                   const minutes = Math.floor(ms / 60000);
                   const seconds = Math.floor((ms % 60000) / 1000);
                   const hundredths = Math.floor((ms % 1000) / 10);
                   const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
                   return `${timestamp} ${line.text || ''}`;
-                })
-                .join('\n');
-            } else if (Array.isArray(finalLyrics)) {
-               // 🚨 Fix: If 'lyrics' comes as an actual Array (pre-parsed JSON)
-               console.log(`[Lyrica] Detected Array in lyrics field, converting to LRC`);
-               try {
-                   finalLyrics = finalLyrics.map((line: any) => {
+               }).join('\n');
+           } catch (e) {
+               finalLyrics = ''; 
+           }
+        } else if (typeof finalLyrics === 'string' && (finalLyrics.trim().startsWith('[') || finalLyrics.trim().startsWith('{'))) {
+           try {
+              const parsedJson = JSON.parse(finalLyrics);
+              if (Array.isArray(parsedJson)) {
+                   finalLyrics = parsedJson.map((line: any) => {
                       const ms = line.start_time || 0;
                       const minutes = Math.floor(ms / 60000);
                       const seconds = Math.floor((ms % 60000) / 1000);
@@ -112,64 +148,35 @@ class LyricaService {
                       const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
                       return `${timestamp} ${line.text || ''}`;
                    }).join('\n');
-               } catch (e) {
-                   console.warn('[Lyrica] Failed to convert Array lyrics', e);
-                   finalLyrics = ''; // Fallback
+              }
+           } catch (e) {
+               if (finalLyrics.trim().startsWith('[{"')) {
+                   finalLyrics = null; 
                }
-            } else if (typeof finalLyrics === 'string' && (finalLyrics.trim().startsWith('[') || finalLyrics.trim().startsWith('{'))) {
-               // 🚨 Fix: If 'lyrics' comes as a stringified JSON array/object
-               try {
-                  const parsedJson = JSON.parse(finalLyrics);
-                  if (Array.isArray(parsedJson)) {
-                       console.log(`[Lyrica] Detected JSON string in lyrics field, converting to LRC`);
-                       finalLyrics = parsedJson.map((line: any) => {
-                          const ms = line.start_time || 0;
-                          const minutes = Math.floor(ms / 60000);
-                          const seconds = Math.floor((ms % 60000) / 1000);
-                          const hundredths = Math.floor((ms % 1000) / 10);
-                          const timestamp = `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
-                          return `${timestamp} ${line.text || ''}`;
-                       }).join('\n');
-                  }
-               } catch (e) {
-                   // Not a valid JSON, probably just lyrics starting with [ or { (e.g. "[Intro]")
-                   // Ignore error and treat as plain text
-                   // BUT if it looks like the complex JSON array we saw, discard it to avoid passing raw JSON
-                   if (finalLyrics.trim().startsWith('[{"')) {
-                       console.warn('[Lyrica] Failed to parse JSON lyrics string, discarding to prevent errors');
-                       finalLyrics = null; 
-                   }
-               }
-            }
+           }
+        }
 
-            if (finalLyrics) {
-              console.log(`[Lyrica] ✓ Found via ${data.data.source || strategy.label}`);
-              return {
-                lyrics: finalLyrics,
-                source: `Lyrica (${strategy.label})`, // e.g., "Lyrica (synced-slow)"
-                metadata: {
-                  title: data.data?.track_name,
-                  artist: data.data?.artist_name,
-                  duration: data.data?.duration,
-                  coverArt: data.data?.album_art
-                }
-              };
+        if (finalLyrics) {
+          return {
+            lyrics: finalLyrics,
+            source: `Lyrica (${label})`, 
+            metadata: {
+              title: data.data.track_name || data.data.title,
+              artist: data.data.artist_name || data.data.artist,
+              duration: data.data.duration?.seconds || data.data.duration,
+              coverArt: data.data.album_art
             }
-          }
-        } catch (err: any) {
-          clearTimeout(timeoutId);
-          if (err.name === 'AbortError') {
-             console.warn(`[Lyrica] ${strategy.label} timed out`);
-          } else {
-             console.log(`[Lyrica] ${strategy.label} failed:`, err.message);
-          }
+          };
         }
       }
-      
-      console.log('[Lyrica] All strategies exhausted');
       return null;
-    } catch (error) {
-      console.error('[Lyrica] Fetch error:', error);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+         console.warn(`[Lyrica] ${label} timed out`);
+      } else {
+         console.log(`[Lyrica] ${label} failed:`, err.message);
+      }
       return null;
     }
   }
@@ -188,21 +195,18 @@ class LyricaService {
     const safeDuration = duration > 0 ? duration : 180;
 
     if (hasTimestamps) {
-        // ... (standard parsing)
         // Standard LRC Parsing
         lines.forEach((line, index) => {
           const match = line.match(timeRegex);
           if (match) {
             const minutes = parseInt(match[1], 10);
             const seconds = parseInt(match[2], 10);
-            // Normalize milliseconds: if 2 digits (e.g. 54) -> 540ms, if 3 digits (e.g. 540) -> 540ms
             const millisecondsStr = match[3].padEnd(3, '0'); 
             const milliseconds = parseInt(millisecondsStr, 10);
             
             const timestamp = minutes * 60 + seconds + milliseconds / 1000;
             let text = line.replace(timeRegex, '').trim();
 
-            // Convert empty lines to [INSTRUMENTAL]
             if (!text) {
               text = '[INSTRUMENTAL]';
             }
@@ -215,23 +219,17 @@ class LyricaService {
           }
         });
     } else {
-        // PLAIN TEXT AUTO-SCROLL LOGIC (Teleprompter Mode)
-        // Distribute lines evenly across duration
-        console.log(`[Lyrica] Parsing Plain Text (${lines.length} lines) over ${duration}s`);
-        
-        // Filter out empty lines to avoid gaps
+        // PLAIN TEXT AUTO-SCROLL LOGIC
         const meaningfulLines = lines.map(l => l.trim()).filter(l => l.length > 0);
         const totalLines = meaningfulLines.length;
         
         if (totalLines > 0) {
             const timePerLine = safeDuration / totalLines;
-            
             meaningfulLines.forEach((text, index) => {
                 result.push({
                     timestamp: index * timePerLine,
                     text: text,
                     lineOrder: index,
-                    // Mark as 'estimated' if we had a flag, but for now standard format works
                 });
             });
         }

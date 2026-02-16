@@ -14,7 +14,15 @@ import {
   StatusBar,
   Share,
   ActivityIndicator,
+  ViewToken,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedScrollHandler, 
+  useDerivedValue 
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useReelsFeedStore } from '../store/reelsFeedStore';
@@ -24,6 +32,7 @@ import { reelsRecommendationEngine } from '../services/ReelsRecommendationEngine
 import { useReelsPreferencesStore } from '../store/reelsPreferencesStore';
 import { UnifiedSong } from '../types/song';
 import { ReelsVaultModal } from '../components/ReelsVaultModal';
+import { PerformanceHUD } from '../components/PerformanceHUD';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -42,9 +51,12 @@ const ReelsScreen: React.FC = () => {
     appendFeedSongs,
     setCurrentIndex,
     addToVault,
+    removeFromVault,
     isInVault,
     setIsLoading,
   } = useReelsFeedStore();
+  
+  const insets = useSafeAreaInsets();
 
   const activeIndexRef = useRef(-1);
   const flatListRef = useRef<FlatList>(null);
@@ -53,6 +65,19 @@ const ReelsScreen: React.FC = () => {
   const viewStartTimeRef = useRef<number>(Date.now());
 
   const { recordInteraction, loadFromStorage } = useReelsPreferencesStore();
+
+  const scrollY = useSharedValue(0);
+  const currentIndexSV = useDerivedValue(() => {
+    'worklet';
+    return scrollY.value / REEL_HEIGHT;
+  });
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      'worklet';
+      scrollY.value = event.contentOffset.y;
+    },
+  });
 
   // Restore scroll position when screen becomes focused
   useFocusEffect(
@@ -84,7 +109,7 @@ const ReelsScreen: React.FC = () => {
     console.log('[Reels] 🎯 Loading personalized feed...');
     setIsLoading(true);
     try {
-      const songs = await reelsRecommendationEngine.fetchPersonalizedFeed(20);
+      const songs = await reelsRecommendationEngine.fetchPersonalizedFeed(6);
 
       if (songs.length > 0) {
         setFeedSongs(songs);
@@ -146,7 +171,7 @@ const ReelsScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const songs = await reelsRecommendationEngine.loadMoreSongs(15);
+      const songs = await reelsRecommendationEngine.loadMoreSongs(6);
       appendFeedSongs(songs);
       console.log(`[Reels] 🎯 Appended ${songs.length} more personalized songs`);
     } catch (error) {
@@ -158,7 +183,7 @@ const ReelsScreen: React.FC = () => {
 
   // Handle viewable items change + track interactions
   const handleViewableChange = useCallback(
-    ({ viewableItems }: any) => {
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       if (!viewableItems || viewableItems.length === 0) return;
 
       const newIndex = viewableItems[0]?.index;
@@ -195,7 +220,7 @@ const ReelsScreen: React.FC = () => {
         // Keep current play/pause state when swiping
         reelsBufferManager.updateActiveIndex(newIndex, feedSongs);
 
-        if (newIndex >= feedSongs.length - 5) {
+        if (newIndex >= feedSongs.length - 2) {
           loadMoreSongs();
         }
       }
@@ -208,8 +233,14 @@ const ReelsScreen: React.FC = () => {
   }).current;
 
   const handleLikePress = useCallback((song: UnifiedSong) => {
-    addToVault(song);
-  }, [addToVault]);
+    if (isInVault(song.id)) {
+      removeFromVault(song.id);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      addToVault(song);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [isInVault, addToVault, removeFromVault]);
 
   const handleSharePress = useCallback(async (song: UnifiedSong) => {
     try {
@@ -222,9 +253,9 @@ const ReelsScreen: React.FC = () => {
   }, []);
 
   const handleDownloadPress = useCallback((song: UnifiedSong) => {
-    // Add to vault for now (can be extended to download queue)
-    addToVault(song);
-  }, [addToVault]);
+    // Also toggle vault status since "Save" is currently linked to Vault
+    handleLikePress(song);
+  }, [handleLikePress]);
 
   const handlePlayPause = useCallback(async () => {
     if (isPlaying) {
@@ -254,10 +285,12 @@ const ReelsScreen: React.FC = () => {
           onDownload={() => handleDownloadPress(item)}
           onPlayPause={handlePlayPause}
           reelHeight={REEL_HEIGHT}
+          index={index}
+          currentIndex={currentIndexSV}
         />
       );
     },
-    [currentIndex, isPlaying, isInVault, handleLikePress, handleSharePress, handleDownloadPress, handlePlayPause]
+    [currentIndex, isPlaying, isInVault, handleLikePress, handleSharePress, handleDownloadPress, handlePlayPause, currentIndexSV]
   );
 
   const getItemLayout = useCallback(
@@ -272,8 +305,8 @@ const ReelsScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {feedSongs.length > 0 ? (
-        <FlatList
-          ref={flatListRef}
+        <Animated.FlatList
+          ref={flatListRef as any}
           data={feedSongs}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
@@ -281,15 +314,17 @@ const ReelsScreen: React.FC = () => {
           snapToInterval={REEL_HEIGHT}
           decelerationRate="fast"
           showsVerticalScrollIndicator={false}
-          windowSize={3}
-          maxToRenderPerBatch={1}
-          removeClippedSubviews={false}
-          initialNumToRender={1}
-          updateCellsBatchingPeriod={50}
+          onScroll={scrollHandler}
+          scrollEventThrottle={1}
+          windowSize={5}
+          maxToRenderPerBatch={2}
+          removeClippedSubviews={true}
+          initialNumToRender={3}
+          updateCellsBatchingPeriod={16}
           viewabilityConfig={viewabilityConfig}
           onViewableItemsChanged={handleViewableChange}
           getItemLayout={getItemLayout}
-          extraData={vault} // Ensure checks update when vault changes
+          extraData={vault} 
           onScrollToIndexFailed={(info) => {
             console.warn('[Reels] Scroll to index failed:', info.index);
             setTimeout(() => {
@@ -313,14 +348,14 @@ const ReelsScreen: React.FC = () => {
       )}
 
       {/* Back Button - Top Left */}
-      <Pressable style={styles.backButton} onPress={handleGoBack}>
+      <Pressable style={[styles.backButton, { top: insets.top + 16 }]} onPress={handleGoBack}>
         <Ionicons name="arrow-back" size={26} color="#fff" />
       </Pressable>
 
       {/* Vault Button - Top Right */}
       {vault.length > 0 && (
         <Pressable
-          style={styles.vaultButton}
+          style={[styles.vaultButton, { top: insets.top + 16 }]}
           onPress={() => setShowVault(true)}
         >
           <Ionicons name="heart" size={22} color="#fff" />
@@ -332,7 +367,7 @@ const ReelsScreen: React.FC = () => {
 
       {/* Reload Button - Top Right (Below Vault) */}
       <Pressable
-        style={styles.reloadButton}
+        style={[styles.reloadButton, { top: insets.top + 16 }]}
         onPress={handleReload}
       >
         <Ionicons name="refresh" size={24} color="#fff" />
@@ -348,6 +383,9 @@ const ReelsScreen: React.FC = () => {
 
       {/* Vault Modal */}
       <ReelsVaultModal visible={showVault} onClose={() => setShowVault(false)} />
+
+      {/* Performance HUD (Dev only) */}
+      <PerformanceHUD />
     </View>
   );
 };
@@ -359,7 +397,6 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: 'absolute',
-    top: 50,
     left: 16,
     width: 44,
     height: 44,
@@ -371,7 +408,6 @@ const styles = StyleSheet.create({
   },
   vaultButton: {
     position: 'absolute',
-    top: 50,
     right: 16,
     width: 44,
     height: 44,
@@ -383,7 +419,6 @@ const styles = StyleSheet.create({
   },
   reloadButton: {
     position: 'absolute',
-    top: 50,
     right: 70, // Positioned to the left of the vault button (or alone if vault is empty)
     width: 44,
     height: 44,

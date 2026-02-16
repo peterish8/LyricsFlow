@@ -54,8 +54,11 @@ export const BackgroundDownloader = () => {
             }
 
             // Validate song has required fields
-            if (!item.song.streamUrl) {
-                console.error(`[BackgroundDownloader] ❌ No streamUrl for ${item.song.title}`);
+            // UnifiedSong from Reels usually has downloadUrl, but Search results use streamUrl. Check both.
+            const targetUrl = item.song.downloadUrl || item.song.streamUrl;
+            
+            if (!targetUrl) {
+                console.error(`[BackgroundDownloader] ❌ No download URL for ${item.song.title}`);
                 updateItem(item.id, { 
                     status: 'failed', 
                     error: 'No download URL available', 
@@ -67,7 +70,7 @@ export const BackgroundDownloader = () => {
             // Add to active set IMMEDIATELY (synchronously)
             activeDownloads.current.add(item.id);
             console.log(`[BackgroundDownloader] Starting download ${activeDownloads.current.size}/${MAX_CONCURRENT}: ${item.song.title}`);
-            console.log(`[BackgroundDownloader] URL: ${item.song.streamUrl.substring(0, 80)}...`);
+            console.log(`[BackgroundDownloader] URL: ${targetUrl.substring(0, 80)}...`);
 
             try {
                 // Log song object to debug cover art
@@ -81,7 +84,7 @@ export const BackgroundDownloader = () => {
                     album: item.song.album || '',
                     duration: item.song.duration || 0,
                     selectedQuality: {
-                        url: item.song.streamUrl,
+                        url: targetUrl,
                         quality: '320kbps',
                         format: 'mp3'
                     },

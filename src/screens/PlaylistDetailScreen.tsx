@@ -17,6 +17,8 @@ import {
   ActivityIndicator,
   TextInput,
   Dimensions,
+  Platform,
+  Vibration,
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -46,8 +48,10 @@ import * as playlistQueries from '../database/playlistQueries';
 import { PlaylistItem } from '../components/PlaylistItem';
 import { CustomMenu } from '../components/CustomMenu';
 import { CoverFlow } from '../components/CoverFlow';
-import Scrubber from '../components/Scrubber';
+import TimelineScrubber from '../components/TimelineScrubber';
 import { ModernDeleteModal } from '../components/ModernDeleteModal';
+import { Toast } from '../components/Toast';
+import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
 
 type PlaylistDetailRouteProp = RouteProp<
   { PlaylistDetail: { playlistId: string } },
@@ -73,6 +77,7 @@ export const PlaylistDetailScreen: React.FC = () => {
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [songToDelete, setSongToDelete] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Store Hooks
   const currentSongId = usePlayerStore(state => state.currentSongId);
@@ -88,6 +93,35 @@ export const PlaylistDetailScreen: React.FC = () => {
   const duration = usePlayerStore(state => state.duration);
   
   const activeIsPlaying = currentPlaylistId === playlistId;
+
+  // Scan Queue Logic
+  const scanQueue = useLyricsScanQueueStore(state => state.queue);
+  const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
+
+  const handleAddToQueue = useCallback((song: Song) => {
+      const existing = scanQueue.find(j => j.songId === song.id);
+      
+      // If result is plain, we allow "Upgrading" to synced
+      const isPlainResult = existing?.status === 'completed' && existing?.resultType === 'plain';
+
+      if (existing) {
+         if (existing.status === 'failed' || isPlainResult) {
+            // Allow retry or "Upgrade"
+            addToScanQueue(song, isPlainResult); // forceSynced = true if currently plain
+            setToast({ 
+                visible: true, 
+                message: isPlainResult ? `Retrying for synced lyrics: "${song.title}"` : `Retrying: "${song.title}"`, 
+                type: 'info' 
+            });
+         } else {
+            setToast({ visible: true, message: `Already searching for "${song.title}"`, type: 'info' });
+            return;
+         }
+      } else {
+         addToScanQueue(song);
+         setToast({ visible: true, message: `Added to Magic Search: "${song.title}"`, type: 'success' });
+      }
+  }, [scanQueue, addToScanQueue]);
 
   // Sort State
   type SortOption = 'custom' | 'title' | 'artist' | 'date';
@@ -447,6 +481,10 @@ export const PlaylistDetailScreen: React.FC = () => {
 
   // Passing props to memoized component
    const renderItem = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Song>) => {
+    const scanJob = scanQueue.find(j => j.songId === item.id);
+    const isScanning = scanJob?.status === 'scanning' || scanJob?.status === 'pending';
+    const isCompleted = scanJob?.status === 'completed';
+
     return (
       <PlaylistItem
         item={item}
@@ -454,14 +492,17 @@ export const PlaylistDetailScreen: React.FC = () => {
         isActive={isActive}
         getIndex={getIndex}
         currentSongId={currentSongId}
-        isPlaying={isPlaying} // Pass down
+        isPlaying={isPlaying}
         isEditMode={isEditMode}
         onPress={handleSongPress}
+        onMagicPress={handleAddToQueue}
+        isScanning={isScanning}
+        isCompleted={isCompleted}
         onDelete={handleDeleteSong}
         displayIndex={getIndex ? getIndex() : 0}
       />
     );
-  }, [currentSongId, isPlaying, isEditMode, handleSongPress, handleDeleteSong]); // Added isPlaying dependency
+  }, [currentSongId, isPlaying, isEditMode, handleSongPress, handleDeleteSong, scanQueue, handleAddToQueue]);
 
   // Animated Styles
   const headerStyle = useAnimatedStyle(() => {
@@ -666,7 +707,7 @@ export const PlaylistDetailScreen: React.FC = () => {
                  <View style={styles.inlinePlayerContainer}>
                      {/* Scrubber - Full Width */}
                      <View style={styles.scrubberContainer}>
-                         <Scrubber 
+                         <TimelineScrubber 
                             currentTime={activeIsPlaying ? position : 0}
                             duration={activeIsPlaying ? (duration > 0 ? duration : (currentSong?.duration || 180)) : (songs[0]?.duration || 180)}
                             onSeek={(value) => {
@@ -823,9 +864,17 @@ export const PlaylistDetailScreen: React.FC = () => {
                 await playlistQueries.removeSongFromPlaylist(playlistId, songToDelete);
                 loadData();
                 setShowDeleteConfirm(false);
+                setToast({ visible: true, message: 'Song removed from playlist', type: 'success' });
             }
         }}
         onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      <Toast 
+        visible={toast?.visible || false} 
+        message={toast?.message || ''} 
+        type={toast?.type || 'info'} 
+        onDismiss={() => setToast(null)} 
       />
     </View>
   );

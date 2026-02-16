@@ -26,7 +26,7 @@ export interface Song {
   coverImageUri?: string; // URI to custom cover art
   lyricsAlign?: 'left' | 'center' | 'right'; // Default alignment for all lyrics
   textCase?: 'normal' | 'uppercase' | 'titlecase' | 'sentencecase'; // Text case transformation
-  lyricSource?: 'LRCLIB' | 'Genius' | 'Manual'; // Where lyrics came from
+  lyricSource?: string; // Where lyrics came from (e.g. 'LRCLIB', 'Genius', 'Lyrica', 'JioSaavn', 'Manual')
   audioUri?: string; // URI to local audio file
   isLiked?: boolean; // Whether song is liked
   isHidden?: boolean; // Whether song is hidden

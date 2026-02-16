@@ -32,6 +32,7 @@ interface SettingsState {
   libraryBackgroundMode: 'daily' | 'aurora' | 'current'; // New setting for dynamic background
   animateBackground: boolean; // Toggle for background movement
   libraryFocusMode: boolean; // Toggle for "Focus Mode" (Black Background)
+  showPerformanceHUD: boolean; // Toggle for FPS counter
   
   // Library
   defaultView: ViewMode;
@@ -57,6 +58,7 @@ interface SettingsState {
   setLibraryBackgroundMode: (mode: 'daily' | 'aurora' | 'current') => void;
   setAnimateBackground: (enabled: boolean) => void;
   setLibraryFocusMode: (enabled: boolean) => void;
+  setShowPerformanceHUD: (enabled: boolean) => void;
   setDefaultView: (view: ViewMode) => void;
   setDefaultSort: (sort: SortOption) => void;
   setShowThumbnails: (show: boolean) => void;
@@ -86,6 +88,7 @@ const DEFAULT_SETTINGS = {
   defaultView: 'grid' as ViewMode,
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
+  showPerformanceHUD: false, // Default disabled
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -112,6 +115,7 @@ export const useSettingsStore = create<SettingsState>()(
       setLibraryBackgroundMode: (libraryBackgroundMode) => set({ libraryBackgroundMode }),
       setAnimateBackground: (animateBackground: boolean) => set({ animateBackground }),
       setLibraryFocusMode: (libraryFocusMode: boolean) => set({ libraryFocusMode }),
+      setShowPerformanceHUD: (showPerformanceHUD: boolean) => set({ showPerformanceHUD }),
       
       // Library actions
       setDefaultView: (defaultView) => set({ defaultView }),

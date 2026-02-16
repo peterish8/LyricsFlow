@@ -5,12 +5,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import * as GestureHandler from 'react-native-gesture-handler';
 import SynchronizedLyrics from './SynchronizedLyrics';
-import IslandScrubber from './IslandScrubber';
+import TimelineScrubber from './TimelineScrubber';
 const { Gesture, GestureDetector } = GestureHandler;
 import Animated, { 
   useAnimatedStyle, 
   useSharedValue, 
-  withRepeat, 
   withTiming, 
   withSequence,
   withSpring,
@@ -19,7 +18,6 @@ import Animated, {
   interpolate,
   Extrapolation,
   runOnJS,
-  runOnUI,
   useDerivedValue
 } from 'react-native-reanimated';
 
@@ -27,7 +25,7 @@ import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { getGradientColors } from '../constants/gradients';
-import VinylRecord from './VinylRecord';
+import { RotatingVinyl } from './VinylRecord';
 import { getCurrentLineIndex } from '../utils/timestampParser';
 
 const { width } = Dimensions.get('window');
@@ -100,7 +98,6 @@ const MiniPlayer: React.FC = () => {
   const [fullLyricExpanded, setFullLyricExpanded] = useState(false);
   
   // Animation values
-  const rotation = useSharedValue(0);
   const expansionProgress = useSharedValue(0); // 0 = collapsed, 1 = tray (190px)
   const lyricExpansionProgress = useSharedValue(0); // 0 = tray, 1 = half screen
   const fullExpansionProgress = useSharedValue(0); // 0 = half screen, 1 = full screen (nav-bar level)
@@ -204,42 +201,10 @@ const MiniPlayer: React.FC = () => {
     syncAudio();
   }, [currentSong?.id, player, loadedAudioId, setLoadedAudioId, setMiniPlayerHidden]);
 
-  // Handle Rotation (Store-based)
-  useEffect(() => {
-    if (storePlaying) {
-      // Calculate remaining rotation for current cycle
-      // Normalize current rotation to 0-360 range
-      const currentRotation = rotation.value % 360;
-      // Calculate duration needed for the remaining part of the turn (assuming 3000ms per full turn)
-      const remainingDuration = 3000 * ((360 - currentRotation) / 360);
-      
-      rotation.value = withSequence(
-        // 1. Finish the current rotation to 360
-        withTiming(360, { duration: remainingDuration, easing: Easing.linear }),
-        // 2. Loop 0 -> 360 forever
-        withRepeat(
-          withSequence(
-            withTiming(0, { duration: 0 }), // Reset to 0 instantly
-            withTiming(360, { duration: 3000, easing: Easing.linear }) // Full rotation
-          ),
-          -1,
-          false
-        )
-      );
-    }
-  }, [storePlaying]);
-
-  // Auto-close Classic Mode on song change
   // Auto-close removed: Lyrics persist across songs
   // useEffect(() => { ... }, [currentSong?.id, isIsland]);
 
-  const animatedVinylStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ rotate: `${rotation.value}deg` }],
-    };
-  });
-  
-  // Dynamic Island Spring Animation
+  // Classic Height Animation
   const animatedIslandStyle = useAnimatedStyle(() => {
     if (!isIsland) return {};
 
@@ -502,60 +467,7 @@ const MiniPlayer: React.FC = () => {
     }
   }, [player]);
 
-  // Classic Scrubber Animations
-  const isScrubbingClassic = useSharedValue(false);
-  const classicScrubProgress = useSharedValue(0);
 
-  const animatedTrackStyle = useAnimatedStyle(() => {
-    return {
-        height: withTiming(isScrubbingClassic.value ? 6 : 2, { duration: 200 }), // Thicken on scrub
-    };
-  });
-
-  const animatedDotStyle = useAnimatedStyle(() => {
-    return {
-        transform: [{ scale: withTiming(isScrubbingClassic.value ? 0 : 1, { duration: 200 }) }], // Disappear on scrub
-        opacity: withTiming(isScrubbingClassic.value ? 0 : 1, { duration: 200 }),
-    };
-  });
-
-  // Fix for scrubber jumping back: Delay releasing the UI lock until the optimistic update has likely processed
-  const handleClassicScrubEnd = (time: number) => {
-      // 1. Commit the seek (this updates optimizedPosition immediately in JS state)
-      handleIslandSeek(time);
-
-      // 2. Delay releasing the visual "scrubbing" state slightly.
-      // This ensures the React render cycle (triggered by setOptimizedPosition) 
-      // has completed and updated the 'progress' variable BEFORE we switch back to using it.
-      setTimeout(() => {
-          runOnUI(() => {
-              isScrubbingClassic.value = false;
-          })();
-      }, 50); // 50ms is imperceptible to user but sufficient for React render
-  };
-
-  const handleClassicScrub = Gesture.Pan()
-    .onStart(() => {
-        isScrubbingClassic.value = true;
-        classicScrubProgress.value = storePosition / (storeDuration || 1);
-    })
-    .onUpdate((e) => {
-        // Calculate progress based on screen width (since bar is full width)
-        const newProgress = Math.min(Math.max(e.absoluteX / width, 0), 1);
-        classicScrubProgress.value = newProgress;
-    })
-    .onEnd(() => {
-        // Do NOT set isScrubbingClassic.value = false here.
-        // Delegate to JS helper to ensure synchronization.
-        runOnJS(handleClassicScrubEnd)(classicScrubProgress.value * (storeDuration || 1));
-    });
-
-  const animatedFillStyle = useAnimatedStyle(() => {
-      const displayProgress = isScrubbingClassic.value ? classicScrubProgress.value : progress;
-      return {
-          width: `${displayProgress * 100}%`,
-      };
-  });
 
 
   
@@ -572,19 +484,14 @@ const MiniPlayer: React.FC = () => {
     ]}>
       {/* Classic Scrubber (Gapless & Animated) */}
       {!isIsland && (
-         <GestureDetector gesture={handleClassicScrub}>
-            <Animated.View style={styles.classicScrubberTarget}>
-                <View style={styles.progressBarTrackBase}>
-                     {/* Track */}
-                     <Animated.View style={[styles.progressBarTrackAnimated, animatedTrackStyle]}>
-                          <Animated.View style={[styles.progressFillAnimated, animatedFillStyle]} />
-                     </Animated.View>
-                     
-                     {/* Dot (Knob) */}
-                     <Animated.View style={[styles.scrubberDot, animatedDotStyle, { left: `${progress * 100}%` }]} />
-                </View>
-            </Animated.View>
-         </GestureDetector>
+         <TimelineScrubber
+            currentTime={storePosition}
+            duration={storeDuration > 0 ? storeDuration : 1}
+            onSeek={handleIslandSeek}
+            variant="classic"
+            showTimeLabels={false}
+            style={styles.classicScrubberOverride}
+         />
       )}
       
       <AnimatedPressable 
@@ -658,11 +565,13 @@ const MiniPlayer: React.FC = () => {
                 <GestureDetector gesture={panGesture}>
                     <View style={styles.expandedTopRow}>
                         {/* Rotating Vinyl */}
-                        <Animated.View style={[animatedVinylStyle, styles.vinylMargin]}>
-                            <Pressable onPress={openNowPlaying}>
-                                 <VinylRecord imageUri={currentSong.coverImageUri} size={64} />
-                            </Pressable>
-                        </Animated.View>
+                        <Pressable onPress={openNowPlaying} style={styles.vinylMargin}>
+                             <RotatingVinyl 
+                                imageUri={currentSong.coverImageUri} 
+                                size={64} 
+                                isPlaying={optimisticPlaying} 
+                             />
+                        </Pressable>
 
                         {/* Info */}
                         <View style={styles.expandedInfo}>
@@ -747,10 +656,11 @@ const MiniPlayer: React.FC = () => {
                         {/* Smooth Time Scrubber - Bottom of Island */}
                         {isIsland && expanded && (
                              <View style={styles.scrubberContainer}>
-                                <IslandScrubber 
+                                <TimelineScrubber 
                                     currentTime={storePosition}
                                     duration={storeDuration > 0 ? storeDuration : 1}
                                     onSeek={handleIslandSeek}
+                                    variant="island"
                                 />
                              </View>
                         )}
@@ -806,22 +716,21 @@ const MiniPlayer: React.FC = () => {
                     </View>
                     ) : (
                     /* Bar Mode Controls */
-                    <>
-                        <Text style={styles.time}>
-                        {formatTime(storePosition)} / {formatTime(storeDuration)}
-                        </Text>
-                        <Pressable onPress={async (e) => { e.stopPropagation(); await skipBackward(e); }} style={styles.controlButton}>
-                        <Ionicons name="play-back" size={20} color="#fff" />
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Pressable onPress={(e) => { e.stopPropagation(); skipBackward(e); }} style={styles.controlButton}>
+                        <Ionicons name="play-back" size={24} color="#fff" />
                         </Pressable>
-                        <Pressable onPress={togglePlay} style={styles.playButton} hitSlop={20}>
+                        
+                        <Pressable onPress={(e) => { e.stopPropagation(); togglePlay(e); }} style={[styles.playButton, { marginHorizontal: 12 }]} hitSlop={20}>
                         <Animated.View style={animatedButtonStyle}>
-                            <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={24} color="#fff" />
+                            <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={32} color="#fff" />
                         </Animated.View>
                         </Pressable>
-                        <Pressable onPress={async (e) => { e.stopPropagation(); await skipForward(e); }} style={styles.controlButton}>
-                        <Ionicons name="play-forward" size={20} color="#fff" />
+                        
+                        <Pressable onPress={(e) => { e.stopPropagation(); skipForward(e); }} style={styles.controlButton}>
+                        <Ionicons name="play-forward" size={24} color="#fff" />
                         </Pressable>
-                    </>
+                    </View>
                     )}
                 </View>
 
@@ -886,7 +795,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     height: 50, 
     width: '100%',
-    paddingHorizontal: 8, // Reduced from 16 to move content left
+    paddingHorizontal: 4, // Reduced from 8 to move content left
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -905,15 +814,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 15,
   },
-  classicScrubberTarget: {
+  classicScrubberOverride: {
     position: 'absolute',
-    top: -10, // Extend hit area upwards
-    left: 0,
-    right: 0,
-    height: 20, // Hit area height
-    justifyContent: 'center',
+    top: -14,
+    left: 20,
+    right: 20,
+    width: 'auto',
     zIndex: 200,
-    backgroundColor: 'transparent', // Debug: 'rgba(255,0,0,0.2)'
+    paddingVertical: 0, 
+    paddingHorizontal: 0,
   },
   progressBarTrackBase: {
     width: '100%',
@@ -1058,7 +967,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17, // Circle in collapsed
-    marginRight: 10,
+    marginRight: 6, // Reduced from 10 to move closer to edge
   },
   placeholderThumbnail: {
     width: 48,

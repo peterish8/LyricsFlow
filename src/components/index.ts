@@ -2,7 +2,7 @@ export { GradientBackground } from './GradientBackground';
 export { LyricsLine } from './LyricsLine';
 export { SongCard } from './SongCard';
 export { GradientPicker } from './GradientPicker';
-export { default as Scrubber } from './Scrubber';
+
 export { PlayerControls } from './PlayerControls';
 export { AuroraHeader } from './AuroraHeader';
 export { AIGeneratorModal } from './AIGeneratorModal';

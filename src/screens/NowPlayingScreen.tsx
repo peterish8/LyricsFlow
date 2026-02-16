@@ -3,13 +3,13 @@ import { View, Text, Pressable, StyleSheet, Image, Alert, Platform, Dimensions }
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing, withSequence } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing, withSequence, cancelAnimation } from 'react-native-reanimated';
 import * as GestureHandler from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
 import { useSongsStore } from '../store/songsStore';
-import Scrubber from '../components/Scrubber';
+import TimelineScrubber from '../components/TimelineScrubber';
 import CustomMenu from '../components/CustomMenu';
 import { RootStackScreenProps } from '../types/navigation';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,7 +19,7 @@ import { AuroraHeader } from '../components/AuroraHeader';
 import { CoverArtSearchScreen } from './CoverArtSearchScreen'; // Import the new screen (as a component/modal)
 // Toast removed as unused
 import { useSettingsStore } from '../store/settingsStore';
-import VinylRecord from '../components/VinylRecord';
+import { RotatingVinyl } from '../components/VinylRecord';
 import SynchronizedLyrics from '../components/SynchronizedLyrics';
 const { Gesture, GestureDetector } = GestureHandler;
 const { width } = Dimensions.get('window');
@@ -60,9 +60,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       };
     }, [setMiniPlayerHiddenSource])
   );
-  
-  // Issue 6: Vinyl rotation
-  const vinylRotation = useSharedValue(0);
   
   // Animation for Auto-Hide
   const controlsOpacity = useSharedValue(1);
@@ -186,25 +183,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
        ]
   }));
   
-  // Issue 6: Vinyl rotation animation (spins when playing, stops when paused)
-  useEffect(() => {
-    if (storePlaying) {
-      vinylRotation.value = withRepeat(
-        withTiming(360, { duration: 8000, easing: Easing.linear }),
-        -1, // infinite
-        false // no reverse
-      );
-    } else {
-      // Pause rotation at current position
-      // We grab the current value and set it to stop animation
-      const currentRotation = vinylRotation.value % 360;
-      vinylRotation.value = currentRotation; 
-    }
-  }, [storePlaying, vinylRotation]);
-  
-  const vinylAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${vinylRotation.value}deg` }]
-  }));
   useEffect(() => {
     const load = async () => {
       try {
@@ -626,6 +604,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
              lyrics={processedLyrics || []}
              currentTime={storePosition}
              onLyricPress={handleLyricTap}
+             songTitle={currentSong?.title}
+             highlightColor={gradientColors[0] !== '#000' ? gradientColors[0] : 'rgba(255,255,255,0.2)'}
              isUserScrolling={isUserScrolling.current}
              onScrollStateChange={(isScrolling) => {
                  isUserScrolling.current = isScrolling;
@@ -662,12 +642,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
           ) : (
             // Issue 6: Vinyl Record Display (when lyrics are hidden)
             <View style={styles.vinylContainer}>
-              <Animated.View style={vinylAnimatedStyle}>
-                <VinylRecord 
+                <RotatingVinyl 
                   imageUri={currentSong?.coverImageUri} 
                   size={width * 0.75} 
+                  isPlaying={storePlaying}
                 />
-              </Animated.View>
             </View>
           )}
       </View>
@@ -727,10 +706,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
                {/* 2. Scrubber - Middle */}
                <View style={{ marginVertical: 8 }}> 
-                  <Scrubber 
+                  <TimelineScrubber 
                      currentTime={storePosition} 
                      duration={storeDuration} 
-                     onSeek={handleScrub} 
+                     onSeek={handleScrub}
+                     variant="classic"
                   />
                </View>
 

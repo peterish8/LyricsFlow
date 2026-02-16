@@ -10,6 +10,9 @@ interface PlaylistItemProps extends RenderItemParams<Song> {
   currentSongId: string | null;
   isEditMode: boolean;
   onPress: (song: Song, index: number) => void;
+  onMagicPress?: (song: Song) => void;
+  isScanning?: boolean;
+  isCompleted?: boolean;
   onDelete: (songId: string) => void;
   isPlaying: boolean;
   displayIndex: number;
@@ -18,6 +21,7 @@ interface PlaylistItemProps extends RenderItemParams<Song> {
 // ... imports
 
 const VisualizerBar = ({ anim }: { anim: SharedValue<number> }) => {
+// ... existing VisualizerBar code remains same ...
     const style = useAnimatedStyle(() => ({
         height: interpolate(anim.value, [0, 1], [4, 14]),
         opacity: interpolate(anim.value, [0, 1], [0.5, 1])
@@ -26,11 +30,7 @@ const VisualizerBar = ({ anim }: { anim: SharedValue<number> }) => {
 };
 
 const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
-    // Simple 3-bar animation (Organic Mode)
-    // We create shared values once, or ensure they are stable. 
-    // Since useSharedValue is a hook, we can't put it inside useMemo directly if we want to create them there.
-    // But the array creation itself causes the dependency change.
-    
+// ... existing LiveVisualizer code remains same ...
     const sv1 = useSharedValue(0.3);
     const sv2 = useSharedValue(0.4);
     const sv3 = useSharedValue(0.3);
@@ -39,29 +39,25 @@ const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     
     React.useEffect(() => {
         if (!isPlaying) {
-            // STOP/RESET animation
             animations.forEach(anim => {
                 cancelAnimation(anim);
-                anim.value = withTiming(0.3, { duration: 300 }); // Return to idle height
+                anim.value = withTiming(0.3, { duration: 300 });
             });
             return;
         }
 
         animations.forEach((anim, i) => {
-            // Offset start times slightly for organic feel
             const delay = i * 50;
-            
             setTimeout(() => {
                 anim.value = withRepeat(
                     withSequence(
-                        // Fast, punchy movements for "beat" simulation
                         withTiming(Math.random(), { duration: 150, easing: Easing.linear }),
                         withTiming(Math.random(), { duration: 100, easing: Easing.quad }),
                         withTiming(Math.random(), { duration: 250, easing: Easing.inOut(Easing.quad) }),
                         withTiming(Math.random(), { duration: 120, easing: Easing.linear })
                     ),
-                    -1, // Infinite
-                    true // Reverses
+                    -1,
+                    true
                 );
             }, delay);
         });
@@ -80,8 +76,6 @@ const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     );
 };
 
-// ActiveSongProgress removed as unused
-
 const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({ 
   item, 
   drag, 
@@ -89,11 +83,48 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
   currentSongId, 
   isEditMode, 
   onPress,
+  onMagicPress,
+  isScanning,
+  isCompleted,
   onDelete,
   isPlaying,
   displayIndex
 }) => {
   const isActiveSong = currentSongId === item.id;
+  
+  // Triple Tap Logic
+  const tapCountRef = React.useRef(0);
+  const lastTapRef = React.useRef(0);
+  const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handlePress = () => {
+    if (isEditMode) return; // Don't trigger play/magic in edit mode
+
+    const now = Date.now();
+    const delay = 400;
+
+    if (now - lastTapRef.current < delay) {
+      tapCountRef.current += 1;
+    } else {
+      tapCountRef.current = 1;
+    }
+    lastTapRef.current = now;
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    if (tapCountRef.current === 3) {
+      // Triple Tap Trigger
+      if (onMagicPress) onMagicPress(item);
+      tapCountRef.current = 0;
+    } else {
+      timerRef.current = setTimeout(() => {
+        if (tapCountRef.current === 1) {
+          onPress(item, displayIndex);
+        }
+        tapCountRef.current = 0;
+      }, delay);
+    }
+  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -105,11 +136,11 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
     <ScaleDecorator>
       <Pressable
         onLongPress={isEditMode ? drag : undefined}
-        onPress={() => onPress(item, displayIndex)}
+        onPress={handlePress}
         disabled={isActive}
         style={[
           styles.songRow,
-          isActiveSong && !isEditMode && styles.songRowActive, // Grey Highlight
+          isActiveSong && !isEditMode && styles.songRowActive,
           isActive && styles.songRowDragging
         ]}
       >
@@ -120,17 +151,11 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
                <Ionicons name="reorder-two" size={24} color="#666" />
              </Pressable>
            ) : (
-             // Just the number, normal color
-             // User: "make normal itself"
               <Text style={styles.songNumber}>
                 {displayIndex + 1}
               </Text>
            )}
         </View>
-
-
-
-
 
         {/* Album Art (Small) */}
         <View style={styles.smallCoverContainer}>
@@ -142,8 +167,15 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
             </View>
           )}
 
+          {/* Scanning Overlay */}
+          {isScanning && (
+            <View style={styles.scanningOverlay}>
+               <Ionicons name="sync" size={16} color="#FFF" />
+            </View>
+          )}
+
           {/* Live Visualizer (White & Animated) */}
-          {isActiveSong && !isEditMode && (
+          {isActiveSong && !isEditMode && !isScanning && (
               <View style={styles.visualizerOverlay}>
                   <LiveVisualizer isPlaying={isPlaying} />
               </View>
@@ -152,12 +184,17 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
 
         {/* Info */}
         <View style={styles.songInfo}>
-          <Text 
-            style={[styles.songTitle, isActiveSong && !isEditMode && styles.songTitleActive]} 
-            numberOfLines={1}
-          >
-            {item.title}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text 
+              style={[styles.songTitle, isActiveSong && !isEditMode && styles.songTitleActive]} 
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            {(isCompleted || (item.lyrics && item.lyrics.length > 0)) && (
+               <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={{ marginLeft: 4 }} />
+            )}
+          </View>
           <Text style={styles.songArtist} numberOfLines={1}>
             {item.artist || 'Unknown Artist'}
           </Text>
@@ -169,11 +206,9 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
             <Ionicons name="remove-circle" size={24} color="#ff4444" />
           </Pressable>
         ) : (
-           // "Make normal itself" - always show static duration
            <Text style={styles.songDuration}>{formatDuration(item.duration || 0)}</Text>
         )}
 
-        {/* Three dots for song context (Normal Mode) */}
         {!isEditMode && (
            <Pressable style={styles.moreButton} hitSlop={10}>
               <Ionicons name="ellipsis-vertical" size={20} color="rgba(255,255,255,0.6)" />
@@ -235,6 +270,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center'
+  },
+  scanningOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      left: 0,
+      top: 0,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      borderRadius: 4,
+      justifyContent: 'center',
+      alignItems: 'center',
   },
   visualizerOverlay: {
       position: 'absolute',

@@ -4,7 +4,7 @@
  * Dynamic blurred background from cover art
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,42 +14,52 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  interpolate, 
+  Extrapolation,
+  withSpring,
+  withTiming,
+  runOnJS,
+  SharedValue
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UnifiedSong } from '../types/song';
+import { analyzeImageBrightness } from '../utils/imageAnalyzer';
 
 import { reelsBufferManager } from '../services/ReelsBufferManager';
-import IslandScrubber from './IslandScrubber';
+import TimelineScrubber from './TimelineScrubber';
 
 // Local component to handle progress updates without re-rendering the heavy ReelCard
 const ReelsProgressController = ({ isActive }: { isActive: boolean }) => {
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const position = useSharedValue(0);
+  const duration = useSharedValue(0);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isActive) {
       // Subscribe to updates
       reelsBufferManager.setStatusUpdateCallback((status) => {
         if (status.isLoaded) {
-          setPosition(status.positionMillis);
-          setDuration(status.durationMillis || 0);
+          position.value = status.positionMillis;
+          duration.value = status.durationMillis || 0;
         }
       });
     }
-    return () => {
-        // Cleanup not strictly necessary as manager handles single callback, 
-        // but good practice if we add multiple listener support later.
-    };
-  }, [isActive]);
+  }, [isActive, position, duration]);
 
   if (!isActive) return null;
 
   return (
     <View style={styles.scrubberContainer}>
-        <IslandScrubber 
+        <TimelineScrubber 
             currentTime={position}
             duration={duration}
             onSeek={(time) => reelsBufferManager.seekTo(time)}
-            onScrubStart={() => reelsBufferManager.pause()} // Pause while scrubbing
-            onScrubEnd={() => reelsBufferManager.resume()} // Resume after
+            onScrubStart={() => reelsBufferManager.pause()}
+            onScrubEnd={() => reelsBufferManager.resume()}
+            variant="island"
         />
     </View>
   );
@@ -67,11 +77,37 @@ interface ReelCardProps {
   onDownload: () => void;
   onPlayPause: () => void;
   reelHeight: number;
+  index: number;
+  currentIndex: SharedValue<number>;
 }
 
 export const ReelCard: React.FC<ReelCardProps> = React.memo(
-  ({ song, isActive, isLiked, isPlaying, onLike, onShare, onDownload, onPlayPause, reelHeight }) => {
+  ({ 
+    song, 
+    isActive, 
+    isLiked, 
+    isPlaying, 
+    onLike, 
+    onShare, 
+    onDownload, 
+    onPlayPause, 
+    reelHeight,
+    index,
+    currentIndex 
+  }) => {
     const [showPlayPause, setShowPlayPause] = useState(false);
+    const [gradientOpacity, setGradientOpacity] = useState(0.85);
+    const insets = useSafeAreaInsets();
+    const likeScale = useSharedValue(1);
+
+    useEffect(() => {
+      if (song.highResArt) {
+        analyzeImageBrightness(song.highResArt).then(result => {
+           // If light, more opacity for legibility
+           setGradientOpacity(result.brightness > 160 ? 0.95 : 0.85);
+        });
+      }
+    }, [song.highResArt]);
 
     const handleTap = () => {
       onPlayPause();
@@ -79,101 +115,146 @@ export const ReelCard: React.FC<ReelCardProps> = React.memo(
       setTimeout(() => setShowPlayPause(false), 800);
     };
 
+    const handleLikePress = () => {
+      'worklet';
+      likeScale.value = withSpring(1.5, { damping: 10, stiffness: 100 }, () => {
+        likeScale.value = withSpring(1);
+      });
+      runOnJS(onLike)();
+    };
+
+    // Card visibility and entry/exit transformation
+    const cardAnimatedStyle = useAnimatedStyle(() => {
+      'worklet';
+      const distance = Math.abs(currentIndex.value - index);
+      
+      const opacity = interpolate(
+        distance,
+        [0, 1],
+        [1, 0.3],
+        Extrapolation.CLAMP
+      );
+      
+      const scale = interpolate(
+        distance,
+        [0, 1],
+        [1, 0.95],
+        Extrapolation.CLAMP
+      );
+
+      return {
+        opacity,
+        transform: [{ scale }]
+      };
+    });
+
+    const likeButtonStyle = useAnimatedStyle(() => {
+      'worklet';
+      return {
+        transform: [{ scale: likeScale.value }]
+      };
+    });
+
     return (
-      <Pressable style={[styles.container, { height: reelHeight }]} onPress={handleTap}>
-        {/* Blurred Background - Full Screen Dynamic Colors */}
-        {song.highResArt && (
-          <Image
-            source={{ uri: song.highResArt }}
-            style={[StyleSheet.absoluteFillObject, { width: SCREEN_WIDTH, height: reelHeight }]}
-            blurRadius={60}
-            resizeMode="cover"
-          />
-        )}
-
-        {/* Dark Overlay */}
-        <View style={styles.overlay} />
-
-        {/* Main Cover Art - Centered */}
-        {song.highResArt && (
-          <Image
-            source={{ uri: song.highResArt }}
-            style={styles.coverArt}
-            resizeMode="cover"
-          />
-        )}
-
-        {/* Play/Pause indicator (shows briefly on tap) */}
-        {showPlayPause && (
-          <View style={styles.playPauseOverlay}>
-            <View style={styles.playPauseCircle}>
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={50}
-                color="#fff"
-              />
-            </View>
-          </View>
-        )}
-
-        {/* PROGRESS SCRUBBER (Replaces Waveform) */}
-        {/* Placed at bottom, above actions/info */}
-        <View style={styles.progressWrapper}>
-            <ReelsProgressController isActive={isActive} />
-        </View>
-
-        {/* Right Side Action Buttons */}
-        <View style={styles.actionsContainer}>
-          {/* Like Button */}
-          <Pressable style={styles.actionButton} onPress={onLike}>
-            <Ionicons
-              name={isLiked ? 'heart' : 'heart-outline'}
-              size={30}
-              color={isLiked ? '#FF2D55' : '#fff'}
+      <Animated.View style={[styles.container, { height: reelHeight }, cardAnimatedStyle]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleTap}>
+          {/* Blurred Background - Full Screen Dynamic Colors */}
+          {song.highResArt && (
+            <Image
+              source={{ uri: song.highResArt }}
+              style={[StyleSheet.absoluteFillObject, { width: SCREEN_WIDTH, height: reelHeight }]}
+              blurRadius={60}
+              resizeMode="cover"
             />
-            <Text style={[styles.actionLabel, isLiked && { color: '#FF2D55' }]}>
-              {isLiked ? 'Liked' : 'Like'}
-            </Text>
-          </Pressable>
+          )}
 
-          {/* Share Button */}
-          <Pressable style={styles.actionButton} onPress={onShare}>
-            <Ionicons name="share-outline" size={28} color="#fff" />
-            <Text style={styles.actionLabel}>Share</Text>
-          </Pressable>
+          {/* Dark Overlay */}
+          <View style={styles.overlay} />
 
-          {/* Download Button */}
-          <Pressable style={styles.actionButton} onPress={onDownload}>
-            <Ionicons name="download-outline" size={28} color="#fff" />
-            <Text style={styles.actionLabel}>Save</Text>
-          </Pressable>
-        </View>
+          {/* Main Cover Art - Centered */}
+          {song.highResArt && (
+            <Image
+              source={{ uri: song.highResArt }}
+              style={styles.coverArt}
+              resizeMode="cover"
+            />
+          )}
 
-        {/* Bottom Song Info Bar - Instagram-style */}
-        <View style={styles.bottomContainer}>
-          {/* Song Info Row */}
-          <View style={styles.songInfoRow}>
-            {/* Mini Album Art */}
-            {song.highResArt ? (
-              <Image source={{ uri: song.highResArt }} style={styles.miniArt} />
-            ) : (
-              <View style={[styles.miniArt, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                <Ionicons name="musical-note" size={18} color="#fff" />
+          {/* Play/Pause indicator (shows briefly on tap) */}
+          {showPlayPause && (
+            <View style={styles.playPauseOverlay}>
+              <View style={styles.playPauseCircle}>
+                <Ionicons
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={50}
+                  color="#fff"
+                />
               </View>
-            )}
-
-            {/* Song Details */}
-            <View style={styles.songDetails}>
-              <Text style={styles.songTitle} numberOfLines={1}>
-                {song.title}
-              </Text>
-              <Text style={styles.songArtist} numberOfLines={1}>
-                {song.artist || 'Unknown Artist'}
-              </Text>
             </View>
+          )}
+
+          {/* PROGRESS SCRUBBER (Replaces Waveform) */}
+          <View style={styles.progressWrapper}>
+              <ReelsProgressController isActive={isActive} />
           </View>
-        </View>
-      </Pressable>
+
+          {/* Right Side Action Buttons */}
+          <View style={[styles.actionsContainer, { bottom: insets.bottom + 120 }]}>
+            {/* Like Button */}
+            <Animated.View style={likeButtonStyle}>
+              <Pressable style={styles.actionButton} onPress={handleLikePress}>
+                <Ionicons
+                  name={isLiked ? 'heart' : 'heart-outline'}
+                  size={32}
+                  color={isLiked ? '#FF2D55' : '#fff'}
+                />
+                <Text style={[styles.actionLabel, isLiked && styles.likedLabel]}>
+                  {isLiked ? 'Liked' : 'Like'}
+                </Text>
+              </Pressable>
+            </Animated.View>
+
+            {/* Share Button */}
+            <Pressable style={styles.actionButton} onPress={onShare}>
+              <Ionicons name="share-outline" size={30} color="#fff" />
+              <Text style={styles.actionLabel}>Share</Text>
+            </Pressable>
+
+            {/* Download Button */}
+            <Pressable style={styles.actionButton} onPress={onDownload}>
+              <Ionicons name="download-outline" size={30} color="#fff" />
+              <Text style={styles.actionLabel}>Save</Text>
+            </Pressable>
+          </View>
+
+          {/* Bottom Song Info Bar - Instagram-style with Gradient Blend */}
+          <LinearGradient
+            colors={['rgba(0,0,0,0)', `rgba(0,0,0,${gradientOpacity})`]}
+            style={[styles.bottomGradient, { paddingBottom: insets.bottom + 16 }]}
+          >
+            <View style={styles.songInfoRow}>
+              {/* Mini Album Art */}
+              {song.highResArt ? (
+                <Image source={{ uri: song.highResArt }} style={styles.miniArt} />
+              ) : (
+                <View style={styles.placeholderArt}>
+                  <Ionicons name="musical-note" size={18} color="#fff" />
+                </View>
+              )}
+
+              {/* Song Details */}
+              <View style={styles.songDetails}>
+                <Text style={styles.songTitle} numberOfLines={1}>
+                  {song.title}
+                </Text>
+                <Text style={styles.songArtist} numberOfLines={1}>
+                  {song.artist || 'Unknown Artist'}
+                </Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
     );
   },
   (prevProps, nextProps) => {
@@ -236,40 +317,57 @@ const styles = StyleSheet.create({
   actionsContainer: {
     position: 'absolute',
     right: 12,
-    bottom: 180, // Moved up to make room for scrubber
-    gap: 24,
+    gap: 20,
     alignItems: 'center',
   },
   actionButton: {
     alignItems: 'center',
     gap: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   actionLabel: {
     color: 'rgba(255,255,255,0.9)',
     fontSize: 11,
     fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  bottomContainer: {
+  likedLabel: {
+    color: '#FF2D55',
+  },
+  bottomGradient: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     paddingHorizontal: 16,
-    paddingBottom: 24,
-    paddingTop: 12,
+    paddingTop: 60, // Gradient fade distance
   },
   songInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)', // Glassmorphism touch
+    borderRadius: 14,
     padding: 10,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   miniArt: {
     width: 44,
     height: 44,
     borderRadius: 8,
     marginRight: 12,
+  },
+  placeholderArt: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -278,12 +376,19 @@ const styles = StyleSheet.create({
   },
   songTitle: {
     color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '700',
     marginBottom: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   songArtist: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
+    fontWeight: '500',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

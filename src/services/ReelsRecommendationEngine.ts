@@ -5,10 +5,15 @@
  * Generates personalized search queries based on user's artists & genres
  */
 
-import { UnifiedSong } from '../types/song';
-import { useReelsPreferencesStore } from '../store/reelsPreferencesStore';
+import { UnifiedSong, Song } from '../types/song';
+import { useReelsPreferencesStore, LanguagePreference } from '../store/reelsPreferencesStore';
 import { useSongsStore } from '../store/songsStore';
 import { MultiSourceSearchService } from './MultiSourceSearchService';
+
+interface GeneratedQuery {
+  query: string;
+  language: string;
+}
 
 // Trending/discovery queries - Removed as we now generate on the fly
 
@@ -20,8 +25,6 @@ class ReelsRecommendationEngine {
    * This is the KEY to instant personalization!
    */
   seedFromLibrary() {
-    if (this.seededFromLibrary) return;
-
     const songsStore = useSongsStore.getState();
     const prefsStore = useReelsPreferencesStore.getState();
     const songs = songsStore.songs;
@@ -35,25 +38,22 @@ class ReelsRecommendationEngine {
     // Check if we need to re-seed: library has more songs than seeded interactions
     // This handles the case where old vault data was seeded but library wasn't
     const librarySongCount = songs.filter(s => s.artist && s.artist !== 'Unknown Artist').length;
-    const existingCount = prefsStore.interactions.length;
     
-    if (existingCount > 0 && existingCount >= librarySongCount) {
-      this.seededFromLibrary = true;
-      console.log(`[RecoEngine] Already seeded (${existingCount} interactions for ${librarySongCount} library songs)`);
-      return;
-    }
-
-    // Clear old stale data and re-seed from full library
-    if (existingCount > 0) {
-      console.log(`[RecoEngine] 🔄 Re-seeding: had ${existingCount} old interactions, library has ${librarySongCount} songs`);
-      prefsStore.clearPreferences();
+    // Check if we have analyzed preferences yet
+    const topArtists = prefsStore.getTopArtistNames(5);
+    if (this.seededFromLibrary && topArtists.length > 0) {
+        return;
     }
 
     console.log(`[RecoEngine] 🌱 Seeding from ${songs.length} library songs...`);
 
     // Record each song as a "liked" interaction to build artist preferences
+    // We do this efficiently by batch updating if possible, or just strict loop
     songs.forEach(song => {
-      if (song.artist && song.artist !== 'Unknown Artist') {
+      if (song.artist && song.artist !== 'Unknown Artist' && !song.artist.includes('Unknown')) {
+        // Only record if not already recorded? 
+        // Actually, store doesn't prevent dupes, so we should be careful.
+        // For now, let's assume if it's in library, it's a strong signal.
         prefsStore.recordInteraction({
           songId: song.id,
           title: song.title,
@@ -66,28 +66,50 @@ class ReelsRecommendationEngine {
         });
       }
     });
+    
+    // Force immediate analysis to populate topArtists
+    prefsStore.analyzePreferences();
 
     this.seededFromLibrary = true;
     console.log('[RecoEngine] ✅ Seeded preferences from library!');
+    console.log('[RecoEngine] Top artists derived:', prefsStore.getTopArtistNames(10));
+  }
 
-    // Log top artists
-    const topArtists = prefsStore.getTopArtistNames(10);
-    console.log('[RecoEngine] Top artists from library:', topArtists);
+  /**
+   * Select a language based on user weights
+   */
+  private selectLanguageByWeight(weights: LanguagePreference[]): string {
+    const active = weights.filter(w => w.weight > 0);
+    if (active.length === 0) return 'English';
+
+    const totalWeight = active.reduce((sum, curr) => sum + curr.weight, 0);
+    const roll = Math.random() * totalWeight;
+
+    let cumulative = 0;
+    for (const item of active) {
+      cumulative += item.weight;
+      if (roll <= cumulative) return item.language;
+    }
+
+    return active[0].language;
   }
 
   /**
    * Generate personalized search queries based on "Artist Cluster" strategy
    * User Request: "Pick any 6 artists and each artist 5 songs"
    */
-  generateQueries(targetArtistCount: number = 6): { query: string; language: string }[] {
+  generateQueries(targetArtistCount: number = 6): GeneratedQuery[] {
     // Seed from library first!
     this.seedFromLibrary();
 
     const songsStore = useSongsStore.getState();
     const prefsStore = useReelsPreferencesStore.getState();
+    const languageWeights = prefsStore.getLanguageWeights();
+    
+    // 1. Get Top Artists (Explicitly Liked / Watched)
     const topArtists = prefsStore.getTopArtistNames(20);
     
-    // 1. Get ALL unique artists from library (The "Home" pool)
+    // 2. Get Dictionary of Library Artists (Implicit Interest)
     const libraryArtists = Array.from(new Set(
         songsStore.songs
             .map(s => s.artist)
@@ -95,75 +117,60 @@ class ReelsRecommendationEngine {
             .map(a => a!.trim())
     ));
 
-    // 2. Pool: Mix of Top Artists (favs) + Random Library Artists (rediscovery)
-    // We want a mix, but heavily weighted towards library capability
-    const candidatePool = Array.from(new Set([...topArtists, ...libraryArtists]));
+    // 3. Create Candidate Pool
+    const skippedArtists = new Set(prefsStore.getSkippedArtistNames().map(a => a.toLowerCase()));
+    const cleanPool = [...topArtists, ...libraryArtists].filter(a => !skippedArtists.has(a.toLowerCase()));
+    const uniquePool = Array.from(new Set(cleanPool));
+    
+    console.log(`[RecoEngine] 🎱 Candidate Artist Pool Size: ${uniquePool.length}`);
 
-    if (candidatePool.length === 0) {
-        // Fallback to trending if no library data
-        const weights = prefsStore.getLanguageWeights(); // Use new method
-        // Filter only active languages or default to all if none active?
-        const activeDefaults = weights.filter(w => w.weight > 0).map(w => w.language);
-        const languagesPool = activeDefaults.length > 0 ? activeDefaults : (['English', 'Hindi'] as any[]);
-
-        const fallbackQueries: { query: string; language: string }[] = [];
-        for(let i=0; i<targetArtistCount; i++) {
-            const lang = languagesPool[Math.floor(Math.random() * languagesPool.length)];
+    if (uniquePool.length === 0) {
+        // Fallback to trending if no library/history data
+        console.log('[RecoEngine] ⚠️ No personalized artists found. Using Language Trending fallback.');
+        const fallbackQueries: GeneratedQuery[] = [];
+        const activeLanguages = languageWeights.filter(w => w.weight > 0);
+        
+        const modifiers = ['Trending', 'Hit Songs', 'Melody', 'Love Songs', 'Party Songs'];
+        
+        while(fallbackQueries.length < targetArtistCount) {
+            const selectedLang = this.selectLanguageByWeight(languageWeights);
+            const mod = modifiers[Math.floor(Math.random() * modifiers.length)];
             fallbackQueries.push({ 
-                query: `${lang} trending songs`,
-                language: lang
+                query: `${selectedLang} ${mod}`,
+                language: selectedLang
             });
         }
         return fallbackQueries;
     }
 
-    // 3. Shuffle and pick 6 unique artists
-    // const shuffled = candidatePool.sort(() => Math.random() - 0.5);
-    // const selectedArtists = shuffled.slice(0, targetArtistCount);
+    // 4. Shuffle and Pick Artists
+    const shuffledArtists = uniquePool.sort(() => Math.random() - 0.5);
+    const selectedArtists = shuffledArtists.slice(0, targetArtistCount); 
+    
+    const generatedQueries: GeneratedQuery[] = [];
 
-    // 4. Create Weighted Queries based on Language Preferences
-    const weights = prefsStore.getLanguageWeights();
-    const activeLanguages = weights.filter(w => w.weight > 0);
-    
-    // Sort by weight desc
-    activeLanguages.sort((a, b) => b.weight - a.weight);
-
-    const generatedQueries: { query: string; language: string }[] = [];
-    
-    // Distribute slots based on weight (Total: 6 slots)
-    // E.g. Tamil 80% (4.8 slots -> 5), English 20% (1.2 slots -> 1)
-    
-    let slotsFilled = 0;
-    
-    // Pass 1: Allocate guaranteed slots
-    activeLanguages.forEach(lang => {
-         const slots = Math.round((lang.weight / 100) * targetArtistCount);
-         if (slots > 0) {
-             for(let i=0; i<slots; i++) {
-                 // Pick an artist for this language? 
-                 // Actually, use "Language + Random Artist" or just "Language Hit Songs"
-                 // Since we don't know the artist's language easily without complex metadata, 
-                 // we will use the Language Filter in our Search Service!
-                 
-                 // Strategy: Pick a random query type
-                 const types = ['Top Songs', 'Melody', 'Trending', 'Love Songs', 'Hit Songs'];
-                 const type = types[Math.floor(Math.random() * types.length)];
-                 const q = `${lang.language} ${type}`;
-                 
-                 generatedQueries.push({ query: q, language: lang.language });
-             }
-             slotsFilled += slots;
-         }
+    selectedArtists.forEach(artist => {
+        const selectedLang = this.selectLanguageByWeight(languageWeights);
+        const modifiers = ['songs', 'hit songs', 'melody songs', 'best songs'];
+        const mod = modifiers[Math.floor(Math.random() * modifiers.length)];
+        
+        generatedQueries.push({ 
+            query: `${artist} ${mod}`, 
+            language: selectedLang 
+        });
     });
-    
-    // Pass 2: Fill remaining slots with highest weighted language (or random active)
+
+    // 5. Fill remaining slots
     while(generatedQueries.length < targetArtistCount) {
-         const fallbackLang = activeLanguages[0]?.language || 'English';
-         const q = `${fallbackLang} Trending`;
-         generatedQueries.push({ query: q, language: fallbackLang });
+         const selectedLang = this.selectLanguageByWeight(languageWeights);
+         const mod = ['Trending', 'Viral', 'New'].sort(() => Math.random() - 0.5)[0];
+         generatedQueries.push({
+             query: `${selectedLang} ${mod}`,
+             language: selectedLang
+         });
     }
 
-    console.log(`[ReelsReco] 🎨 Generated ${generatedQueries.length} Weighted Queries:`, generatedQueries.map(q => q.query));
+    console.log(`[ReelsReco] 🎨 Generated ${generatedQueries.length} Personalized Queries:`, generatedQueries.map(q => `${q.query} (${q.language})`));
     return generatedQueries;
   }
 
@@ -236,9 +243,6 @@ class ReelsRecommendationEngine {
   }
 
   /**
-   * Filter out downloaded, seen, and disliked artist songs
-   */
-  /**
    * Filter and Enrich songs
    * 1. Swaps in LOCAL songs if they exist (Prioritize Offline)
    * 2. Filters out seen/skipped songs
@@ -248,7 +252,7 @@ class ReelsRecommendationEngine {
     const songsStore = useSongsStore.getState();
 
     // Map for fast lookups: "title_artist" -> Local Song
-    const localSongMap = new Map<string, any>();
+    const localSongMap = new Map<string, Song>();
     songsStore.songs.forEach(s => {
         const key = `${s.title?.toLowerCase().trim()}_${s.artist?.toLowerCase().trim()}`;
         localSongMap.set(key, s);
@@ -257,6 +261,13 @@ class ReelsRecommendationEngine {
     const skippedArtists = new Set(
       prefsStore.getSkippedArtistNames().map(a => a.toLowerCase())
     );
+
+    const devotionalKeywords = [
+        'devotional', 'bhakti', 'bhajan', 'aarti', 'mantra', 'chant', 
+        'gospel', 'spirit', 'prayer', 'krishna', 'ram', 'hanuman', 
+        'ganesh', 'shiva', 'durga', 'amritwani', 'chalisa', 'kirtan', 
+        'stotram', 'sahib', 'waheguru', 'jesus', 'allah', 'katha', 'satsang'
+    ];
 
     return songs.map(song => {
       // 1. Check if we have a local version
@@ -291,6 +302,34 @@ class ReelsRecommendationEngine {
       // Filter skipped artists
       const artistLower = song.artist?.toLowerCase()?.trim();
       if (artistLower && skippedArtists.has(artistLower)) return false;
+
+      // 3. Filter Devotional Content
+      const titleLower = song.title?.toLowerCase() || '';
+      // const albumLower = song.album?.toLowerCase() || ''; // UnifiedSong might not have album
+      const isDevotional = devotionalKeywords.some(keyword => 
+          titleLower.includes(keyword) || artistLower?.includes(keyword)
+      );
+      
+      if (isDevotional) {
+          console.log(`[Reels] 🕊️ Filtered devotional content: ${song.title}`);
+          return false;
+      }
+
+      // 4. Filter Unwanted Edits (Hardstyle, Sped Up, etc.)
+      // User Request: "HARDSTYLE, SPED UP and all coming"
+      const unwantedKeywords = [
+          'hardstyle', 'sped up', 'slowed', 'reverb', 'bass boosted', 
+          'mashup', '8d audio', 'nightcore', 'daycore', 'lofi flip'
+      ];
+      
+      const isUnwanted = unwantedKeywords.some(keyword => 
+          titleLower.includes(keyword) || artistLower?.includes(keyword)
+      );
+
+      if (isUnwanted) {
+          console.log(`[Reels] 🚫 Filtered unwanted edit: ${song.title}`);
+          return false;
+      }
 
       return true;
     });

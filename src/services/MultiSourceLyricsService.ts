@@ -12,19 +12,22 @@ export const MultiSourceLyricsService = {
     
     fetchLyricsParallel: async (title: string, artist: string, duration?: number): Promise<LyricaResult[]> => {
         try {
-            // We want to return AS SOON AS we find "Synced" lyrics.
-            // But we also want to collect all results if only "Plain" lyrics are found, to choose the best one.
-            
             const results: LyricaResult[] = [];
             let finishedCount = 0;
+            let resolved = false;
             const totalSources = 2; // Lyrica + Saavn
             
             return new Promise((resolve) => {
+                const safeResolve = (value: LyricaResult[]) => {
+                    if (resolved) return;
+                    resolved = true;
+                    resolve(value);
+                };
+
                 const checkCompletion = () => {
                     finishedCount++;
                     if (finishedCount >= totalSources) {
-                        // All done, return whatever we have
-                        resolve(results); 
+                        safeResolve(results); 
                     }
                 };
 
@@ -33,10 +36,9 @@ export const MultiSourceLyricsService = {
                     .then(res => {
                         if (res) {
                             results.push(res);
-                            // If we found SYNCED lyrics, stop waiting and return immediately!
                             if (/[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(res.lyrics)) {
                                 console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via Lyrica');
-                                resolve([res]); // Return just this one (or we could wait for others but why?)
+                                safeResolve([res]);
                                 return;
                             }
                         }
@@ -55,10 +57,9 @@ export const MultiSourceLyricsService = {
                             } as LyricaResult;
                             results.push(result);
                             
-                            // If we found SYNCED lyrics and haven't resolved yet
                             if (/[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(res.lyrics)) {
                                 console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via Saavn');
-                                resolve([results[0]]); // Return just this one (or we could wait for others but why?)
+                                safeResolve([result]);
                                 return;
                             }
                         }
@@ -66,11 +67,11 @@ export const MultiSourceLyricsService = {
                     .catch(e => console.warn('[LyricsEngine] JioSaavn failed:', e))
                     .finally(checkCompletion);
 
-                // 3. Timeout (8s) - redundancy in case logic fails
+                // 3. Timeout (8s)
                 setTimeout(() => {
-                    if (finishedCount < totalSources) {
+                    if (!resolved) {
                         console.log('[LyricsEngine] Timeout reached, returning collected results');
-                        resolve(results);
+                        safeResolve(results);
                     }
                 }, 8000);
             });

@@ -4,6 +4,8 @@
  */
 
 import { LyricLine } from '../types/song';
+import { parseTimestampedLyrics, hasValidTimestamps } from '../utils/timestampParser';
+
 
 const BASE_URL = 'https://lrclib.net/api';
 
@@ -38,15 +40,14 @@ export const LrcLibService = {
       console.log('[LrcLibService] Searching LRCLIB:', searchUrl);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
       
       const response = await fetch(searchUrl, {
         signal: controller.signal,
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'LuvLyrics/1.0 (Mobile; Android)',
           'Accept': 'application/json',
-          'Content-Type': 'application/json',
         }
       });
       clearTimeout(timeoutId);
@@ -83,15 +84,14 @@ export const LrcLibService = {
       console.log('[LrcLibService] Getting lyrics from:', url);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
       
       const response = await fetch(url, {
         signal: controller.signal,
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'LuvLyrics/1.0 (Mobile; Android)',
           'Accept': 'application/json',
-          'Content-Type': 'application/json',
         }
       });
       clearTimeout(timeoutId);
@@ -114,56 +114,38 @@ export const LrcLibService = {
   /**
    * Parse LRC format string into LyricLine[]
    */
+  /**
+   * Parse LRC format string into LyricLine[]
+   * Uses centralized parser for robustness, falls back to interpolation for plain text.
+   */
   parseLrc: (lrcContent: string, duration: number = 180): LyricLine[] => {
     if (!lrcContent) return [];
     
-    const lines = lrcContent.split('\n');
-    const result: LyricLine[] = [];
-    const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
-
-    const hasTimestamps = lines.some(line => timeRegex.test(line));
-
-    // Ensure valid duration for estimation (prevent 0 timestamps)
-    const safeDuration = duration > 0 ? duration : 180;
-
-    if (hasTimestamps) {
-        lines.forEach((line, index) => {
-          const match = line.match(timeRegex);
-          if (match) {
-            const minutes = parseInt(match[1], 10);
-            const seconds = parseInt(match[2], 10);
-            const milliseconds = parseInt(match[3].padEnd(3, '0'), 10); // Handle 2 or 3 digit ms
-            const timestamp = minutes * 60 + seconds + milliseconds / 1000;
-            const text = line.replace(timeRegex, '').trim();
-
-            if (text) {
-              result.push({
-                id: undefined, // Generated later or by DB
-                timestamp,
-                text,
-                lineOrder: index // Temporary order
-              });
-            }
-          }
-        });
-    } else {
-        // PLAIN TEXT FALLBACK
-        const meaningfulLines = lines.map(l => l.trim()).filter(l => l.length > 0);
-        const totalLines = meaningfulLines.length;
-        if (totalLines > 0) {
-            const timePerLine = safeDuration / totalLines;
-            meaningfulLines.forEach((text, index) => {
-                result.push({
-                    id: undefined,
-                    timestamp: index * timePerLine,
-                    text,
-                    lineOrder: index
-                });
-            });
-        }
+    // 1. Try to parse as Synced Lyrics using robust utility
+    if (hasValidTimestamps(lrcContent)) {
+        return parseTimestampedLyrics(lrcContent);
     }
     
-    // Re-index line orders
-    return result.map((line, idx) => ({ ...line, lineOrder: idx }));
+    // 2. PLAIN TEXT FALLBACK (Interpolated Timestamps)
+    // If no timestamps found, distribute lines evenly across duration
+    const lines = lrcContent.split('\n');
+    const result: LyricLine[] = [];
+    const safeDuration = duration > 0 ? duration : 180;
+    
+    const meaningfulLines = lines.map(l => l.trim()).filter(l => l.length > 0);
+    const totalLines = meaningfulLines.length;
+    
+    if (totalLines > 0) {
+        const timePerLine = safeDuration / totalLines;
+        meaningfulLines.forEach((text, index) => {
+            result.push({
+                timestamp: index * timePerLine,
+                text,
+                lineOrder: index
+            });
+        });
+    }
+    
+    return result;
   }
 };

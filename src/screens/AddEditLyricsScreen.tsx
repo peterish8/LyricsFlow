@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 // ... imports
 
-import { LrcLibService, LrcLibTrack } from '../services/LrcLibService';
+import { lyricaService } from '../services/LyricaService';
 
 // ...
 
@@ -240,53 +240,38 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
       console.log(`[Magic] Attempt ${magicAttempt}: Searching for "${searchTitle}" by "${searchArtist}"`);
 
       try {
-          // STRATEGY: 
-          // Attempt 0 & 1 -> Synced Only
-          // Attempt 2 -> Fallback (Synced or Plain)
+          // Lyrica Logic: Follows Synced Slow -> Fast -> Plain strategy
+          // If we already have plain lyrics (blue), we retry specifically for synced
+          const isRetryForSynced = magicStatus === 'blue';
+          const durationVal = parseDurationInput(durationText);
           
-          let result: LrcLibTrack | null = null;
-          
-          const results = await LrcLibService.search({
-              track_name: searchTitle,
-              artist_name: searchArtist,
-              album_name: searchAlbum
-          });
-          
-          if (magicAttempt < 2) {
-              result = results.find(t => t.syncedLyrics && t.syncedLyrics.length > 0) || null;
-          } else {
-              result = results.find(t => t.syncedLyrics && t.syncedLyrics.length > 0) || 
-                       results.find(t => t.plainLyrics && t.plainLyrics.length > 0) || null;
-          }
+          const result = await lyricaService.fetchLyrics(
+              searchTitle, 
+              searchArtist, 
+              isRetryForSynced,
+              durationVal
+          );
 
-          if (result) {
-              const hasSynced = result.syncedLyrics && result.syncedLyrics.length > 0;
-              const textToUse = hasSynced ? result.syncedLyrics : result.plainLyrics;
-              const parsed = LrcLibService.parseLrc(textToUse, result.duration);
+          if (result && result.lyrics) {
+              const hasSynced = lyricaService.hasTimestamps(result.lyrics);
+              const parsed = lyricaService.parseLrc(result.lyrics, result.metadata?.duration || 0);
               
               setLyricsText(lyricsToRawText(parsed));
-              if (result.duration) setDurationText(formatTime(result.duration));
+              if (result.metadata?.duration) setDurationText(formatTime(result.metadata.duration));
 
               setMagicStatus(hasSynced ? 'green' : 'blue');
               
-              setToastMessage(hasSynced ? '✨ Synced lyrics applied!' : '📝 Plain lyrics applied.');
+              const modeText = hasSynced ? 'Synced lyrics applied!' : 'Plain lyrics applied.';
+              setToastMessage(`✨ ${modeText} (${result.source})`);
               setToastType('success');
               setShowToast(true);
-
               setMagicAttempt(0);
 
           } else {
-              if (magicAttempt < 2) {
-                  setMagicStatus('yellow');
-                  setMagicAttempt(prev => (prev + 1) as 0 | 1 | 2);
-                  setToastMessage(`No synced lyrics found. Tap to retry (${magicAttempt + 1}/2)`);
-                  setToastType('info');
-              } else {
-                  setMagicStatus('red');
-                  setMagicAttempt(0); 
-                  setToastMessage('No lyrics found (Synced or Plain).');
-                  setToastType('error');
-              }
+              setMagicStatus(isRetryForSynced ? 'blue' : 'red'); // Keep blue if we were retrying for synced but failed
+              setMagicAttempt(0); 
+              setToastMessage(isRetryForSynced ? 'No synced lyrics found to upgrade.' : 'No lyrics found via Lyrica.');
+              setToastType(isRetryForSynced ? 'info' : 'error');
               setShowToast(true);
           }
 
@@ -295,6 +280,7 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
           setMagicStatus('red');
           setToastMessage('Network error.');
           setToastType('error');
+          setShowToast(true);
       } finally {
           setMagicLoading(false);
       }
@@ -333,7 +319,7 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
     }
 
     // ...
-    let parsedLines = LrcLibService.parseLrc(finalLyrics, result.duration);
+    let parsedLines = lyricaService.parseLrc(finalLyrics, result.duration);
     const hasSyncedTimestamps = result.syncedLyrics && result.syncedLyrics.includes('[');
     
     if (hasSyncedTimestamps) {

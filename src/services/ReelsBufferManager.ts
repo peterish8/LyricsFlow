@@ -160,10 +160,18 @@ class ReelsBufferManager {
             activeSlot.sound.setOnPlaybackStatusUpdate(this.activeStatusCallback);
         }
         
+        // Double check status before replay
+        const status = await activeSlot.sound.getStatusAsync();
+        if (!status.isLoaded) {
+            console.warn(`[ReelsBuffer] Sound at ${index} unloaded unexpectedly!`);
+            return; 
+        }
+
         await activeSlot.sound.replayAsync(); // replayAsync ensures it starts from 0 or resumes correctly
         console.log(`[ReelsBuffer] ▶️ Playing ${song.title}`);
       } catch (error) {
         console.error('[ReelsBuffer] Failed to play:', error);
+        // Retry once?
       }
     }
   }

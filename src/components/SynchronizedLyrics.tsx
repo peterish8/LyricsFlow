@@ -58,50 +58,50 @@ const LyricLine = React.memo(({ text, isActive, isPassed, onPress, textStyle, so
     };
   });
   
-  // Word Splitting & Highlighting Logic - MEMOIZED to prevent processing on every active toggle
-  const renderedWords = React.useMemo(() => {
+  // Phrase Matching Logic - "Exact Match Like Dynamic Island"
+  const renderedText = React.useMemo(() => {
       if (!songTitle) return text;
-
-      const words = text.split(' ');
-      // Filter out empty strings from the title words
-      const titleWords = songTitle.toLowerCase().split(' ')
-          .map(w => w.replace(/[^a-z0-9]/g, ''))
-          .filter(w => w.length > 0);
       
-      return words.map((word, index) => {
-          // Strictly clean the word (remove punctuation)
-          const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, '');
-          
-          // STRICT MATCH: The clean word must be in the title words list.
-          const isMatch = cleanWord.length > 0 && titleWords.includes(cleanWord);
-          
-          if (!isMatch) {
-              return <Text key={index}>{word} </Text>;
-          }
-          
-          // Glowing Style for Matched Words using the Dynamic Color
-          return (
-              <Text 
-                key={index} 
-                style={{
-                    color: '#FFFFFF', // Bright White for sparkle
-                    textShadowColor: highlightColor, // Colored Glow from cover art
-                    textShadowOffset: { width: 0, height: 0 },
-                    textShadowRadius: 20, // Increased radius for softer, stronger glow
-                    fontWeight: '900',
-                    opacity: 1, // Ensure full opacity for pop
-                }}
-              >
-                {word}{' '}
+      const cleanText = text.replace(/\s+/g, ' '); // normalize spaces
+      const lowerText = cleanText.toLowerCase();
+      const lowerTitle = songTitle.toLowerCase().trim();
+      
+      // Avoid highlighting if title is too short to be unique (unless it's the whole line)
+      if (lowerTitle.length < 2) return text;
+
+      const index = lowerText.indexOf(lowerTitle);
+      
+      if (index === -1) {
+          return text;
+      }
+
+      // We found the title in this line!
+      const prefix = cleanText.substring(0, index);
+      const match = cleanText.substring(index, index + lowerTitle.length);
+      const suffix = cleanText.substring(index + lowerTitle.length);
+
+      return (
+          <Text>
+              {prefix}
+              <Text style={{
+                  backgroundColor: highlightColor || 'rgba(255,255,255,0.3)',
+                  color: '#FFFFFF',
+                  fontWeight: '900',
+                  // "Dynamic Island" style for text
+                  // borderRadius/overflow works on Text in newer RN, but padding might need spaces
+                  // Adding thin spaces around might help breathing room
+              }}>
+                 {` ${match} `}
               </Text>
-          );
-      });
+              {suffix}
+          </Text>
+      );
   }, [text, songTitle, highlightColor]);
 
   return (
     <Pressable onPress={onPress}>
       <Animated.Text style={[styles.lyricText, textStyle, animatedStyle]}>
-        {renderedWords}
+        {renderedText}
       </Animated.Text>
     </Pressable>
   );
@@ -156,12 +156,12 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
     return effectiveTime >= line.timestamp && (!nextLine || effectiveTime < nextLine.timestamp);
   });
 
-  // Opacity for smooth reveal
-  const containerOpacity = useSharedValue(0);
+  // Opacity for smooth reveal - Default to 1 to ensure visibility
+  const containerOpacity = useSharedValue(1);
   
   const containerStyle = useAnimatedStyle(() => {
      return {
-         opacity: withTiming(containerOpacity.value, { duration: 200 }) // Faster fade (was 300)
+         opacity: withTiming(containerOpacity.value, { duration: 200 })
      };
   });
 
@@ -173,7 +173,6 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
     // If invalid index, just show anyway? Or stay hidden?
     // Better to show.
     if (!isValidIndex) {
-        containerOpacity.value = 1;
         return;
     }
 
@@ -188,19 +187,7 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
                 viewPosition: activeLinePosition,
             });
             if (isInitial) {
-                // Confirm success? Hard to know for sure, but we assume if no error thrown
                 hasInitialScrolled.current = true;
-                
-                // DELAYED REVEAL: Reduced to minimum to render frame but feel instant
-                // This prevents seeing the "jump" or the top of the list
-                // User requested "no delay".
-                containerOpacity.value = 1; // trigger animation immediately via useAnimatedStyle or just set current?
-                // Actually containerOpacity is a sharedValue used in useAnimatedStyle withTiming.
-                // If we set it to 1, it will animate.
-                // We'll remove the timeout effectively.
-                requestAnimationFrame(() => {
-                     containerOpacity.value = 1;
-                }); 
             }
         } catch (e) {
             console.log('[SynchronizedLyrics] Scroll failed:', e);
@@ -216,14 +203,8 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
             setTimeout(() => performScroll(true), 500) // Fallback
         ];
         
-        // Safety: Visual fallback if scroll fails entirely after 1s
-        const safetyReveal = setTimeout(() => {
-             if (containerOpacity.value === 0) containerOpacity.value = 1;
-        }, 1000);
-
         return () => {
              timers.forEach(t => clearTimeout(t));
-             clearTimeout(safetyReveal);
         };
     } else {
         // Normal progression - only when index changes
@@ -285,8 +266,6 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
               flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: activeLinePosition });
-              // Also reveal on fail-recovery
-              containerOpacity.value = 1;
             });
           }}
           // Optimization: getItemLayout Removed. 

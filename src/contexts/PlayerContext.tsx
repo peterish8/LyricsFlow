@@ -39,7 +39,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       store.updateProgress(currentTime, duration);
       
       if (store.isPlaying !== playing) {
-        store.setIsPlaying(playing);
+        // Prevent UI flicker: Don't update to "paused" (false) if merely buffering/loading
+        const isBuffering = playbackState === 'buffering' || playbackState === 'loading';
+        if (!playing && isBuffering) {
+            // Keep existing state (likely "playing") to avoid button flicker
+        } else {
+            store.setIsPlaying(playing);
+        }
       }
 
       if (playbackState === 'finished') {

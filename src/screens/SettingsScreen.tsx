@@ -477,6 +477,12 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.lyricsFontSize.charAt(0).toUpperCase() + settings.lyricsFontSize.slice(1)}
               onPress={() => {}}
             />
+            <SettingsRowSwitch
+              icon="speedometer-outline"
+              label="Show FPS Counter"
+              value={settings.showPerformanceHUD}
+              onToggle={settings.setShowPerformanceHUD}
+            />
           </View>
 
           <View style={styles.section}>

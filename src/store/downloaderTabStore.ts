@@ -8,7 +8,7 @@ export interface BulkItem {
   status: 'pending' | 'searching' | 'found' | 'not_found';
 }
 
-interface SearchTab {
+export interface SearchTab {
   id: string;
   query: string;
   titleQuery: string;   // Per-tab title search text
