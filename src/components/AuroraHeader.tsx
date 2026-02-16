@@ -34,7 +34,6 @@ interface AuroraBackgroundProps {
 }
 
 export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
-  palette = 'library',
   colors,
   imageUri,
   animated = false,

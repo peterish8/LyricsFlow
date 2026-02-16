@@ -31,7 +31,7 @@ export const PlaylistSelectionModal = ({ visible, onClose, onSelect, onSkip }: P
             setNewPlaylistName('');
             setSearchQuery('');
         }
-    }, [visible]);
+    }, [visible, fetchPlaylists]);
 
     const filteredPlaylists = playlists.filter(p => 
         p.name.toLowerCase().includes(searchQuery.toLowerCase())

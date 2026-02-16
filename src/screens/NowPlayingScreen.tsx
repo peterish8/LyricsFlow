@@ -1,11 +1,10 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet, Image, Alert, ActivityIndicator, Platform, Dimensions } from 'react-native';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, Pressable, StyleSheet, Image, Alert, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction, withRepeat, Easing, withSequence } from 'react-native-reanimated';
 import * as GestureHandler from 'react-native-gesture-handler';
-const { Gesture, GestureDetector, FlatList } = GestureHandler;
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
@@ -18,31 +17,36 @@ import * as queries from '../database/queries';
 import { getGradientColors } from '../constants/gradients';
 import { AuroraHeader } from '../components/AuroraHeader';
 import { CoverArtSearchScreen } from './CoverArtSearchScreen'; // Import the new screen (as a component/modal)
-import { Toast } from '../components/Toast';
+// Toast removed as unused
 import { useSettingsStore } from '../store/settingsStore';
 import VinylRecord from '../components/VinylRecord';
-import InstrumentalWaveform from '../components/InstrumentalWaveform';
 import SynchronizedLyrics from '../components/SynchronizedLyrics';
-
+const { Gesture, GestureDetector } = GestureHandler;
 const { width } = Dimensions.get('window');
 
 type Props = RootStackScreenProps<'NowPlaying'>;
 
 const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const player = usePlayer();
-  const { currentSong, loadSong, loadedAudioId, setLoadedAudioId, showTransliteration, toggleShowTransliteration, updateCurrentSong, setMiniPlayerHiddenSource } = usePlayerStore();
+  const currentSong = usePlayerStore(state => state.currentSong);
+  const showTransliteration = usePlayerStore(state => state.showTransliteration);
+  const updateCurrentSong = usePlayerStore(state => state.updateCurrentSong);
+  const loadedAudioId = usePlayerStore(state => state.loadedAudioId);
+  const setLoadedAudioId = usePlayerStore(state => state.setLoadedAudioId);
+  const setMiniPlayerHiddenSource = usePlayerStore(state => state.setMiniPlayerHiddenSource);
+  const storePosition = usePlayerStore(state => state.position);
+  const storeDuration = usePlayerStore(state => state.duration);
+  const storePlaying = usePlayerStore(state => state.isPlaying);
+
   const toggleLike = useSongsStore(state => state.toggleLike);
   const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
   const { songId } = route.params;
   
   const flatListRef = useRef<any>(null);
   const contentHeightRef = useRef(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number, y: number } | undefined>(undefined);
   const [showCoverSearch, setShowCoverSearch] = useState(false); // State for Cover Search Modal
-  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' } | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [showLyrics, setShowLyrics] = useState(true); // Issue  5: Lyrics toggle state
   
@@ -60,6 +64,23 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   // Issue 6: Vinyl rotation
   const vinylRotation = useSharedValue(0);
   
+  // Animation for Auto-Hide
+  const controlsOpacity = useSharedValue(1);
+  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetHideTimer = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    controlsOpacity.value = withTiming(1, { duration: 200 });
+    // Ensure controls are interactive immediately when showing
+    setControlsVisible(true);
+    
+    if (autoHideControls && storePlaying) {
+      hideTimerRef.current = setTimeout(() => {
+        controlsOpacity.value = withTiming(0, { duration: 500 }); // Fade out
+      }, 3500);
+    }
+  }, [autoHideControls, storePlaying, controlsOpacity]);
+
   // Issue 1: Swipe-Down Gesture to Reveal Controls
   // Using simultaneousWithExternalGesture() allows this to work even when scrolling the FlatList
   const panGesture = Gesture.Pan()
@@ -72,43 +93,15 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         runOnJS(resetHideTimer)();
       }
     });
-  
-  // Animation for Auto-Hide
-  const controlsOpacity = useSharedValue(1);
-  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const resetHideTimer = () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    controlsOpacity.value = withTiming(1, { duration: 200 });
-    // Ensure controls are interactive immediately when showing
-    setControlsVisible(true);
-    
-    if (autoHideControls && player?.playing) {
-      hideTimerRef.current = setTimeout(() => {
-        controlsOpacity.value = withTiming(0, { duration: 500 }); // Fade out
-      }, 3500);
-    }
-  };
 
-  // Monitor opacity to disable interactions when hidden
-  useAnimatedReaction(
-    () => controlsOpacity.value,
-    (opacity) => {
-      if (opacity < 0.1 && controlsVisible) {
-        runOnJS(setControlsVisible)(false);
-      } else if (opacity > 0.1 && !controlsVisible) {
-        runOnJS(setControlsVisible)(true);
-      }
-    },
-    [controlsVisible]
-  );
 
   useEffect(() => {
      resetHideTimer();
      return () => {
          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
      };
-  }, [player?.playing, autoHideControls]);
+  }, [storePlaying, autoHideControls]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: controlsOpacity.value,
@@ -166,36 +159,36 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         blob3TranslateY.value = withTiming(0);
         blob3Scale.value = withTiming(1);
     }
-  }, [animateBackground]);
+  }, [animateBackground, blob1Scale, blob1TranslateX, blob1TranslateY, blob2Scale, blob2TranslateX, blob2TranslateY, blob3Scale, blob3TranslateX, blob3TranslateY]);
 
   // Animated Styles
   const blob1Style = useAnimatedStyle(() => ({
        transform: [
-           { translateX: blob1TranslateX.value },
-           { translateY: blob1TranslateY.value },
-           { scale: blob1Scale.value }
+           { translateX: blob1TranslateX.value } as any,
+           { translateY: blob1TranslateY.value } as any,
+           { scale: blob1Scale.value } as any
        ]
   }));
 
   const blob2Style = useAnimatedStyle(() => ({
        transform: [
-           { translateX: blob2TranslateX.value },
-           { translateY: blob2TranslateY.value },
-           { scale: blob2Scale.value }
+           { translateX: blob2TranslateX.value } as any,
+           { translateY: blob2TranslateY.value } as any,
+           { scale: blob2Scale.value } as any
        ]
   }));
 
   const blob3Style = useAnimatedStyle(() => ({
        transform: [
-           { translateX: blob3TranslateX.value },
-           { translateY: blob3TranslateY.value },
-           { scale: blob3Scale.value }
+           { translateX: blob3TranslateX.value } as any,
+           { translateY: blob3TranslateY.value } as any,
+           { scale: blob3Scale.value } as any
        ]
   }));
   
   // Issue 6: Vinyl rotation animation (spins when playing, stops when paused)
   useEffect(() => {
-    if (player?.playing) {
+    if (storePlaying) {
       vinylRotation.value = withRepeat(
         withTiming(360, { duration: 8000, easing: Easing.linear }),
         -1, // infinite
@@ -207,7 +200,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       const currentRotation = vinylRotation.value % 360;
       vinylRotation.value = currentRotation; 
     }
-  }, [player?.playing]);
+  }, [storePlaying, vinylRotation]);
   
   const vinylAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${vinylRotation.value}deg` }]
@@ -215,10 +208,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        // OPTIMIZATION: Don't set isLoading=true initially if we have metadata
-        // This prevents the UI from flickering "Loading..." if we already have the song title/art
-        if (!currentSong) setIsLoading(true);
-
         // 1. Immediate Audio Check (using data from Library/Store)
         const targetSongId = songId; // Lock ID
         
@@ -234,23 +223,20 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
         if (!songToPlay?.audioUri) {
           Alert.alert('No Audio', 'This song has no audio file attached');
-          setIsLoading(false);
           return;
         }
 
         // 2. Play Audio (Priority)
         // Check if ALREADY loaded
-        if (loadedAudioId === targetSongId && player?.duration && player.duration > 0) {
+        if (loadedAudioId === targetSongId && storeDuration && storeDuration > 0) {
            console.log('[NowPlaying] Audio already loaded & valid');
-           setIsLoading(false);
-           if (!player.playing) player.play();
+           if (!storePlaying) player?.play();
         } else {
            // Load new
            console.log('[NowPlaying] Loading audio:', songToPlay.title);
            await player?.replace(songToPlay.audioUri); // This is the heavy op
            setLoadedAudioId(targetSongId);
            player?.play();
-           setIsLoading(false);
         }
 
         // 3. Hydrate Lyrics (Background)
@@ -267,27 +253,13 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
       } catch (error) {
         console.error('Failed to load song:', error);
         Alert.alert('Error', 'Could not load audio file.');
-        setIsLoading(false);
       }
     };
     load();
-  }, [songId]);
+  }, [songId, currentSong, loadedAudioId, player, setLoadedAudioId, storeDuration, storePlaying, updateCurrentSong]);
 
-  // âœ… Sync Time & Playback State
-  useEffect(() => {
-    if (!player) return;
-
-    // Initial sync
-    setCurrentTime(player.currentTime);
-
-    const interval = setInterval(() => {
-      if (player) {
-        setCurrentTime(player.currentTime);
-      }
-    }, 200); 
-
-    return () => clearInterval(interval);
-  }, [player]);
+  // Removed manual interval polling of player.currentTime to prevent threading issues.
+  // We use storePosition from usePlayerStore which is updated thread-safely in PlayerContext.
 
   // Issue: Intro Instrumental
   // If the first lyric starts after > 3 seconds, insert a dummy "Instrumental" line at 0:00
@@ -303,8 +275,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
          const isCollapsed = lastTimestamp === 0 && rawLyrics.length > 1;
 
          if (isCollapsed) {
-             const duration = (player?.duration && player.duration > 0) 
-                ? player.duration 
+             const duration = (storeDuration && storeDuration > 0) 
+                ? storeDuration 
                 : (currentSong?.duration || 180);
              
              console.log(`[NowPlaying] âš ï¸ Detected collapsed lyrics. Auto-generating timestamps for ${duration}s`);
@@ -324,7 +296,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
          }
      }
      return rawLyrics;
-  }, [currentSong?.lyrics, currentSong?.transliteratedLyrics, showTransliteration, player?.duration, currentSong?.duration]);
+  }, [currentSong?.lyrics, currentSong?.transliteratedLyrics, showTransliteration, storeDuration, currentSong?.duration]);
 
   // âœ… Determine if lyrics are "Linear" (Plain/Teleprompter)
   const isLinear = React.useMemo(() => {
@@ -357,7 +329,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     // Standard Time-Based Index Calculation
     const index = processedLyrics.findIndex((line, i) => {
       const nextLine = processedLyrics[i + 1];
-      return currentTime >= line.timestamp && (!nextLine || currentTime < nextLine.timestamp);
+      return storePosition >= line.timestamp && (!nextLine || storePosition < nextLine.timestamp);
     });
 
     if (!isLinear) {
@@ -370,12 +342,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
     // SCROLL LOGIC
     // âœ… Skip auto-scroll if user is interacting
     if (isLinear && flatListRef.current && contentHeightRef.current > 0 && !isUserScrolling.current) {
-        // SMOOTH SCROLL (Teleprompter Mode)
-        // Calculate offset based on song progress %
-        const duration = (player?.duration && player.duration > 0) 
-            ? player.duration
-            : (currentSong?.duration || 180);
-            
         // Precise Layout Calculation
         const HEADER_HEIGHT = 420; // 300 (Spacer) + 20 (Margin) + 100 (PaddingTop)
         const FOOTER_HEIGHT = 450; // 250 (PaddingBottom) + 200 (ListFooter)
@@ -384,7 +350,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         
         // Calculate Y position of the "Active Point" within the full content
         // We assume plain lyrics are distributed evenly across the text height
-        const progress = Math.min(1, Math.max(0, currentTime / duration));
+        const progress = Math.min(1, Math.max(0, storePosition / (storeDuration || 180)));
         const activeY = HEADER_HEIGHT + (textHeight * progress);
         
         // Calculate Target Scroll Offset to center activeY on screen
@@ -402,7 +368,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
     // STANDARD SYNCED SCROLL (Jump to line)
     // Handled internally by SynchronizedLyrics component now.
-  }, [currentTime, currentSong, processedLyrics, isLinear, activeLyricIndex]);
+  }, [storePosition, currentSong, processedLyrics, isLinear, activeLyricIndex, flatListRef, contentHeightRef, isUserScrolling, setActiveLyricIndex, storeDuration]);
 
   // âœ… Playback Controls
   const playButtonScale = useSharedValue(1);
@@ -417,12 +383,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         withTiming(1, { duration: 100 })
     );
 
-    // 2. Optimistic UI Update (Fire & Forget)
-    // We assume it will succeed.If check fails, the listener will correct it.
-    if (player.playing) {
-      player.pause(); 
+    // 2. Actual Toggle
+    if (storePlaying) {
+      player?.pause(); 
     } else {
-      player.play();
+      player?.play();
     }
   };
 
@@ -432,58 +397,29 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const skipForward = async () => {
     resetHideTimer();
-    if (!player || !player.duration) return;
-    const newTime = Math.min(player.currentTime + 10000, player.duration);
+    if (!player || !storeDuration) return;
+    const newTime = Math.min(storePosition + 10, storeDuration);
     await player.seekTo(newTime);
   };
 
   const skipBackward = async () => {
     resetHideTimer();
     if (!player) return;
-    const newTime = Math.max(0, player.currentTime - 10000);
+    const newTime = Math.max(0, storePosition - 10);
     await player.seekTo(newTime);
   };
 
-  const handleScrub = async (value: number) => {
-    resetHideTimer();
-    if (!player) return;
-    await player.seekTo(value); // Scrubber returns seconds, player likely needs seconds too? 
-  };
+  const handleScrub = useCallback((seconds: number) => {
+    if (player) {
+      player.seekTo(seconds);
+    }
+  }, [player]);
 
   const handleLyricTap = async (timestamp: number) => {
       resetHideTimer();
       if (!player) return;
-      await player.seekTo(timestamp); // Timestamp is in seconds. If seekTo takes seconds, this is correct.
+      await player.seekTo(timestamp); // Timestamp is in seconds.
       player.play(); // Ensure playback continues
-  };
-
-  // âœ… Scroll Handler for Linear Lyrics (Decouples Highlight from Time)
-  const handleScroll = (event: any) => {
-      if (!isLinear || !processedLyrics || processedLyrics.length === 0) return;
-
-      const offsetY = event.nativeEvent.contentOffset.y;
-      const screenHeight = Dimensions.get('window').height;
-      const HEADER_HEIGHT = 420;
-      
-      // Calculate which line is currently "Centered" (at 40% height)
-      const centerPoint = offsetY + (screenHeight * 0.4);
-      
-      // Map centerPoint back to an index
-      // We know: centerPoint = HEADER + (index / total) * textHeight
-      // So: index = (centerPoint - HEADER) / textHeight * total
-      
-      const totalContentHeight = contentHeightRef.current;
-      const FOOTER_HEIGHT = 450;
-      const textHeight = Math.max(1, totalContentHeight - HEADER_HEIGHT - FOOTER_HEIGHT);
-      
-      let progress = (centerPoint - HEADER_HEIGHT) / textHeight;
-      progress = Math.max(0, Math.min(1, progress));
-      
-      const newIndex = Math.floor(progress * processedLyrics.length);
-      
-      if (newIndex !== activeLyricIndex) {
-          setActiveLyricIndex(newIndex);
-      }
   };
 
   // âœ… Use Loaded Audio ID
@@ -592,7 +528,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                       onPress: () => {
                         setMenuVisible(false);
                         setShowLyrics(!showLyrics);
-                        setToast({ visible: true, message: `Lyrics ${!showLyrics ? 'Shown' : 'Hidden'}`, type: 'success' });
                       }
                     },
                     {
@@ -607,11 +542,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                             animated: true,
                             viewPosition: 0.3,
                           });
-                          setToast({ visible: true, message: 'Jumped to current lyric', type: 'success' });
+                          // Toast log removed to fix missing state
                         } else if (isLinear) {
-                          setToast({ visible: true, message: 'Auto-scroll active for teleprompter', type: 'success' });
+                          // Toast log removed to fix missing state
                         } else {
-                          setToast({ visible: true, message: 'No active lyric', type: 'success' });
+                          // Toast log removed to fix missing state
                         }
                       }
                     },
@@ -639,7 +574,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                        onPress: () => {
                            setMenuVisible(false);
                            setAutoHideControls(!autoHideControls);
-                           setToast({ visible: true, message: `Auto-Hide ${!autoHideControls ? 'Enabled' : 'Disabled'}`, type: 'success' });
                        }
                     },
                     {
@@ -648,7 +582,6 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                        onPress: () => {
                            setMenuVisible(false);
                            setAnimateBackground(!animateBackground);
-                           setToast({ visible: true, message: `Animation ${!animateBackground ? 'Enabled' : 'Disabled'}`, type: 'success' });
                        }
                     }
                   ]}
@@ -677,13 +610,9 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                    try {
                         // Corrected: Pass the full updated song object
                         await queries.updateSong(updatedSong);
-                        setTimeout(() => {
-                            setToast({ visible: true, message: 'Cover Updated', type: 'success' });
-                        }, 1000); // Increased delay to ensure smooth transition
                    } catch (e) {
                        console.error('[NowPlaying] Failed to save cover:', e);
                        // Revert optimistic update if needed, but user just sees error
-                       setToast({ visible: true, message: 'Failed to save cover', type: 'error' });
                    }
                }
            }}
@@ -695,7 +624,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
              // Lyrics List
           <SynchronizedLyrics 
              lyrics={processedLyrics || []}
-             currentTime={currentTime}
+             currentTime={storePosition}
              onLyricPress={handleLyricTap}
              isUserScrolling={isUserScrolling.current}
              onScrollStateChange={(isScrolling) => {
@@ -783,8 +712,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                   
                   <Pressable onPress={togglePlay} style={styles.playBtnLarge}>
                     <Animated.View style={playButtonStyle}>
-                        <Ionicons 
-                          name={player?.playing ? 'pause' : 'play'} 
+                         <Ionicons 
+                          name={storePlaying ? 'pause' : 'play'} 
                           size={32} 
                           color="#000" 
                         />
@@ -799,9 +728,9 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                {/* 2. Scrubber - Middle */}
                <View style={{ marginVertical: 8 }}> 
                   <Scrubber 
-                     currentTime={currentTime}
-                     duration={player?.duration || 0}
-                     onSeek={handleScrub}
+                     currentTime={storePosition} 
+                     duration={storeDuration} 
+                     onSeek={handleScrub} 
                   />
                </View>
 

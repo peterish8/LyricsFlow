@@ -71,9 +71,10 @@ export interface UnifiedSong {
   downloadUrl: string;
   streamUrl?: string; // Optional alias for downloadUrl
   thumbnail?: string; // Optional alias for highResArt
-  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack' | 'Gaana';
+  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack' | 'Gaana' | 'Local';
   duration?: number; // in seconds
   hasLyrics?: boolean;
+  isLocal?: boolean; // Whether the song is from local library
   
   // Selection/Download Properties
   selectedQuality?: { url: string; quality: string; format: string };

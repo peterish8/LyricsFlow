@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { View, FlatList, Dimensions, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import Animated, { 
   useSharedValue, 
@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+// ITEM_HEIGHT removed as unused
 
 // ------------------------------------------------------------------
 // Step 1: The Animated <LyricLine> Component
@@ -30,8 +31,8 @@ const LyricLine = React.memo(({ text, isActive, isPassed, onPress, textStyle, so
   const activeValue = useSharedValue(isActive ? 1 : 0);
 
   useEffect(() => {
-    activeValue.value = withTiming(isActive ? 1 : 0, { duration: 300 });
-  }, [isActive]);
+    activeValue.value = withTiming(isActive ? 1 : 0, { duration: 150 });
+  }, [isActive, activeValue]);
 
   const animatedStyle = useAnimatedStyle(() => {
     // Interpolate Scale: 1.0 -> 1.1
@@ -57,8 +58,8 @@ const LyricLine = React.memo(({ text, isActive, isPassed, onPress, textStyle, so
     };
   });
   
-  // Word Splitting & Highlighting Logic
-  const renderText = () => {
+  // Word Splitting & Highlighting Logic - MEMOIZED to prevent processing on every active toggle
+  const renderedWords = React.useMemo(() => {
       if (!songTitle) return text;
 
       const words = text.split(' ');
@@ -95,12 +96,12 @@ const LyricLine = React.memo(({ text, isActive, isPassed, onPress, textStyle, so
               </Text>
           );
       });
-  };
+  }, [text, songTitle, highlightColor]);
 
   return (
     <Pressable onPress={onPress}>
       <Animated.Text style={[styles.lyricText, textStyle, animatedStyle]}>
-        {renderText()}
+        {renderedWords}
       </Animated.Text>
     </Pressable>
   );
@@ -142,51 +143,93 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
   bottomSpacerHeight = SCREEN_HEIGHT * 0.4
 }) => {
   const flatListRef = useRef<FlatList>(null);
+  const [isLayoutReady, setIsLayoutReady] = React.useState(false);
+  const hasInitialScrolled = useRef(false);
   
   // Find active index based on time
+  // Compensation: Add 1.5s to currentTime to anticipate the line change (Dynamic Offset Fix)
+  // This counteracts the animation delay + polling interval + inherent player latency
+  const effectiveTime = currentTime + 1.5;
+
   const activeIndex = lyrics.findIndex((line, index) => {
     const nextLine = lyrics[index + 1];
-    return currentTime >= line.timestamp && (!nextLine || currentTime < nextLine.timestamp);
+    return effectiveTime >= line.timestamp && (!nextLine || effectiveTime < nextLine.timestamp);
   });
 
-  // Effect to scroll to active line
-  // Effect to scroll to active line
+  // Opacity for smooth reveal
+  const containerOpacity = useSharedValue(0);
+  
+  const containerStyle = useAnimatedStyle(() => {
+     return {
+         opacity: withTiming(containerOpacity.value, { duration: 200 }) // Faster fade (was 300)
+     };
+  });
+
+  // ⚡ COMPREHENSIVE SCROLL CONTROL
   useEffect(() => {
-    let isMounted = true;
-    
-    // Safety check: Ensure index is valid for current data
+    if (!isLayoutReady || isUserScrolling || !flatListRef.current) return;
+
     const isValidIndex = activeIndex >= 0 && activeIndex < lyrics.length;
-
-    if (isValidIndex && !isUserScrolling && flatListRef.current) {
-      try {
-          flatListRef.current.scrollToIndex({
-            index: activeIndex,
-            animated: true, 
-            viewPosition: activeLinePosition, 
-          });
-      } catch (e) {
-          console.warn('[SynchronizedLyrics] Scroll failed:', e);
-      }
+    // If invalid index, just show anyway? Or stay hidden?
+    // Better to show.
+    if (!isValidIndex) {
+        containerOpacity.value = 1;
+        return;
     }
-    
-    return () => { isMounted = false; };
-  }, [activeIndex, isUserScrolling, lyrics.length]);
 
-  // ⚡ Fix: Force scroll removed. It causes list jumps and "slow updates" warning on new song load.
-  // The standard useEffect([activeIndex]) below handles it gracefully once layout is ready.
-  /*
-  useEffect(() => {
-      if (activeIndex > 0 && !isUserScrolling) {
-          setTimeout(() => {
-              flatListRef.current?.scrollToIndex({
-                  index: activeIndex,
-                  animated: false, // Jump instantly on open
-                  viewPosition: activeLinePosition,
-              });
-          }, 100);
-      }
-  }, []); 
-  */
+    // SCROLL LOGIC
+    const performScroll = (isInitial = false) => {
+        if (!flatListRef.current) return;
+
+        try {
+            flatListRef.current.scrollToIndex({
+                index: activeIndex,
+                animated: !isInitial, // Instant for first jump
+                viewPosition: activeLinePosition,
+            });
+            if (isInitial) {
+                // Confirm success? Hard to know for sure, but we assume if no error thrown
+                hasInitialScrolled.current = true;
+                
+                // DELAYED REVEAL: Reduced to minimum to render frame but feel instant
+                // This prevents seeing the "jump" or the top of the list
+                // User requested "no delay".
+                containerOpacity.value = 1; // trigger animation immediately via useAnimatedStyle or just set current?
+                // Actually containerOpacity is a sharedValue used in useAnimatedStyle withTiming.
+                // If we set it to 1, it will animate.
+                // We'll remove the timeout effectively.
+                requestAnimationFrame(() => {
+                     containerOpacity.value = 1;
+                }); 
+            }
+        } catch (e) {
+            console.log('[SynchronizedLyrics] Scroll failed:', e);
+            // If failed, we don't set hasInitialScrolled to true, so it will retry
+        }
+    };
+
+    if (!hasInitialScrolled.current) {
+        // First jump - aggressive retry strategy
+        const timers = [
+            setTimeout(() => performScroll(true), 50),
+            setTimeout(() => performScroll(true), 250),
+            setTimeout(() => performScroll(true), 500) // Fallback
+        ];
+        
+        // Safety: Visual fallback if scroll fails entirely after 1s
+        const safetyReveal = setTimeout(() => {
+             if (containerOpacity.value === 0) containerOpacity.value = 1;
+        }, 1000);
+
+        return () => {
+             timers.forEach(t => clearTimeout(t));
+             clearTimeout(safetyReveal);
+        };
+    } else {
+        // Normal progression - only when index changes
+        performScroll(false);
+    }
+  }, [activeIndex, isLayoutReady, isUserScrolling, lyrics.length, activeLinePosition]);
 
   const renderItem = useCallback(({ item, index }: { item: { timestamp: number; text: string }; index: number }) => {
     const isActive = index === activeIndex;
@@ -206,7 +249,7 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
   }, [activeIndex, onLyricPress, textStyle, songTitle, highlightColor]);
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, containerStyle]}>
       <MaskedView
         style={styles.maskedView}
         maskElement={
@@ -219,6 +262,7 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
       >
         <FlatList
           ref={flatListRef}
+          onLayout={() => setIsLayoutReady(true)}
           data={lyrics}
           keyExtractor={(item, index) => `${index}_${item.timestamp}`}
           renderItem={renderItem}
@@ -240,21 +284,21 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
-              flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: activeLinePosition });
+              // Also reveal on fail-recovery
+              containerOpacity.value = 1;
             });
           }}
-          // Optimization: getItemLayout helps FlatList calculate offset without measuring
-          // We estimate 80px per item (Text + Margin)
-          // getItemLayout={(data, index) => (
-          //   {length: 80, offset: 80 * index, index}
-          // )}
+          // Optimization: getItemLayout Removed. 
+          // Lyrics have variable height (wrapping), so fixed height causes massive scroll errors.
+          // Reliance on onScrollToIndexFailed and retry logic is better for accuracy (if numToRender is high enough).
           removeClippedSubviews={Platform.OS === 'android'} // Force cleanup on Android
-          initialNumToRender={10}
-          maxToRenderPerBatch={5}
-          windowSize={5}
+          initialNumToRender={50} // High enough to cover early song, low enough to stop jitter
+          maxToRenderPerBatch={50}
+          windowSize={15}
         />
       </MaskedView>
-    </View>
+    </Animated.View>
   );
 };
 

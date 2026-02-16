@@ -3,7 +3,7 @@
  * Home screen with song grid, aurora header
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   StyleSheet,
@@ -13,12 +13,12 @@ import {
   Pressable,
   RefreshControl,
   Image,
-  Alert,
   Modal,
   ScrollView,
   Animated,
   Platform,
   Vibration,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,12 +42,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
-// import { useTasksStore } from '../store/tasksStore';
-// import { TasksModal } from '../components/TasksModal';
 
 type Props = TabScreenProps<'Library'>;
 
-// Extract SongListItem to a memoized component to improve performance
+// SongListItem moved or memoized logic handled below in LibraryScreen directly if preferred, 
+// but keeping as is for now as it's a good clean component.
+// Removed unnecessary React. before useRef since it's now imported.
 const SongListItem = React.memo(({ 
   song, 
   onPress, 
@@ -66,7 +66,7 @@ const SongListItem = React.memo(({
     const isCompleted = scanJob?.status === 'completed';
     
     // Scale animation for bounce effect
-    const scaleAnim = React.useRef(new Animated.Value(1)).current;
+    const scaleAnim = useRef(new Animated.Value(1)).current;
 
     const handlePressIn = () => {
         Animated.spring(scaleAnim, {
@@ -88,7 +88,7 @@ const SongListItem = React.memo(({
 
     const renderRightActions = (_progress: any, dragX: any) => {
         const scale = dragX.interpolate({
-            inputRange: [-80, 0],
+            inputRange: [-60, 0], // Reduced from -80
             outputRange: [1, 0],
             extrapolate: 'clamp',
         });
@@ -228,21 +228,33 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   );
   
   // Bottom Sheet State
-  const [showBottomSheet, setShowBottomSheet] = React.useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
-  const gradientOpacity = React.useRef(new Animated.Value(1)).current;
+  const [showBottomSheet, setShowBottomSheet] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const gradientOpacity = useRef(new Animated.Value(1)).current;
   
-  const [activeThemeColors, setActiveThemeColors] = React.useState<string[] | undefined>(undefined);
-  const [activeImageUri, setActiveImageUri] = React.useState<string | null>(null);
+  const [activeThemeColors, setActiveThemeColors] = useState<string[] | undefined>(undefined);
+  const [activeImageUri, setActiveImageUri] = useState<string | null>(null);
   
-  const [artMenuVisible, setArtMenuVisible] = React.useState(false);
-  const [artMenuAnchor, setArtMenuAnchor] = React.useState<{ x: number, y: number } | undefined>(undefined);
-  const [selectedSongForArt, setSelectedSongForArt] = React.useState<Song | null>(null);
-  const [recentArtVisible, setRecentArtVisible] = React.useState(false);
-  const [showCoverSearch, setShowCoverSearch] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [toast, setToast] = React.useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [showQueueModal, setShowQueueModal] = React.useState(false);
+  const [artMenuVisible, setArtMenuVisible] = useState(false);
+  const [artMenuAnchor, setArtMenuAnchor] = useState<{ x: number, y: number } | undefined>(undefined);
+  const [selectedSongForArt, setSelectedSongForArt] = useState<Song | null>(null);
+  const [recentArtVisible, setRecentArtVisible] = useState(false);
+  const [showCoverSearch, setShowCoverSearch] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [showQueueModal, setShowQueueModal] = useState(false);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredSongs = useMemo(() => {
+     if (!searchQuery.trim()) return songs;
+     const query = searchQuery.toLowerCase().trim();
+     return songs.filter(s => 
+        s.title.toLowerCase().includes(query) || 
+        (s.artist && s.artist.toLowerCase().includes(query)) ||
+        (s.album && s.album.toLowerCase().includes(query))
+     );
+  }, [songs, searchQuery]);
   
   const downloadQueue = useDownloadQueueStore(state => state.queue);
   const activeDownloadsCount = downloadQueue.filter(i => i.status === 'downloading' || i.status === 'pending' || i.status === 'staging').length;
@@ -358,8 +370,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     
     try {
         console.log('[Library] Deleting song:', selectedSongForArt.title);
-        const { deleteSong: storeDeleteSong } = useSongsStore.getState();
-        await storeDeleteSong(selectedSongForArt.id);
+        await deleteSong(selectedSongForArt.id);
         setShowDeleteConfirm(false);
         setShowBottomSheet(false);
         setToast({ visible: true, message: 'Song deleted', type: 'success' });
@@ -535,12 +546,12 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         {/* Content */}
         <FlatList<Song>
           key="library-list"
-          data={songs}
+          data={filteredSongs}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={[
              styles.listContent,
-             isIsland && { paddingTop: 20 } // Reduced gap to bring covers up
+             { paddingTop: isIsland ? 20 : 25 } // Maintain gap (slightly more for Classic)
           ]}
           ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
           ListHeaderComponent={
@@ -615,6 +626,23 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                         <Ionicons name="add" size={24} color={Colors.textSecondary} />
                       </Pressable>
                     </View>
+                  </View>
+
+                  {/* 🔍 Search Input */}
+                  <View style={styles.searchBarContainer}>
+                     <Ionicons name="search" size={20} color="#FFF" style={{marginLeft: 12}} />
+                     <TextInput
+                        style={styles.searchInput}
+                        placeholder="Filter local library..."
+                        placeholderTextColor="#FFF"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                     />
+                     {searchQuery ? (
+                        <Pressable onPress={() => setSearchQuery('')} style={{padding: 8}}>
+                             <Ionicons name="close-circle" size={18} color="#666" />
+                        </Pressable>
+                     ) : null}
                   </View>
                 </>
               ) : null}
@@ -1001,8 +1029,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     marginTop: 8,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    height: 48,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)'
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    height: '100%',
+    paddingHorizontal: 12
   },
   sectionTitle: {
     fontSize: 24,
@@ -1162,7 +1207,7 @@ const styles = StyleSheet.create({
   swipeAction: {
     justifyContent: 'center',
     alignItems: 'center',
-    width: 80,
+    width: 60, // Reduced from 80
     height: '100%', 
     borderTopRightRadius: 12,
     borderBottomRightRadius: 12,

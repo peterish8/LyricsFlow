@@ -222,7 +222,7 @@ export const BackgroundDownloader = () => {
         return () => {
             isActive = false;
         };
-    }, [queue]);
+    }, [queue, updateItem, addSong, fetchSongs]);
 
     return (
         <>

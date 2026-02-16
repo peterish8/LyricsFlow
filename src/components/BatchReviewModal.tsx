@@ -25,7 +25,7 @@ const SingleSongReview = ({ song, onConfirm, onSkip }: { song: UnifiedSong, onCo
             stageSong(song);
             setIsLoaded(true);
         }
-    }, [song]);
+    }, [song, stageSong]);
 
     if (!staging || !isLoaded) {
         return (

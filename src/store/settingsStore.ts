@@ -78,7 +78,7 @@ const DEFAULT_SETTINGS = {
   showTimeRemaining: true,
   playInMiniPlayerOnly: false,
   miniPlayerStyle: 'island' as const, // Default to island as requested "like it was before"
-  navBarStyle: 'classic' as const, // Default to classic navbar
+  navBarStyle: 'modern-pill' as const, // Default to modern pill navbar
   autoHideControls: true, // Default enabled
   libraryBackgroundMode: 'daily' as const, // Default to daily top
   animateBackground: true, // Default enable animation

@@ -33,7 +33,7 @@ interface LyricLine {
   isSynced: boolean;
 }
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
+
 
 export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
   visible,
@@ -43,54 +43,32 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
   audioUri,
   duration = 0
 }) => {
-  const { 
-    currentSong, 
-    play, 
-    pause, 
-    seekTo, 
-    // position, // PlayerStore doesn't expose position/duration reactively yet
-    // duration: playerDuration,
-  } = usePlayerStore();
+  const currentSong = usePlayerStore(state => state.currentSong);
+  const play = usePlayerStore(state => state.play);
+  const pause = usePlayerStore(state => state.pause);
+  const seekTo = usePlayerStore(state => state.seekTo);
+  const storePosition = usePlayerStore(state => state.position);
+  const storeDuration = usePlayerStore(state => state.duration);
+  const storePlaying = usePlayerStore(state => state.isPlaying);
   
-  // We need to use useAudioPlayer hook or similar to get reactive position/duration
-  // OR we can poll it here since we don't have global reactive state for it yet.
-  // Ideally, PlayerContext should update store with position, but that's high frequency.
-  // For now, let's just use a local interval to poll current position if we can access the player,
-  // BUT we don't have direct access to player here.
-  
-  // WORKAROUND: We need position for syncing. 
-  // Let's use the `useAudioPlayer` hook from expo-audio directly here IF it returns the same singleton.
-  // If not, we need PlayerContext to expose it via Context, not Store.
-  
-  // Actually, we can use the `usePlayer` hook exported from PlayerContext!
-  // const player = usePlayer(); // Assuming usePlayer is available and returns the player instance
-  // player object has .currentTime and .duration
-
   // We use the usePlayer context hook which returns the expo-audio player instance
-  // Note: player might be null if not initialized
+  // Note: player might be null if not initialized. We only use it for commands (play/pause/seek)
+  // but status is read from the store for thread safety.
   const player = usePlayer();
 
-  // WORKAROUND: Polling causes "Player accessed on wrong thread" crash.
-  // FIX: We will NOT poll. We will only fetch time when:
-  // 1. User taps a line (to sync it)
-  // 2. User drags slider (we know time then)
-  // 3. Play/Pause toggle
+  const [isPlayingLocal, setIsPlayingLocal] = useState(false);
+  const [positionLocal, setPositionLocal] = useState(0);
 
-  const [position, setPosition] = useState(0);
-  const [playerDuration, setPlayerDuration] = useState(duration); // Use passed duration as fallback
-  const [isPlaying, setIsPlaying] = useState(false);
+  // Sync with store
+  useEffect(() => {
+    setIsPlayingLocal(storePlaying);
+  }, [storePlaying]);
 
-  // We only sync state when user INTERACTS, not on a timer.
-  const safeSync = () => {
-      if (player) {
-          try {
-              setPosition(player.currentTime);
-              setIsPlaying(player.playing);
-          } catch (e) {
-               // ignore
-          }
-      }
-  };
+  useEffect(() => {
+    setPositionLocal(storePosition);
+  }, [storePosition]);
+
+  const playerDuration = storeDuration || duration || 0;
 
   const [lines, setLines] = useState<LyricLine[]>([]);
   const [activeLineIndex, setActiveLineIndex] = useState<number>(-1);
@@ -126,30 +104,16 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
     }
   }, [visible, lyricsText]);
 
-  // Load audio if needed (though usually PlayerContext handles this)
-  useEffect(() => {
-    if (visible && audioUri && !player) {
-      // If we need to load a specific song for editing that isn't playing
-      // Note: In most cases, user is editing what they are listening to.
-      // Logic to switch audio context would go here if we supported editing non-playing songs.
-    }
-  }, [visible, audioUri]);
-
   // Scroll to active line based on playback position
   useEffect(() => {
-    if (!visible || !isPlaying) return;
-
-    // Find the latest line that has a timestamp <= current position
-    // BUT in "Tap Mode", we don't want to auto-scroll to existing timestamps necessarily,
-    // we want to stay where the user is looking.
-    // However, usually "Karaoke View" follows the song.
+    if (!visible || !isPlayingLocal) return;
 
     // Let's implement active line highlighting based on timestamps
     let currentIdx = -1;
     for (let i = 0; i < lines.length; i++) {
-       if (lines[i].timestamp !== undefined && lines[i].timestamp! <= position) {
+       if (lines[i].timestamp !== undefined && lines[i].timestamp! <= positionLocal) {
            currentIdx = i;
-       } else if (lines[i].timestamp !== undefined && lines[i].timestamp! > position) {
+       } else if (lines[i].timestamp !== undefined && lines[i].timestamp! > positionLocal) {
            break;
        }
     }
@@ -165,18 +129,10 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
             });
         }
     }
-  }, [position, visible]);
+  }, [positionLocal, visible, isPlayingLocal, lines, activeLineIndex]);
 
   const handleTapLine = (index: number) => {
-    // Sync time right before assigning
-    let syncTime = position;
-    if (player) {
-        try {
-            syncTime = player.currentTime;
-            setPosition(syncTime);
-        } catch(e) {}
-    }
-
+    const syncTime = positionLocal;
     const newLines = [...lines];
     newLines[index].timestamp = syncTime;
     newLines[index].isSynced = true;
@@ -185,16 +141,12 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
 
   // Update play state for UI
   const togglePlay = () => {
-      if (isPlaying) pause(); else play();
-      setIsPlaying(!isPlaying);
-      // We can try to sync once after a delay
-      setTimeout(safeSync, 500);
+      if (isPlayingLocal) pause(); else play();
   };
 
   const handleSeek = (val: number) => {
     seekTo(val);
-    setPosition(val); // optimistic update
-    setTimeout(safeSync, 500); // verify after seek
+    setPositionLocal(val); // optimistic update
   };
 
   const clearTimestamp = (index: number) => {
@@ -207,8 +159,7 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
   const handleAutoFill = () => {
      // Interpolate logic
      const newLines = [...lines];
-     let lastSyncedIndex = -1;
-
+     
      // 1. Find all synced indices
      const syncedIndices = newLines
         .map((l, i) => l.isSynced ? i : -1)
@@ -325,8 +276,8 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
              <Slider
                 style={styles.slider}
                 minimumValue={0}
-                maximumValue={playerDuration || duration}
-                value={position}
+                maximumValue={playerDuration}
+                value={positionLocal}
                 onSlidingComplete={handleSeek}
                 minimumTrackTintColor={Colors.accent}
                 maximumTrackTintColor="#555"
@@ -334,15 +285,15 @@ export const ManualSyncModal: React.FC<ManualSyncModalProps> = ({
              />
              
              <View style={styles.buttonsRow}>
-                 <Pressable onPress={() => seekTo(Math.max(0, position - 5))}>
+                 <Pressable onPress={() => seekTo(Math.max(0, positionLocal - 5))}>
                     <Ionicons name="play-back" size={24} color="#fff" />
                  </Pressable>
                  
                  <Pressable onPress={togglePlay} style={styles.playBtn}>
-                    <Ionicons name={isPlaying ? "pause" : "play"} size={32} color="#000" />
+                    <Ionicons name={isPlayingLocal ? "pause" : "play"} size={32} color="#000" />
                  </Pressable>
 
-                 <Pressable onPress={() => seekTo(Math.min(playerDuration, position + 5))}>
+                 <Pressable onPress={() => seekTo(Math.min(playerDuration, positionLocal + 5))}>
                     <Ionicons name="play-forward" size={24} color="#fff" />
                  </Pressable>
              </View>

@@ -14,21 +14,83 @@ import {
   Image,
   Modal,
   TextInput,
+  Alert,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { TabScreenProps } from '../types/navigation';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
-import { AuroraHeader, GradientPicker } from '../components';
 import { CustomAlert } from '../components/CustomAlert';
 import { Colors } from '../constants/colors';
 import { exportAllSongs, shareExportedFile, importSongsFromJson } from '../utils/exportImport';
 import { clearAllData } from '../database/queries';
+import { useReelsPreferencesStore } from '../store/reelsPreferencesStore';
+
+const ReelsLanguagesModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
+    const { preferredLanguages, updateLanguageWeight } = useReelsPreferencesStore();
+    
+    // Sort so active ones are on top or just alphabetical? Let's do alphabetical or fixed order
+    // Fixed order from store is fine.
+    
+    return (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={visible}
+            onRequestClose={onClose}
+        >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' }}>
+                <View style={{ 
+                    width: '90%', 
+                    maxHeight: '80%', 
+                    backgroundColor: Colors.card, 
+                    borderRadius: 20, 
+                    padding: 20,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.1)'
+                }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                        <Text style={{ fontSize: 20, fontWeight: 'bold', color: Colors.textPrimary }}>Music Languages</Text>
+                        <Pressable onPress={onClose}>
+                            <Ionicons name="close-circle" size={28} color={Colors.textSecondary} />
+                        </Pressable>
+                    </View>
+                    
+                    <ScrollView style={{ width: '100%' }}>
+                        <Text style={{ color: Colors.textSecondary, marginBottom: 16, fontSize: 13 }}>
+                             Adjust preferences to curate your Reels feed. Set weight to 0% to disable a language.
+                        </Text>
+                        
+                        {preferredLanguages.map((item) => (
+                            <View key={item.language} style={{ marginBottom: 20 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                                    <Text style={{ fontSize: 16, color: Colors.textPrimary, fontWeight: '600' }}>{item.language}</Text>
+                                    <Text style={{ fontSize: 14, color: Colors.primary }}>{item.weight}%</Text>
+                                </View>
+                                <Slider
+                                    style={{ width: '100%', height: 40 }}
+                                    minimumValue={0}
+                                    maximumValue={100}
+                                    step={10}
+                                    value={item.weight}
+                                    onSlidingComplete={(value) => updateLanguageWeight(item.language, value)}
+                                    minimumTrackTintColor={Colors.primary}
+                                    maximumTrackTintColor={Colors.cardHover}
+                                    thumbTintColor={Colors.primary}
+                                />
+                            </View>
+                        ))}
+                    </ScrollView>
+                </View>
+            </View>
+        </Modal>
+    );
+};
 import { useSongsStore } from '../store/songsStore';
-import { Alert } from 'react-native';
 import { scanAudioFiles, convertAudioFileToSong } from '../services/mediaScanner';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -50,6 +112,7 @@ const SettingsScreen: React.FC<Props> = () => {
   const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
   const [hiddenSongsVisible, setHiddenSongsVisible] = React.useState(false);
   const { hiddenSongs, fetchHiddenSongs, hideSong: unhideSong } = useSongsStore();
+  const [reelsLangModalVisible, setReelsLangModalVisible] = React.useState(false);
 
   // Visibility Management: Hide MiniPlayer when Settings is focus
   useFocusEffect(
@@ -430,21 +493,34 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.playInMiniPlayerOnly}
               onToggle={settings.setPlayInMiniPlayerOnly}
             />
-            <SettingsRow
-              icon="layers-outline"
-              label="Mini Player Style"
-              value={settings.miniPlayerStyle === 'island' ? 'Dynamic Island' : 'Classic Bar'}
-              onPress={() => settings.setMiniPlayerStyle(
-                settings.miniPlayerStyle === 'island' ? 'bar' : 'island'
-              )}
-            />
+            {/* Mini Player Style - Only show choice if Classic Navbar is selected */}
+            {settings.navBarStyle === 'classic' && (
+                <SettingsRow
+                icon="layers-outline"
+                label="Mini Player Style"
+                value={settings.miniPlayerStyle === 'island' ? 'Dynamic Island' : 'Classic Bar'}
+                onPress={() => {
+                    const newStyle = settings.miniPlayerStyle === 'island' ? 'bar' : 'island';
+                    settings.setMiniPlayerStyle(newStyle);
+                }}
+                />
+            )}
+
             <SettingsRow
               icon="navigate-outline"
               label="Navigation Bar Style"
               value={settings.navBarStyle === 'modern-pill' ? 'Modern Pill' : 'Classic'}
-              onPress={() => settings.setNavBarStyle(
-                settings.navBarStyle === 'modern-pill' ? 'classic' : 'modern-pill'
-              )}
+              onPress={() => {
+                const newStyle = settings.navBarStyle === 'modern-pill' ? 'classic' : 'modern-pill';
+                settings.setNavBarStyle(newStyle);
+                
+                // If switching TO Modern Pill, FORCE Dynamic Island
+                if (newStyle === 'modern-pill') {
+                  settings.setMiniPlayerStyle('island');
+                } 
+                // If switching TO Classic, defaulted to Island (user can change it)
+                // No need to force 'bar' anymore, let user choose.
+              }}
             />
             <SettingsRowSwitch
               icon="sunny-outline"
@@ -513,6 +589,16 @@ const SettingsScreen: React.FC<Props> = () => {
               icon="trash-outline"
               label="Clear All Data"
               onPress={handleClearData}
+            />
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>REELS & DISCOVERY</Text>
+            <SettingsRow
+              icon="language-outline"
+              label="Music Languages"
+              value="Configure Weights"
+              onPress={() => setReelsLangModalVisible(true)}
             />
           </View>
 
@@ -732,6 +818,11 @@ const SettingsScreen: React.FC<Props> = () => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReelsLanguagesModal 
+        visible={reelsLangModalVisible} 
+        onClose={() => setReelsLangModalVisible(false)} 
+      />
     </View>
   );
 };

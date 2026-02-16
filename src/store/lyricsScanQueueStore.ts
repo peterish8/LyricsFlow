@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { Song } from '../types/song';
 import { MultiSourceLyricsService } from '../services/MultiSourceLyricsService';
 import { useSongsStore } from './songsStore';
-import { lyricaService } from '../services/LyricaService';
 import * as FileSystem from 'expo-file-system/legacy';
 import { parseTimestampedLyrics } from '../utils/timestampParser';
 
@@ -114,38 +113,30 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
         let bestResult = null;
         let finalType = 'none';
         
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            updateJob(prev => ({ 
-                attempts: attempt, 
-                log: [...prev.log, `Attempt ${attempt} starting...`] 
-            }));
-            
-            // Adjust query
-            let searchTitle = nextJob.title;
-            let searchArtist = nextJob.artist;
-            
-            if (attempt === 2) searchTitle = searchTitle.replace(/\(.*?\)/g, '').trim();
-            if (attempt === 3) searchTitle = searchTitle.replace(/\[.*?\]/g, '').replace(/ft\..*/i, '').trim();
+        updateJob(prev => ({ 
+            attempts: 1, 
+            log: [...prev.log, `Searching for lyrics...`] 
+        }));
+        
+        // Exact same logic as Edit Lyrics Page: Fetch Once
+        // We use the full title/artist without aggressive stripping first
+        const searchTitle = nextJob.title;
+        const searchArtist = nextJob.artist;
 
-            const results = await MultiSourceLyricsService.fetchLyricsParallel(searchTitle, searchArtist, nextJob.duration);
-            
-            // Relaxed Regex: Match [00:00], (00:00), 00:00, 00.00
-            const synced = results.find(l => /[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(l.lyrics));
-            
-            if (synced) {
-                bestResult = synced;
-                finalType = 'synced';
-                updateJob(prev => ({ log: [...prev.log, `✅ Found synced lyrics (Attempt ${attempt})`] }));
-                break; 
-            } else if (results.length > 0) {
-                if (!bestResult) bestResult = results[0];
-                updateJob(prev => ({ log: [...prev.log, `⚠️ Found plain lyrics (Attempt ${attempt})`] }));
-            }
-            
-            if (attempt < 3 && !synced) {
-                 updateJob(prev => ({ log: [...prev.log, `Retrying with refined query...`] }));
-                 await new Promise(r => setTimeout(r, 1000)); // Reduced delay
-            }
+        const results = await MultiSourceLyricsService.fetchLyricsParallel(searchTitle, searchArtist, nextJob.duration);
+        
+        // Relaxed Regex for timestamps: [00:00], (00:00), 00:00
+        const synced = results.find(l => /[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(l.lyrics));
+        
+        if (synced) {
+            bestResult = synced;
+            finalType = 'synced';
+            updateJob(prev => ({ log: [...prev.log, `✅ Found synced lyrics`] }));
+        } else if (results.length > 0) {
+            // Fallback to plain if no synced found
+            bestResult = results[0];
+            finalType = 'plain';
+            updateJob(prev => ({ log: [...prev.log, `⚠️ Found plain lyrics only`] }));
         }
 
         // Apply Result
@@ -162,9 +153,9 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
                         const lyricsPath = `${songDir}/lyrics.lrc`;
                         await FileSystem.writeAsStringAsync(lyricsPath, bestResult.lyrics);
                         savedPath = lyricsPath;
-                    } catch (e) {
-                        console.warn("Could not write to song dir, trying cache...");
-                    }
+                     } catch {
+                         console.warn("Could not write to song dir, trying cache...");
+                     }
                  }
                  
                  // Try 2: Save to internal cache if Try 1 failed or invalid

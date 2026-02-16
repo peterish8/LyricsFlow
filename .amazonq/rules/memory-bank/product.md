@@ -22,21 +22,38 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 - **Battery Optimization**: Toggleable background animations to save power.
 
 ### Smart Lyric Search (The Magic Button) ✨
-- **Waterfall Strategy**: Tiered fetching from **LRCLIB (Synced)** first, then falling back to **Genius (Plain Text)**.
-- **Lyric Preview Mode**: Full-screen preview allows users to verify and scroll through found lyrics before applying them.
-- **Dynamic Theming**: The Magic Button background dynamically shifts its gradient to match the current song's `gradientId`.
-- **Robust Scraping**: Intelligent cleaning of Genius metadata ensures a pure reading experience without web clutter.
-- **Match Scoring**: Automatic verification of result relevance using title, artist, and duration metadata.
+- **Parallel Fetching**: Hits **LRCLIB**, **JioSaavn**, and **Lyrica** simultaneously (5s race)
+- **Lyric Preview Mode**: Full-screen preview allows users to verify and scroll through found lyrics before applying
+- **Dynamic Theming**: The Magic Button background dynamically shifts its gradient to match the current song's `gradientId`
+- **Match Scoring**: Automatic verification of result relevance using title, artist, and duration metadata
 
-### On-Device AI (Legacy)
-- **Whisper AI**: (Legacy) Support for local transcription using `whisper.rn`.
-- **Privacy-First**: No network required for transcription after initial model download.
+### Audio Download & Streaming
+- **Multi-source download**: Download from JioSaavn, Wynk, Gaana, NetEase, SoundCloud, Audiomack
+- **Quality selection**: Choose audio quality (128k, 320k, FLAC)
+- **Download queue**: Manage multiple downloads with queue system
+- **Batch processing**: Process multiple songs at once with BatchReviewModal
+
+### Playlist Management
+- **Full CRUD**: Create, edit, delete playlists
+- **Default playlists**: "Liked Songs" is auto-created
+- **Song organization**: Add/remove songs from playlists
+- **Playlist detail view**: View all songs in a playlist
+
+### Reels & Social Features
+- **Reels feed**: Vertical short-form content experience
+- **Recommendations**: AI-powered content suggestions
+- **Vault**: Save favorite reels for offline viewing
+
+### Transliteration Support
+- **Romanization**: Convert Tamil, Hindi lyrics to Roman script
+- **Language picker**: Select source and target languages
+- **Toggle view**: Switch between original and transliterated lyrics
 
 ### Cover Art Management
 - **Custom uploads**: Long-press (1.5s) cover art to upload from gallery
 - **Recent art reuse**: Quick access to recently used cover art
 - **Gradient fallback**: Default to theme gradient if no custom cover set
-- **Persistent storage**: Cover URIs saved per song in database
+- **Cover art search**: Search for album artwork online
 
 ### Library Organization
 - **Hybrid layout**: Top 2 songs in grid ("Most Played"), rest in list view ("All Songs")
@@ -58,6 +75,7 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 - Privacy-conscious users who prefer local-first apps
 - Music lovers who enjoy visual aesthetics and smooth animations
 - Users who need flexible lyrics input (AI-generated or manual timestamps)
+- Regional language users who need transliteration support
 
 ## Use Cases
 1. **Immersive Lyric Reading**: Follow along with songs using smooth, synchronized scrolling
@@ -65,3 +83,5 @@ LuvLyrics transforms lyric-reading into a cinematic, immersive experience. Built
 3. **Library Management**: Organize personal lyrics collection with custom cover art
 4. **Offline Experience**: Enjoy full functionality without internet connection
 5. **Visual Customization**: Personalize each song with gradients and formatting options
+6. **Audio Discovery**: Download music from multiple sources
+7. **Playlist Curation**: Create and manage personal playlists

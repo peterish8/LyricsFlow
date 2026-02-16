@@ -1,8 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Modal, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Modal } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
 
 interface ModernDeleteModalProps {
   visible: boolean;

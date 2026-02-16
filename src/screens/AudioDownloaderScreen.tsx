@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-    View, Text, StyleSheet, TextInput, Pressable, Image, 
-    ActivityIndicator, Dimensions, ScrollView, Modal, FlatList, SectionList
+    View, Text, StyleSheet, TextInput, Pressable, 
+    ActivityIndicator, Dimensions, ScrollView, FlatList, SectionList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { useSongStaging } from '../hooks/useSongStaging'; // Kept for simple single-song checks if needed
+// useSongStaging removed as unused
 import { Colors } from '../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { QueueItem } from '../store/downloadQueueStore';
@@ -15,14 +15,13 @@ import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
 import { UnifiedSong } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { Audio } from 'expo-av';
-import { ImageSearchService } from '../services/ImageSearchService';
+// ImageSearchService removed as unused
 
 // New Architecture Imports
 import { useDownloaderTabStore } from '../store/downloaderTabStore';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
 import { 
     DownloadGridCard, 
-    BatchReviewModal, 
     FloatingDownloadIndicator, 
     DownloadQueueModal,
     BulkSwapModal,
@@ -32,7 +31,8 @@ import * as Clipboard from 'expo-clipboard';
 import { usePlaylistStore } from '../store/playlistStore';
 import { BulkItem } from '../store/downloaderTabStore';
 
-const { width } = Dimensions.get('window');
+// width constant removed as unused (Dimensions still kept for other potential uses or removed if entirely unused)
+Dimensions.get('window');
 
 export const AudioDownloaderScreen = ({ navigation }: any) => {
     // Global Stores
@@ -58,7 +58,6 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     
     // Dual-Field Search State - synced with active tab
     const [searchMode, setSearchMode] = useState<'title' | 'artist'>('title'); // Default: title open
-    const [activeTabIdLocal, setActiveTabIdLocal] = useState(activeTabId);
     const [titleQuery, setTitleQueryLocal] = useState(activeTab?.titleQuery || '');
     const [artistQuery, setArtistQueryLocal] = useState(activeTab?.artistQuery || '');
     const [remixSectionExpanded, setRemixSectionExpanded] = useState(false);
@@ -77,7 +76,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
             setJsonInput(activeTab.bulkItems ? JSON.stringify(activeTab.bulkItems.map(i => i.query), null, 2) : '');
             setBulkPlaylistName(activeTab.bulkPlaylistName || '');
         }
-    }, [activeTabId]);
+    }, [activeTabId, activeTab, updateTab]);
 
     // Wrap setters to also persist to tab store
     const setTitleQuery = (val: string) => {
@@ -101,33 +100,10 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
                 setSearchMode('title');
             }
         }
-    }, [activeTabId]);
+    }, [activeTabId, activeTab]);
     
-    // Animated values for smooth transitions
-    const titleFieldWidth = useSharedValue(200); // Start with title open
-    const artistFieldWidth = useSharedValue(0);
-    
-    // Animated styles
-    const titleFieldStyle = useAnimatedStyle(() => ({
-        width: titleFieldWidth.value,
-        opacity: titleFieldWidth.value > 0 ? 1 : 0
-    }));
-    
-    const artistFieldStyle = useAnimatedStyle(() => ({
-        width: artistFieldWidth.value,
-        opacity: artistFieldWidth.value > 0 ? 1 : 0
-    }));
-    
-    // Handle field expansion (mutually exclusive)
-    useEffect(() => {
-        if (searchMode === 'title') {
-            titleFieldWidth.value = withSpring(200);
-            artistFieldWidth.value = withSpring(0);
-        } else if (searchMode === 'artist') {
-            titleFieldWidth.value = withSpring(0);
-            artistFieldWidth.value = withSpring(200);
-        }
-    }, [searchMode]);
+    // Animated values removed as unused in Unified UI
+
     
     // Preview Audio State
     const [previewSound, setPreviewSound] = useState<Audio.Sound | null>(null);
@@ -139,7 +115,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
     // Sync ref with state
     useEffect(() => {
         previewSoundRef.current = previewSound;
-    }, [previewSound]);
+    }, [previewSound, previewSoundRef]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -150,7 +126,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
                 previewSoundRef.current.unloadAsync();
             }
         };
-    }, []);
+    }, [setMiniPlayerHidden]);
 
     // Filter Results for Artist Search
     const filterResults = (results: UnifiedSong[], query: string): {
@@ -210,12 +186,24 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
             // Filter results if artist query exists
             if (artistQuery) {
                 const { exactMatches, remixesAndCovers } = filterResults(results, artistQuery);
-                updateTab(activeTabId, { 
-                    results: exactMatches,
-                    remixResults: remixesAndCovers,
-                    isSearching: false, 
-                    status: exactMatches.length === 0 && remixesAndCovers.length === 0 ? 'No results found.' : '' 
-                });
+                
+                // Fallback: If strict filtering hid everything, but we have results, show them!
+                if (exactMatches.length === 0 && remixesAndCovers.length === 0 && results.length > 0) {
+                     console.log('[AudioDownloader] Strict filter hid all results. Falling back to raw.');
+                     updateTab(activeTabId, { 
+                        results, 
+                        remixResults: [],
+                        isSearching: false, 
+                        status: '' // Clear "No results" since we are showing raw
+                    });
+                } else {
+                    updateTab(activeTabId, { 
+                        results: exactMatches,
+                        remixResults: remixesAndCovers,
+                        isSearching: false, 
+                        status: exactMatches.length === 0 && remixesAndCovers.length === 0 ? 'No results found.' : '' 
+                    });
+                }
             } else {
                 updateTab(activeTabId, { 
                     results, 
@@ -225,7 +213,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
                 });
             }
             
-        } catch (error) {
+        } catch {
             updateTab(activeTabId, { isSearching: false, status: 'Search failed.' });
             setToast({ visible: true, message: 'Search failed', type: 'error' });
         }
@@ -252,7 +240,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
             sound.setOnPlaybackStatusUpdate((s) => {
                 if (s.isLoaded && s.didJustFinish) setPlayingPreviewId(null);
             });
-        } catch (e) {
+        } catch {
             setToast({ visible: true, message: 'Preview failed', type: 'error' });
         }
     };
@@ -286,7 +274,7 @@ export const AudioDownloaderScreen = ({ navigation }: any) => {
         if (activeTab.query && activeTab.results.length === 0 && !activeTab.isSearching && activeTab.status === '') {
              handleSearch();
         }
-    }, [activeTabId]); // When switching to a tab (including new one)
+    }, [activeTabId, activeTab.query, activeTab.results.length, activeTab.isSearching, activeTab.status, handleSearch]);
 
     // Selection Logic
     const handleLongPress = (song: UnifiedSong) => {
@@ -448,7 +436,7 @@ Only provide the JSON array, no other text.`;
                     } else {
                         item.status = 'not_found';
                     }
-                } catch (e) {
+                } catch {
                     item.status = 'not_found';
                 }
                 
@@ -461,7 +449,7 @@ Only provide the JSON array, no other text.`;
 
             updateTab(activeTabId, { isSearching: false, status: 'Completed' });
 
-        } catch (e) {
+        } catch {
             setToast({ visible: true, message: 'Invalid JSON format', type: 'error' });
             updateTab(activeTabId, { isSearching: false });
         }
@@ -590,7 +578,7 @@ Only provide the JSON array, no other text.`;
              
             setToast({ visible: true, message: `Playlist '${bulkPlaylistName}' created! Downloading ${queueItems.length} songs...`, type: 'success' });
 
-        } catch (e) {
+        } catch {
             setToast({ visible: true, message: 'Failed to process bulk download', type: 'error' });
         }
     }; 
@@ -598,7 +586,7 @@ Only provide the JSON array, no other text.`;
     // --- End Bulk Logic ---
 
     // Render Tab Bar
-    const renderTabBar = () => (
+    const renderTabBar = useCallback(() => (
         <View style={styles.tabBar}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 8}}>
                 {tabs.map(tab => (
@@ -622,9 +610,9 @@ Only provide the JSON array, no other text.`;
                 </Pressable>
             </ScrollView>
         </View>
-    );
+    ), [tabs, activeTabId, setActiveTab, closeTab, createTab]);
 
-    const renderScrollableHeader = () => (
+    const renderScrollableHeader = useCallback(() => (
         <View>
             <View style={styles.headerContainer}>
             {/* Unified Search Section */}
@@ -675,7 +663,26 @@ Only provide the JSON array, no other text.`;
                 </Pressable>
             </View>
         </View>
-    );
+    ), [searchMode, selectionMode, renderTabBar, activeTab.mode, activeTabId, updateTab]);
+
+    const renderBulkHeader = useCallback(() => (
+        <View>
+            {renderScrollableHeader()}
+            <View style={{paddingHorizontal: 16, marginBottom: 16}}>
+                <Text style={styles.label}>3. NAME YOUR PLAYLIST</Text>
+                <TextInput
+                    style={styles.playlistInput}
+                    value={bulkPlaylistName}
+                    onChangeText={(t) => {
+                        setBulkPlaylistName(t);
+                        updateTab(activeTabId, { bulkPlaylistName: t });
+                    }}
+                    placeholder="My Awesome Playlist"
+                    placeholderTextColor="#555"
+                />
+            </View>
+        </View>
+    ), [renderScrollableHeader, bulkPlaylistName, activeTabId, updateTab]);
 
     return (
         <View style={styles.container}>
@@ -754,24 +761,7 @@ Only provide the JSON array, no other text.`;
                                 <>
                                     <FlatList
                                         data={activeTab.bulkItems}
-                                        ListHeaderComponent={() => (
-                                            <View>
-                                                {renderScrollableHeader()}
-                                                <View style={{paddingHorizontal: 16, marginBottom: 16}}>
-                                                    <Text style={styles.label}>3. NAME YOUR PLAYLIST</Text>
-                                                    <TextInput
-                                                        style={styles.playlistInput}
-                                                        value={bulkPlaylistName}
-                                                        onChangeText={(t) => {
-                                                            setBulkPlaylistName(t);
-                                                            updateTab(activeTabId, { bulkPlaylistName: t });
-                                                        }}
-                                                        placeholder="My Awesome Playlist"
-                                                        placeholderTextColor="#555"
-                                                    />
-                                                </View>
-                                            </View>
-                                        )}
+                                        ListHeaderComponent={renderBulkHeader}
                                         keyExtractor={(item) => item.id}
                                         numColumns={2}
                                         contentContainerStyle={{ paddingBottom: 100 }}

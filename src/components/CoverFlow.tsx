@@ -6,9 +6,6 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   runOnJS,
-  interpolate,
-  Extrapolation,
-  withTiming,
   SharedValue,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';

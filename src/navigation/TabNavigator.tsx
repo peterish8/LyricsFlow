@@ -1,12 +1,8 @@
-/**
- * LyricFlow - Tab Navigator
- * Bottom tab navigation for Library, Search, Settings
- */
-
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { TabParamList } from '../types/navigation';
 import { Colors } from '../constants/colors';
 import { CustomTabBar } from '../components';
@@ -35,20 +31,27 @@ export const TabNavigator: React.FC = () => {
 
   return (
     <Tab.Navigator
-      tabBar={(props) => <ModernPillTabBar {...props} />}
+      id="MainTabs"
+      tabBar={navBarStyle === 'modern-pill' ? (props) => <ModernPillTabBar {...props} /> : undefined}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: Colors.textPrimary,
         tabBarInactiveTintColor: Colors.textSecondary,
-        tabBarShowLabel: false, // Hide all labels
+        tabBarShowLabel: navBarStyle === 'classic', // Show labels in classic mode
+        tabBarStyle: navBarStyle === 'classic' ? styles.tabBar : undefined,
+        tabBarBackground: navBarStyle === 'classic' ? () => (
+            <LinearGradient
+                colors={['rgba(20,20,20,0.95)', 'rgba(10,10,10,1)']}
+                style={StyleSheet.absoluteFill}
+                start={{x: 0, y: 0}}
+                end={{x: 0, y: 1}}
+            />
+        ) : undefined,
       }}
     >
       <Tab.Screen
         name="Home"
         component={LibraryScreen}
-        listeners={{
-          focus: () => setMiniPlayerStyle('island'),
-        }}
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, focused }) => (
@@ -63,9 +66,6 @@ export const TabNavigator: React.FC = () => {
       <Tab.Screen
         name="Reels"
         component={ReelsScreen}
-        listeners={{
-          focus: () => setMiniPlayerStyle('island'),
-        }}
         options={{
           tabBarLabel: 'Reels',
           tabBarIcon: ({ color, focused }) => (
@@ -80,9 +80,6 @@ export const TabNavigator: React.FC = () => {
       <Tab.Screen
         name="Library"
         component={PlaylistsScreen}
-        listeners={{
-          focus: () => setMiniPlayerStyle('bar'),
-        }}
         options={{
           tabBarLabel: 'Library',
           tabBarIcon: ({ color, focused }) => (
@@ -97,9 +94,6 @@ export const TabNavigator: React.FC = () => {
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        listeners={{
-          focus: () => setMiniPlayerStyle('island'),
-        }}
         options={{
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
@@ -116,11 +110,17 @@ export const TabNavigator: React.FC = () => {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: '#212121',
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'transparent', // Handled by tabBarBackground gradient
+    borderTopWidth: 0, // Remove border for seamless gradient look
+    // borderTopColor: 'rgba(255,255,255,0.1)',
     height: 70,
     paddingTop: 8,
     paddingBottom: 10,
+    position: 'absolute', // Required for blur/translucency over content
+    bottom: 0,
+    left: 0,
+    right: 0,
+    elevation: 0, // Remove shadow to blend
   },
   tabBarLabel: {
     fontSize: 10,

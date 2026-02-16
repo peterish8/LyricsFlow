@@ -5,9 +5,6 @@
 import { 
   closeDatabase, 
   getDatabase, 
-  initDatabase,
-  isNativeDbNullPointer,
-  withDbRetry,
   withDbRead,
   withDbWrite,
   withDbSafe,
@@ -44,9 +41,7 @@ export const getAllSongs = async (): Promise<Song[]> => {
       audio_uri: string | null;
       is_liked: number | null;
       is_hidden: number | null;
-      separation_status: string | null;
-      separation_progress: number | null;
-    }>('SELECT * FROM songs WHERE is_hidden = 0 ORDER BY date_modified DESC');
+    }>('SELECT * FROM songs WHERE is_hidden = 0 ORDER BY date_created DESC');
     
     return songsRows.map((row) => ({
       id: row.id,
@@ -91,7 +86,7 @@ export const getHiddenSongs = async (): Promise<Song[]> => {
       audio_uri: string | null;
       is_liked: number | null;
       is_hidden: number | null;
-    }>('SELECT * FROM songs WHERE is_hidden = 1 ORDER BY date_modified DESC');
+    }>('SELECT * FROM songs WHERE is_hidden = 1 ORDER BY date_created DESC');
     
     return songsRows.map((row) => ({
       id: row.id,
@@ -137,8 +132,6 @@ export const getSongById = async (id: string): Promise<Song | null> => {
     audio_uri: string | null;
     is_liked: number | null;
     is_hidden: number | null;
-    separation_status: string | null;
-    separation_progress: number | null;
   }>('SELECT * FROM songs WHERE id = ?', [id]);
   
   if (!songRow) return null;
@@ -246,8 +239,8 @@ export const deleteSong = async (id: string): Promise<void> => {
         try {
           console.log(`[QUERIES] Deleting physical audio file: ${song.audioUri}`);
           await FileSystem.deleteAsync(song.audioUri, { idempotent: true });
-        } catch (e) {
-          console.warn('[QUERIES] Failed to delete audio file, it might not exist:', e);
+        } catch {
+          console.warn('[QUERIES] Failed to delete audio file, it might not exist');
         }
       }
       
@@ -255,8 +248,8 @@ export const deleteSong = async (id: string): Promise<void> => {
         try {
           console.log(`[QUERIES] Deleting physical cover image: ${song.coverImageUri}`);
           await FileSystem.deleteAsync(song.coverImageUri, { idempotent: true });
-        } catch (e) {
-          console.warn('[QUERIES] Failed to delete cover image:', e);
+        } catch {
+          console.warn('[QUERIES] Failed to delete cover image');
         }
       }
     }
@@ -292,7 +285,7 @@ export const searchSongs = async (query: string): Promise<Song[]> => {
     `SELECT DISTINCT s.id FROM songs s
      LEFT JOIN lyrics l ON s.id = l.song_id
      WHERE s.title LIKE ? OR s.artist LIKE ? OR s.album LIKE ? OR l.text LIKE ?
-     ORDER BY s.date_modified DESC`,
+     ORDER BY s.date_created DESC`,
     [searchTerm, searchTerm, searchTerm, searchTerm]
   );
   

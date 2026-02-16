@@ -19,50 +19,6 @@ const SAAVN_MIRRORS = [
 // Layer 1.1: Gaana API (User's hosted)
 const GAANA_API = 'https://gaanaapibyprats.vercel.app/api/search';
 
-// SoundCloud Client ID Caching
-let cachedClientId: string | null = null;
-let clientIdTimestamp = 0;
-
-async function getSoundCloudClientId(): Promise<string | null> {
-  if (cachedClientId && (Date.now() - clientIdTimestamp < 3600000)) { // 1 hour cache
-    console.log('[SoundCloud] Using cached client ID');
-    return cachedClientId;
-  }
-
-  try {
-    console.log('[SoundCloud] Scraping new client ID...');
-    const response = await fetch('https://soundcloud.com', {
-      headers: { 'User-Agent': BROWSER_HEADERS['User-Agent'] }
-    });
-    const text = await response.text();
-    
-    // Find script URLs
-    const scriptTags = text.match(/<script crossorigin src="(https:\/\/[a-z0-9.-]+\.sndcdn\.com\/assets\/[a-zA-Z0-9.-]+\.js)"/g);
-    if (!scriptTags) return null;
-
-    // Scan scripts for client_id
-    for (const tag of scriptTags) {
-      const url = tag.match(/src="(.*?)"/)?.[1];
-      if (!url) continue;
-
-      try {
-        const jsRes = await fetch(url);
-        const jsText = await jsRes.text();
-        const match = jsText.match(/client_id:"([a-zA-Z0-9]{32})"/);
-        if (match && match[1]) {
-          cachedClientId = match[1];
-          clientIdTimestamp = Date.now();
-          console.log('[SoundCloud] Fresh Client ID:', cachedClientId);
-          return cachedClientId;
-        }
-      } catch (e) { continue; }
-    }
-  } catch (e) {
-    console.warn('[SoundCloud] Client ID scrape failed');
-  }
-  return null;
-}
-
 /**
  * ============================================================================
  * LAYER 1: JIOSAAVN (Primary Music Source)
@@ -73,14 +29,21 @@ async function getSoundCloudClientId(): Promise<string | null> {
 /**
  * Helper: Fetch from a SINGLE Saavn Mirror
  */
-async function fetchSaavnResults(baseUrl: string, query: string): Promise<UnifiedSong[]> {
+async function fetchSaavnResults(baseUrl: string, query: string, language?: string): Promise<UnifiedSong[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
     try {
-      console.log(`[Saavn] Pinging ${baseUrl}...`);
+      console.log(`[Saavn] Pinging ${baseUrl} (Lang: ${language || 'All'})...`);
       // Issue: User wants more results (30 instead of 10)
-      const response = await fetch(`${baseUrl}/search/songs?query=${encodeURIComponent(query)}&limit=30&n=30`, {
+      let url = `${baseUrl}/search/songs?query=${encodeURIComponent(query)}&limit=30&n=30`;
+      
+      // Add optional language filter if provided
+      if (language) {
+         url += `&language=${language.toLowerCase()}`;
+      }
+      
+      const response = await fetch(url, {
         headers: BROWSER_HEADERS,
         signal: controller.signal
       });
@@ -111,7 +74,7 @@ async function fetchSaavnResults(baseUrl: string, query: string): Promise<Unifie
           downloadUrl: topQuality?.url || topQuality?.link || '',
           hasLyrics: song.hasLyrics === 'true' || song.hasLyrics === true,
           source: 'Saavn',
-          duration: song.duration ? parseInt(song.duration) : undefined,
+          duration: song.duration ? parseInt(song.duration, 10) : undefined,
         };
       });
     } catch (error: any) {
@@ -127,10 +90,10 @@ async function fetchSaavnResults(baseUrl: string, query: string): Promise<Unifie
  * Parallel Strategy: Custom API + Public Mirror Pool
  * ============================================================================
  */
-async function searchSaavn(query: string): Promise<UnifiedSong[]> {
+async function searchSaavn(query: string, language?: string): Promise<UnifiedSong[]> {
   // Try mirrors in priority order (saavn.sumit.co first, then user's hosted API)
   for (const baseUrl of SAAVN_MIRRORS) {
-    const results = await fetchSaavnResults(baseUrl, query);
+    const results = await fetchSaavnResults(baseUrl, query, language);
     if (results.length > 0) {
       console.log(`[Saavn] ✅ Mirror (${baseUrl}) found ${results.length} songs`);
       return results;
@@ -209,7 +172,7 @@ async function searchGaana(query: string): Promise<UnifiedSong[]> {
       title: track.title || track.track_title || track.name || 'Unknown Title',
       artist: track.artist || track.artists_name || track.artist_names || track.singers || 'Unknown Artist',
       album: track.album || track.album_title || '',
-      duration: track.duration ? parseInt(track.duration) : undefined,
+      duration: track.duration ? parseInt(track.duration, 10) : undefined,
       highResArt: (track.artwork || track.artwork_large || track.image || track.artworkLink || '').replace('150x150', '500x500'),
       downloadUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || track.url || '',
       streamUrl: track.urls?.high?.url || track.stream_url || track.streamUrl || track.url || '',
@@ -222,207 +185,6 @@ async function searchGaana(query: string): Promise<UnifiedSong[]> {
   }
 }
 
-/**
- * ============================================================================
- * LAYER 2: WYNK MUSIC (Backup Official)
- * ============================================================================
- */
-async function searchWynk(query: string): Promise<UnifiedSong[]> {
-  try {
-    console.log('[Wynk] 🎯 Searching for official tracks:', query);
-    
-    // Wynk API endpoint (using public wrapper)
-    const searchUrl = `https://wynk-music-api.vercel.app/api/search?query=${encodeURIComponent(query)}`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    const response = await fetch(searchUrl, {
-      headers: BROWSER_HEADERS,
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      console.warn(`[Wynk] API returned ${response.status}`);
-      return [];
-    }
-    
-    const data = await response.json();
-    const results = data.data?.results || data.results || [];
-    
-    if (results.length === 0) {
-      console.log('[Wynk] No official tracks found');
-      return [];
-    }
-    
-    const songs: UnifiedSong[] = results.slice(0, 10).map((track: any) => {
-      // Extract highest quality audio URL
-      const mediaUrls = track.media_urls || track.downloadUrl || [];
-      const highestQuality = mediaUrls.find((url: any) => url.bitrate === '320' || url.quality === '320kbps')
-        || mediaUrls[mediaUrls.length - 1];
-      
-      // Extract high-res artwork
-      const artwork = track.image || track.artwork || track.albumArt || '';
-      const highResArt = typeof artwork === 'string' ? artwork : artwork.url || '';
-      
-      return {
-        id: track.id || track.contentId || Math.random().toString(),
-        title: track.title || track.name || 'Unknown Title',
-        artist: track.artist || track.artistName || track.singers || 'Unknown Artist',
-        highResArt: highResArt.replace('150x150', '500x500'), // Upgrade to high-res
-        downloadUrl: highestQuality?.url || highestQuality || '',
-        source: 'Wynk' as const,
-        duration: track.duration || undefined,
-        hasLyrics: track.hasLyrics || false,
-      };
-    }).filter((song: UnifiedSong) => song.downloadUrl);
-    
-    console.log(`[Wynk] ✅ Found ${songs.length} official tracks`);
-    return songs;
-    
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      console.warn('[Wynk] Timed out (5s)');
-    } else {
-      console.warn('[Wynk] Search failed:', error.message);
-    }
-    return [];
-  }
-}
-
-/**
- * ============================================================================
- * LAYER 3: NETEASE CLOUD MUSIC (Global Heavyweight)
- * ============================================================================
- */
-async function searchNetEase(query: string): Promise<UnifiedSong[]> {
-  try {
-    console.log('[NetEase] 🌏 Searching global catalog:', query);
-    
-    const searchUrl = `https://netease-cloud-music-api-psi-six.vercel.app/search?keywords=${encodeURIComponent(query)}&limit=10`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    const response = await fetch(searchUrl, {
-      headers: BROWSER_HEADERS,
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      console.warn(`[NetEase] API returned ${response.status}`);
-      return [];
-    }
-    
-    const data = await response.json();
-    const results = data.result?.songs || [];
-    
-    if (results.length === 0) {
-      console.log('[NetEase] No tracks found');
-      return [];
-    }
-    
-    const songs = await Promise.all(results.map(async (song: any) => {
-        try {
-            // Needed to get the actual URL
-            const urlReq = await fetch(`https://netease-cloud-music-api-psi-six.vercel.app/song/url?id=${song.id}`, { headers: BROWSER_HEADERS });
-            const urlData = await urlReq.json();
-            const downloadUrl = urlData.data?.[0]?.url;
-            
-            if (!downloadUrl) return null;
-
-             return {
-                id: song.id.toString(),
-                title: song.name,
-                artist: song.artists?.[0]?.name || 'Unknown',
-                highResArt: song.album?.artist?.img1v1Url || '', 
-                downloadUrl: downloadUrl,
-                source: 'NetEase' as const,
-                duration: song.duration ? song.duration / 1000 : undefined
-             } as UnifiedSong;
-        } catch (e) { return null; }
-    }));
-
-    const validSongs = songs.filter((s): s is UnifiedSong => s !== null);
-    console.log(`[NetEase] ✅ Found ${validSongs.length} tracks`);
-    return validSongs;
-
-  } catch (error: any) {
-    console.warn('[NetEase] Search failed:', error.message);
-    return [];
-  }
-}
-
-async function searchSoundCloud(query: string): Promise<UnifiedSong[]> {
-    try {
-        const clientId = await getSoundCloudClientId();
-        if (!clientId) throw new Error('No Client ID');
-
-        const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=10`;
-        
-        console.log('[SoundCloud] Searching:', query);
-        const response = await fetch(searchUrl, {
-            headers: BROWSER_HEADERS
-        });
-        const data = await response.json();
-    
-        const collection = data.collection || [];
-        if (collection.length === 0) return [];
-
-        const results = await Promise.all(collection.map(async (track: any) => {
-            const progressiveStream = track.media?.transcodings?.find(
-                (t: any) => t.format?.protocol === 'progressive'
-            );
-
-            if (!progressiveStream) return null;
-
-            const streamResponse = await fetch(`${progressiveStream.url}?client_id=${clientId}`, {
-                headers: BROWSER_HEADERS
-            });
-            const streamData = await streamResponse.json();
-            
-            return {
-                id: track.id.toString(),
-                title: track.title,
-                artist: track.user?.username || 'Unknown',
-                highResArt: (track.artwork_url || track.user?.avatar_url || '').replace('-large', '-t500x500'),
-                downloadUrl: streamData.url,
-                source: 'SoundCloud' as const,
-                duration: track.duration ? track.duration / 1000 : undefined
-            };
-        }));
-        
-        return results.filter((s): s is UnifiedSong => s !== null);
-    } catch (e) {
-        console.warn('[SoundCloud] Failed');
-        return [];
-    }
-}
-
-async function searchAudiomack(query: string): Promise<UnifiedSong[]> {
-     try {
-        const searchUrl = `https://api.audiomack.com/v1/search?q=${encodeURIComponent(query)}&show=songs&limit=10`;
-        const response = await fetch(searchUrl, { headers: BROWSER_HEADERS });
-        const data = await response.json();
-        
-        const results = data.results || [];
-        return results.map((track: any) => ({
-            id: track.id,
-            title: track.title,
-            artist: track.artist,
-             highResArt: track.image || '',
-            downloadUrl: `https://api.audiomack.com/v1/music/stream/${track.url_slug}`, 
-            source: 'Audiomack' as const
-        }));
-    } catch (e) {
-        return [];
-    }
-}
-
 const isArtistMatch = (songArtist: string, targetArtist: string): boolean => {
   if (!targetArtist) return false;
   const s = songArtist.toLowerCase();
@@ -430,7 +192,7 @@ const isArtistMatch = (songArtist: string, targetArtist: string): boolean => {
   return s.includes(t) || t.includes(s);
 };
 
-export async function searchMusic(query: string, artistName?: string, onProgress?: (status: string) => void): Promise<UnifiedSong[]> {
+export async function searchMusic(query: string, artistName?: string, onProgress?: (status: string) => void, language?: string): Promise<UnifiedSong[]> {
   console.log('[SearchEngine] 🚀 Starting Ultimate Search (Waterfall Mode)...');
   onProgress?.('Searching JioSaavn (Layer 1)...');
 
@@ -439,7 +201,7 @@ export async function searchMusic(query: string, artistName?: string, onProgress
 
   // LAYER 1: JioSaavn (Primary)
   try {
-      saavnResults = await searchSaavn(query);
+      saavnResults = await searchSaavn(query, language);
       
       // Mark Authenticity and Filter
       if (saavnResults.length > 0) {

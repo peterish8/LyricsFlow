@@ -8,7 +8,6 @@
 // --- POLYFILLS START ---
 import { Buffer } from 'buffer';
 import 'react-native-url-polyfill/auto'; // usually needed, or use url package
-import EventEmitter from 'events';
 // stream-browserify should be aliased in babel/metro if possible, 
 // but often just importing it helps if ytdl uses global.
 // We'll set globals manually to be safe.
@@ -30,14 +29,6 @@ export interface AudioFormat {
     url: string;
     sizeMb: string;
     bitrate: number;
-}
-
-export interface AudioOption {
-    label: string;
-    bitrate: number;
-    format: string;
-    size: string;
-    url: string;
 }
 
 class AudioExtractorService {
@@ -85,12 +76,12 @@ class AudioExtractorService {
                 // Calculate size: ContentLength or Estimate
                 let sizeMb = 'Unknown';
                 if (format.contentLength) {
-                    sizeMb = (parseInt(format.contentLength) / (1024 * 1024)).toFixed(1);
+                    sizeMb = (parseInt(format.contentLength, 10) / (1024 * 1024)).toFixed(1);
                 } else if (format.approxDurationMs) {
                     // Estimate: (Bitrate * Duration) / 8 / 1024 / 1024
                     // Bitrate is in kbps usually? No, audioBitrate is kbps in ytdl
                     // (bitrate * 1000 * duration_sec) / 8 / 1024 / 1024
-                    const durationSec = parseInt(format.approxDurationMs) / 1000;
+                    const durationSec = parseInt(format.approxDurationMs, 10) / 1000;
                     sizeMb = ((bitrate * 1000 * durationSec) / 8 / (1024 * 1024)).toFixed(1);
                 }
 

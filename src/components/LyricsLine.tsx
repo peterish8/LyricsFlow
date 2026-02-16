@@ -8,7 +8,6 @@ import { StyleSheet, Text, Pressable } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   withTiming,
-  interpolate,
 } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
 import { useSettingsStore, FONT_SIZE_MAP, LINE_SPACING_MAP } from '../store/settingsStore';
@@ -33,9 +32,6 @@ export const LyricsLine: React.FC<LyricsLineProps> = memo(({
   const { lyricsFontSize, lineSpacing } = useSettingsStore();
   const fontSizes = FONT_SIZE_MAP[lyricsFontSize];
   const lineHeight = LINE_SPACING_MAP[lineSpacing];
-
-  // Calculate blur based on distance from active line
-  const blurAmount = Math.min(Math.abs(distanceFromActive) * 0.5, 2);
 
   const animatedStyle = useAnimatedStyle(() => {
     const scale = withTiming(isActive ? 1.05 : 0.95, { duration: 300 });

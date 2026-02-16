@@ -69,14 +69,14 @@ export const AddToPlaylistModal = () => {
             // Fetch playlists
             await fetchPlaylists();
         }
-      } catch (e) {
-        console.error("Failed to init modal", e);
+      } catch (error) {
+        console.error("Failed to init modal", error);
       } finally {
         setLoading(false);
       }
     };
     init();
-  }, [mode, targetPlaylistId]);
+  }, [mode, targetPlaylistId, songs.length, fetchSongs, fetchPlaylists]);
 
   // Filter Data
   const dataToRender = useMemo(() => {

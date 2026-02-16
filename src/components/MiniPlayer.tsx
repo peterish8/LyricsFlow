@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import MaskedView from '@react-native-masked-view/masked-view';
 import { useNavigation } from '@react-navigation/native';
 import * as GestureHandler from 'react-native-gesture-handler';
 import SynchronizedLyrics from './SynchronizedLyrics';
@@ -19,14 +18,15 @@ import Animated, {
   cancelAnimation,
   interpolate,
   Extrapolation,
-  runOnJS
+  runOnJS,
+  runOnUI,
+  useDerivedValue
 } from 'react-native-reanimated';
 
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { getGradientColors } from '../constants/gradients';
-import Scrubber from './Scrubber';
 import VinylRecord from './VinylRecord';
 import { getCurrentLineIndex } from '../utils/timestampParser';
 
@@ -41,7 +41,16 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MiniPlayer: React.FC = () => {
   const player = usePlayer();
-  const { currentSong, showTransliteration, loadedAudioId, setLoadedAudioId, hideMiniPlayer, setMiniPlayerHidden } = usePlayerStore();
+  const currentSong = usePlayerStore(state => state.currentSong);
+  const showTransliteration = usePlayerStore(state => state.showTransliteration);
+  const loadedAudioId = usePlayerStore(state => state.loadedAudioId);
+  const setLoadedAudioId = usePlayerStore(state => state.setLoadedAudioId);
+  const hideMiniPlayer = usePlayerStore(state => state.hideMiniPlayer);
+  const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
+  // Rename to real* to allow optimistic override below
+  const realPosition = usePlayerStore(state => state.position);
+  const realDuration = usePlayerStore(state => state.duration);
+  const storePlaying = usePlayerStore(state => state.isPlaying);
   const { miniPlayerStyle, libraryFocusMode } = useSettingsStore();
   const navigation = useNavigation();
   
@@ -58,12 +67,10 @@ const MiniPlayer: React.FC = () => {
     transform: [{ scale: playButtonScale.value }]
   }));
 
-  // Sync optimistic state with real source of truth
+  // Sync optimistic state with store instead of native player
   useEffect(() => {
-    if (player) {
-      setOptimisticPlaying(player.playing);
-    }
-  }, [player?.playing]);
+    setOptimisticPlaying(storePlaying);
+  }, [storePlaying]);
 
   const togglePlay = (e?: any) => {
       e?.stopPropagation();
@@ -92,14 +99,6 @@ const MiniPlayer: React.FC = () => {
   const [lyricExpanded, setLyricExpanded] = useState(false);
   const [fullLyricExpanded, setFullLyricExpanded] = useState(false);
   
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [progressBarWidth, setProgressBarWidth] = useState(0);
-  
-  const flatListRef = useRef<FlatList>(null);
-  const isUserScrolling = useRef(false);
-  const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
-  
   // Animation values
   const rotation = useSharedValue(0);
   const expansionProgress = useSharedValue(0); // 0 = collapsed, 1 = tray (190px)
@@ -114,6 +113,29 @@ const MiniPlayer: React.FC = () => {
     ? getGradientColors(currentSong.gradientId) 
     : ['#222', '#111'];
     
+  // Local state for persistent lyrics (Cross-fade support)
+  const [displayedSong, setDisplayedSong] = useState(currentSong);
+  const transitionOpacity = useSharedValue(1);
+
+  // Update displayed song with cross-fade when expanded in Classic Mode
+  useEffect(() => {
+    if (currentSong?.id !== displayedSong?.id) {
+        if (!isIsland && expanded) {
+            // Fade Out -> Update Data -> Fade In
+            transitionOpacity.value = withTiming(0, { duration: 300 }, (finished) => {
+                if (finished) {
+                    runOnJS(setDisplayedSong)(currentSong);
+                    transitionOpacity.value = withTiming(1, { duration: 300 });
+                }
+            });
+        } else {
+            // Instant update if not expanded or in Island mode
+            setDisplayedSong(currentSong);
+            transitionOpacity.value = 1;
+        }
+    }
+  }, [currentSong?.id, expanded, isIsland]);
+    
   // Create a "vignette" theme for island: Black -> Color -> Black
   const mainColor = gradientColors[1] || gradientColors[0];
 
@@ -121,16 +143,33 @@ const MiniPlayer: React.FC = () => {
   const isSeekingRef = useRef(false);
   const seekLockTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Update time & Rotation Logic
+  // Optimistic position for smooth scrubbing
+  const [optimizedPosition, setOptimizedPosition] = useState(0);
+
+  // Sync effect
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (player && !isSeekingRef.current) {
-        setCurrentTime(player.currentTime);
-        setDuration(player.duration);
-      }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [player]);
+     if (!isSeekingRef.current) {
+         setOptimizedPosition(realPosition);
+     }
+  }, [realPosition]);
+  
+  // Use optimistic position as source of truth for UI
+  const storePosition = optimizedPosition;
+  const storeDuration = realDuration;
+  
+  // Plan:
+  // 1. Remove the lines 155-157 I added.
+  // 2. Go to line 296 and update `storePosition` to use `optimizedPosition`.
+
+
+  // ProgressBar width state (kept for classic mode)
+  const [progressBarWidth, setProgressBarWidth] = useState(0);
+  // Cleanup seekLock
+  useEffect(() => {
+    return () => {
+      if (seekLockTimeout.current) clearTimeout(seekLockTimeout.current);
+    };
+  }, []);
 
   // Track if this is the first song loore)
   const isInitialLoad = useRef(true);
@@ -163,13 +202,11 @@ const MiniPlayer: React.FC = () => {
     };
     
     syncAudio();
-  }, [currentSong?.id, player]);
+  }, [currentSong?.id, player, loadedAudioId, setLoadedAudioId, setMiniPlayerHidden]);
 
-  // Handle Rotation
+  // Handle Rotation (Store-based)
   useEffect(() => {
-    if (!player) return;
-    
-    if (player.playing) {
+    if (storePlaying) {
       // Calculate remaining rotation for current cycle
       // Normalize current rotation to 0-360 range
       const currentRotation = rotation.value % 360;
@@ -189,11 +226,12 @@ const MiniPlayer: React.FC = () => {
           false
         )
       );
-    } else {
-      // Pause rotation at current angle
-      cancelAnimation(rotation);
     }
-  }, [player?.playing]);
+  }, [storePlaying]);
+
+  // Auto-close Classic Mode on song change
+  // Auto-close removed: Lyrics persist across songs
+  // useEffect(() => { ... }, [currentSong?.id, isIsland]);
 
   const animatedVinylStyle = useAnimatedStyle(() => {
     return {
@@ -245,10 +283,26 @@ const MiniPlayer: React.FC = () => {
       borderRadius: currentRadius,
     };
   });
+
+  // Classic Height Animation
+  const animatedClassicStyle = useAnimatedStyle(() => {
+    if (isIsland) return {};
+    return {
+      height: interpolate(expansionProgress.value, [0, 1], [70, screenHeight * 0.5], Extrapolation.CLAMP),
+    };
+  });
+  
+  // Classic Lyrics Opacity (Expansion * Transition)
+  const animatedClassicLyricsStyle = useAnimatedStyle(() => {
+    const expandOp = interpolate(expansionProgress.value, [0.5, 1], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: expandOp * transitionOpacity.value,
+    };
+  });
   
   // Safe progress calculation
-  const progress = duration > 0 && !isNaN(currentTime) 
-    ? Math.min(currentTime / duration, 1) 
+  const progress = storeDuration > 0 && !isNaN(storePosition) 
+    ? Math.min(storePosition / storeDuration, 1) 
     : 0;
   
   const formatTime = (seconds: number): string => {
@@ -258,13 +312,16 @@ const MiniPlayer: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   
-  // Get Current Lyric
-  const lyricsToUse = (showTransliteration && currentSong?.transliteratedLyrics)
-    ? currentSong.transliteratedLyrics
-    : currentSong?.lyrics;
+  // Get Current Lyric (Use displayedSong for persistent view)
+  // Use displayedSong if expanded/classic to prevent instant jump, else currentSong
+  const songForLyrics = (!isIsland && expanded) ? displayedSong : currentSong;
+  
+  const lyricsToUse = (showTransliteration && songForLyrics?.transliteratedLyrics)
+    ? songForLyrics.transliteratedLyrics
+    : songForLyrics?.lyrics;
 
   const currentLyricIndex = lyricsToUse
-    ? getCurrentLineIndex(lyricsToUse, currentTime) 
+    ? getCurrentLineIndex(lyricsToUse, storePosition) 
     : -1;
   const currentLyricText = (currentLyricIndex !== -1 && lyricsToUse?.[currentLyricIndex]) 
     ? lyricsToUse[currentLyricIndex].text 
@@ -274,128 +331,59 @@ const MiniPlayer: React.FC = () => {
      VISUAL HIGHLIGHT LAG 
      User wants text to "come up" before highlighting.
      - currentLyricIndex: Logic source (time based).
-     - visualLyricIndex: Render source (delayed to match scroll).
   */
-  const [visualLyricIndex, setVisualLyricIndex] = useState(-1);
 
-  // Sync Visual Index + Scroll
-  useEffect(() => {
-    // If not expanded, just sync immediately
-    if (!lyricExpanded && !fullLyricExpanded) {
-        setVisualLyricIndex(currentLyricIndex);
-        return;
-    }
 
-    // 1. Manual Scrolling? Instant Update.
-    if (isUserScrolling.current) {
-        setVisualLyricIndex(currentLyricIndex);
-        return;
-    }
 
-    if (currentLyricIndex !== -1 && flatListRef.current && lyricsToUse?.length) {
-        // 2. Trigger Scroll (Logic Index)
-        // Debounce slightly to ensure layout readiness
-        const scrollTimer = setTimeout(() => {
-             try {
-                flatListRef.current?.scrollToIndex({
-                    index: currentLyricIndex,
-                    animated: true,
-                    viewPosition: fullLyricExpanded ? 0.35 : 0.5 
-                });
-            } catch (e) { }
-        }, 50);
 
-        // 3. Delay Visual Update (Wait for Scroll)
-        // Standard scroll animation is ~300ms. We wait 400ms to be safe.
-        // This ensures the line moves UP while gray, then turns white at the destination.
-        const highlightTimer = setTimeout(() => {
-            setVisualLyricIndex(currentLyricIndex);
-        }, 400); 
-
-        return () => {
-            clearTimeout(scrollTimer);
-            clearTimeout(highlightTimer);
-        };
-    }
-  }, [currentLyricIndex, lyricExpanded, fullLyricExpanded]);
-
-  // FORCE scroll on mount/expand to fix "starts at top" bug
-  useEffect(() => {
-      if ((lyricExpanded || fullLyricExpanded) && flatListRef.current && currentLyricIndex !== -1) {
-          setTimeout(() => {
-             try {
-                flatListRef.current?.scrollToIndex({
-                    index: currentLyricIndex,
-                    animated: false, // Instant jump for initial open
-                    viewPosition: fullLyricExpanded ? 0.35 : 0.5
-                });
-            } catch (e) {}
-          }, 50); // Small delay for mount
-      }
-  }, [lyricExpanded, fullLyricExpanded]);
-
-  const handleScrollBegin = () => {
-    isUserScrolling.current = true;
-    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
-  };
-
-  const handleScrollEnd = () => {
-    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
-    scrollTimeout.current = setTimeout(() => {
-      isUserScrolling.current = false;
-    }, 3000);
-  };
 
 
   
   const skipForward = (e?: any) => {
     e?.stopPropagation();
     if (!player) return;
-    const newTime = Math.min(player.currentTime + 10, duration);
+    const newTime = Math.min(storePosition + 10, storeDuration);
     player.seekTo(newTime);
   };
   
   const skipBackward = (e?: any) => {
     e?.stopPropagation();
     if (!player) return;
-    const newTime = Math.max(0, player.currentTime - 10);
+    const newTime = Math.max(0, storePosition - 10);
     player.seekTo(newTime);
   };
 
   const handleSeekPress = (e: any) => {
       e.stopPropagation();
-      if (!player || duration <= 0 || progressBarWidth <= 0) return;
+      if (!player || storeDuration <= 0 || progressBarWidth <= 0) return;
       const { locationX } = e.nativeEvent;
       const percentage = locationX / progressBarWidth;
-      const seekTime = percentage * duration;
+      const seekTime = percentage * storeDuration;
       player.seekTo(seekTime);
   };
 
   const panGesture = Gesture.Pan()
-    .activeOffsetY([-5, 5]) // Increased sensitivity (was 20)
+    .activeOffsetY([-5, 5])
     .simultaneousWithExternalGesture()
     .onUpdate((event: any) => {
-      if (expanded) {
+      if (!isIsland && expanded) {
+          // Classic Mode Swipe Down Logic
+          // No need for complex progress, just detect intent
+      } else if (expanded) {
         if (!lyricExpanded && !fullLyricExpanded) {
-          // Stage 1 (Tray) -> Stage 2 (Half)
           if (event.translationY > 0) {
             lyricExpansionProgress.value = Math.min(event.translationY / 200, 1);
           }
         } else if (lyricExpanded && !fullLyricExpanded) {
-           // Stage 2 (Half) -> Stage 3 (Full)
-           // If dragging DOWN (positive), go to Full. 
-           // If dragging UP (negative), go back to Tray.
-           console.log('[PAN] Half mode - translationY:', event.translationY);
+           const hasLyrics = currentSong?.lyrics && currentSong.lyrics.length > 0;
            if (event.translationY > 0) {
-             fullExpansionProgress.value = Math.min(event.translationY / 200, 1);
-             console.log('[PAN] Expanding to full:', fullExpansionProgress.value);
+             if (hasLyrics) {
+                fullExpansionProgress.value = Math.min(event.translationY / 200, 1);
+             }
            } else {
-             // Dragging UP - return to Tray
              lyricExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
            }
         } else if (fullLyricExpanded) {
-          // Stage 3 (Full) -> Stage 2 (Half)
-          // Only allow dragging UP to collapse
           if (event.translationY < 0) {
             fullExpansionProgress.value = 1 - Math.min(Math.abs(event.translationY) / 200, 1);
           }
@@ -403,12 +391,24 @@ const MiniPlayer: React.FC = () => {
       }
     })
     .onEnd((event: any) => {
-      if (expanded) {
+      if (!isIsland && expanded) {
+          // Classic Close on Swipe Down
+          if (event.translationY > 50 || event.velocityY > 500) {
+               expansionProgress.value = withSpring(0);
+               lyricExpansionProgress.value = withSpring(0);
+               fullExpansionProgress.value = withSpring(0);
+               runOnJS(setExpanded)(false);
+               runOnJS(setLyricExpanded)(false);
+               runOnJS(setFullLyricExpanded)(false);
+          } else {
+               // Snap back if not enough drag
+               expansionProgress.value = withSpring(1);
+          }
+      } else if (expanded) {
         const velocity = event.velocityY;
         const translation = event.translationY;
 
         if (!lyricExpanded && !fullLyricExpanded) {
-          // Transition Tray -> Half
           if (translation > 50 || velocity > 500) {
             lyricExpansionProgress.value = withSpring(1);
             runOnJS(setLyricExpanded)(true);
@@ -416,25 +416,19 @@ const MiniPlayer: React.FC = () => {
             lyricExpansionProgress.value = withSpring(0);
           }
         } else if (lyricExpanded && !fullLyricExpanded) {
-          // From Half: Go Full or back to Tray
-          console.log('[PAN END] Half mode - translation:', translation, 'velocity:', velocity);
-          if (translation > 50 || velocity > 500) {
-            // Dragged DOWN -> Go Full
-            console.log('[PAN END] Triggering full expansion!');
+          const hasLyrics = currentSong?.lyrics && currentSong.lyrics.length > 0;
+          if ((translation > 50 || velocity > 500) && hasLyrics) {
             fullExpansionProgress.value = withSpring(1);
             runOnJS(setFullLyricExpanded)(true);
           } else if (translation < -50 || velocity < -500) {
-            // Dragged UP -> Go Tray
             lyricExpansionProgress.value = withSpring(0);
             runOnJS(setLyricExpanded)(false);
             runOnJS(setFullLyricExpanded)(false);
           } else {
-            // Snap back to Half
             lyricExpansionProgress.value = withSpring(1);
             fullExpansionProgress.value = withSpring(0);
           }
         } else if (fullLyricExpanded) {
-          // From Full: Go back to Half
           if (translation < -50 || velocity < -500) {
             fullExpansionProgress.value = withSpring(0);
             runOnJS(setFullLyricExpanded)(false);
@@ -445,10 +439,8 @@ const MiniPlayer: React.FC = () => {
       }
     });
 
-  const toggleExpand = () => {
-    // ✅ FIX: Tapping should collapse from ANY state, not open NowPlaying
+  const toggleExpand = useCallback(() => {
     if (expanded) {
-      // Collapse everything back to closed
       expansionProgress.value = withSpring(0);
       lyricExpansionProgress.value = withSpring(0);
       fullExpansionProgress.value = withSpring(0);
@@ -458,20 +450,18 @@ const MiniPlayer: React.FC = () => {
       return;
     }
     
-    // Expand to opened (tray) state
     expansionProgress.value = withSpring(1, {
       damping: 14,
       stiffness: 150,
       mass: 0.6
     });
     setExpanded(true);
-  };
+  }, [expanded]);
 
   const openNowPlaying = () => {
     if (currentSong) {
-      setMiniPlayerHidden(true); // Immediate hide to prevent flicker
+      setMiniPlayerHidden(true);
       (navigation as any).navigate('NowPlaying', { songId: currentSong.id });
-      // Collapse with spring
       expansionProgress.value = withSpring(0);
       lyricExpansionProgress.value = withSpring(0);
       fullExpansionProgress.value = withSpring(0);
@@ -482,17 +472,97 @@ const MiniPlayer: React.FC = () => {
   };
 
   const handleLyricPress = useCallback((timestamp: number) => {
-      // Allow tapping specific line to expand too -> AND seek?
       if (!fullLyricExpanded) {
+          // In Half-Screen mode, tapping lyrics expands to Full Screen
           runOnJS(setFullLyricExpanded)(true);
           fullExpansionProgress.value = withSpring(1);
-      } else {
-          // Ensure seek works if fully expanded
-          usePlayerStore.getState().seekTo(timestamp);
-      }
+          return; // Do NOT seek in half mode
+      } 
+      // Only seek in Full Screen mode
+      usePlayerStore.getState().seekTo(timestamp);
   }, [fullLyricExpanded, fullExpansionProgress]);
+
+  const handleIslandSeek = useCallback((time: number) => {
+    if(player) {
+         // Lock updates
+        isSeekingRef.current = true;
+        
+        // Optimistic Update: Set the UI position immediately to the target time
+        // This prevents the "jump back" because progress will now be calculated from this time
+        // until isSeekingRef is released.
+        setOptimizedPosition(time);
+
+        player.seekTo(time);
+        
+        // Unlock after delay
+        if (seekLockTimeout.current) clearTimeout(seekLockTimeout.current);
+        seekLockTimeout.current = setTimeout(() => {
+            isSeekingRef.current = false;
+        }, 1000);
+    }
+  }, [player]);
+
+  // Classic Scrubber Animations
+  const isScrubbingClassic = useSharedValue(false);
+  const classicScrubProgress = useSharedValue(0);
+
+  const animatedTrackStyle = useAnimatedStyle(() => {
+    return {
+        height: withTiming(isScrubbingClassic.value ? 6 : 2, { duration: 200 }), // Thicken on scrub
+    };
+  });
+
+  const animatedDotStyle = useAnimatedStyle(() => {
+    return {
+        transform: [{ scale: withTiming(isScrubbingClassic.value ? 0 : 1, { duration: 200 }) }], // Disappear on scrub
+        opacity: withTiming(isScrubbingClassic.value ? 0 : 1, { duration: 200 }),
+    };
+  });
+
+  // Fix for scrubber jumping back: Delay releasing the UI lock until the optimistic update has likely processed
+  const handleClassicScrubEnd = (time: number) => {
+      // 1. Commit the seek (this updates optimizedPosition immediately in JS state)
+      handleIslandSeek(time);
+
+      // 2. Delay releasing the visual "scrubbing" state slightly.
+      // This ensures the React render cycle (triggered by setOptimizedPosition) 
+      // has completed and updated the 'progress' variable BEFORE we switch back to using it.
+      setTimeout(() => {
+          runOnUI(() => {
+              isScrubbingClassic.value = false;
+          })();
+      }, 50); // 50ms is imperceptible to user but sufficient for React render
+  };
+
+  const handleClassicScrub = Gesture.Pan()
+    .onStart(() => {
+        isScrubbingClassic.value = true;
+        classicScrubProgress.value = storePosition / (storeDuration || 1);
+    })
+    .onUpdate((e) => {
+        // Calculate progress based on screen width (since bar is full width)
+        const newProgress = Math.min(Math.max(e.absoluteX / width, 0), 1);
+        classicScrubProgress.value = newProgress;
+    })
+    .onEnd(() => {
+        // Do NOT set isScrubbingClassic.value = false here.
+        // Delegate to JS helper to ensure synchronization.
+        runOnJS(handleClassicScrubEnd)(classicScrubProgress.value * (storeDuration || 1));
+    });
+
+  const animatedFillStyle = useAnimatedStyle(() => {
+      const displayProgress = isScrubbingClassic.value ? classicScrubProgress.value : progress;
+      return {
+          width: `${displayProgress * 100}%`,
+      };
+  });
+
+
   
-  if (!currentSong || isNowPlaying) return null;
+  // Placeholder check to avoid early null return (safer for Reanimated hooks)
+  const isActuallyVisible = currentSong && !isNowPlaying;
+  
+  if (!isActuallyVisible) return <View style={{ height: 0, opacity: 0 }} />;
   
   return (
     <View style={[
@@ -500,33 +570,60 @@ const MiniPlayer: React.FC = () => {
       isIsland ? styles.islandContainer : styles.barContainer,
       isIsland && expanded && { alignItems: 'center', marginHorizontal: 12, marginRight: 12 } // Expanded: Force Center & Symmetry. Override container margins.
     ]}>
-      {/* ... (Progress Bar for Classic Mode Only) ... */}
+      {/* Classic Scrubber (Gapless & Animated) */}
       {!isIsland && (
-        <View style={styles.progressBarContainer}>
-          <Pressable 
-            style={styles.progressBarTouchable}
-            onLayout={(e) => setProgressBarWidth(e.nativeEvent.layout.width)}
-            onPress={handleSeekPress}
-            hitSlop={{ top: 15, bottom: 15 }}
-          >
-            <View style={styles.progressBarTrack}>
-               <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-            </View>
-          </Pressable>
-        </View>
+         <GestureDetector gesture={handleClassicScrub}>
+            <Animated.View style={styles.classicScrubberTarget}>
+                <View style={styles.progressBarTrackBase}>
+                     {/* Track */}
+                     <Animated.View style={[styles.progressBarTrackAnimated, animatedTrackStyle]}>
+                          <Animated.View style={[styles.progressFillAnimated, animatedFillStyle]} />
+                     </Animated.View>
+                     
+                     {/* Dot (Knob) */}
+                     <Animated.View style={[styles.scrubberDot, animatedDotStyle, { left: `${progress * 100}%` }]} />
+                </View>
+            </Animated.View>
+         </GestureDetector>
       )}
       
       <AnimatedPressable 
-        onPress={isIsland ? toggleExpand : openNowPlaying} 
+        onPress={toggleExpand} 
         style={[
           styles.content, 
           isIsland && styles.islandContent,
           isIsland && animatedIslandStyle, // Apply Reanimated style
+          !isIsland && animatedClassicStyle, // Apply Classic Height animation
           // Remove static conditional styles that conflict
           // isIsland && { maxWidth: expanded ? width - 20 : width * 0.5 },
           // isIsland && expanded && styles.islandExpanded,
+          isIsland && expanded && { alignItems: 'flex-start', justifyContent: 'flex-start' }, // Pin content to top immediately
+          !isIsland && { flexDirection: 'column', alignItems: 'stretch', paddingHorizontal: 0 } // Override row layout for Classic
         ]}
       >
+        {/* Dynamic Background for Classic Mode (Same logic as Island) */}
+        {!isIsland && (
+           <View style={StyleSheet.absoluteFill}>
+               {/* 1. Blurred Background Image */}
+               {currentSong.coverImageUri ? (
+                  <Image 
+                    source={{ uri: currentSong.coverImageUri }} 
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    blurRadius={30} // High blur for abstract background
+                  />
+               ) : (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111' }]} />
+               )}
+
+               {/* 2. Vignette / Dark Overlay to make text readable */}
+               <LinearGradient
+                  colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,0.9)']}
+                  style={StyleSheet.absoluteFill}
+               />
+           </View>
+        )}
+
         {isIsland && (
            <View style={[StyleSheet.absoluteFill, { borderRadius: expanded ? 40 : 30, overflow: 'hidden' }]}>
               {/* 1. Blurred Background Image */}
@@ -556,20 +653,20 @@ const MiniPlayer: React.FC = () => {
         {/* Expanded View Content */}
         {/* Expanded View Content */}
         {isIsland && expanded ? (
-            <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, paddingVertical: 10 }}>
+            <View style={styles.expandedContent}>
                 {/* Top Row: Vinyl + Info + Controls */}
                 <GestureDetector gesture={panGesture}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15, paddingBottom: 5, backgroundColor: 'transparent' }}>
+                    <View style={styles.expandedTopRow}>
                         {/* Rotating Vinyl */}
-                        <Animated.View style={[animatedVinylStyle, { marginRight: 12 }]}>
+                        <Animated.View style={[animatedVinylStyle, styles.vinylMargin]}>
                             <Pressable onPress={openNowPlaying}>
                                  <VinylRecord imageUri={currentSong.coverImageUri} size={64} />
                             </Pressable>
                         </Animated.View>
 
                         {/* Info */}
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                            <Text style={[styles.title, { fontSize: 16, marginBottom: 2 }]} numberOfLines={1}>
+                        <View style={styles.expandedInfo}>
+                            <Text style={styles.expandedTitle} numberOfLines={1}>
                                 {currentSong.title}
                             </Text>
                             <Text style={styles.artist} numberOfLines={1}>
@@ -578,7 +675,7 @@ const MiniPlayer: React.FC = () => {
                         </View>
 
                         {/* Controls Grouped */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={styles.expandedControls}>
                              <Pressable onPress={skipBackward} hitSlop={10}>
                                  <Ionicons name="play-skip-back" size={24} color="#fff" />
                              </Pressable>
@@ -595,16 +692,7 @@ const MiniPlayer: React.FC = () => {
                         
                         {/* Drag Handle Overlay for Stage 1/2 */}
                         {(!fullLyricExpanded) && (
-                            <View style={{
-                                position: 'absolute',
-                                bottom: -10,
-                                left: '50%',
-                                marginLeft: -20,
-                                width: 40,
-                                height: 4,
-                                backgroundColor: 'rgba(255,255,255,0.2)',
-                                borderRadius: 2
-                            }} />
+                            <View style={styles.dragHandle} />
                         )}
                     </View>
                 </GestureDetector>
@@ -620,30 +708,17 @@ const MiniPlayer: React.FC = () => {
                                 fullExpansionProgress.value = withSpring(1);
                             }
                         }}
-                        style={{ 
-                            flex: 1, 
-                            width: '100%',
-                            justifyContent: 'center', 
-                            alignItems: 'center',
-                            minHeight: 40,
-                            paddingHorizontal: 8,
-                            marginTop: (lyricExpanded || fullLyricExpanded) ? 10 : 0
-                        }}
+                        style={[
+                            styles.unifiedLyricsPressable,
+                            (lyricExpanded || fullLyricExpanded) && styles.unifiedLyricsMargin
+                        ]}
                     >
-                        <View style={{ flex: 1, width: '100%' }}>
+                        <View style={styles.flexFullWidth}>
                         {(!lyricExpanded && !fullLyricExpanded) ? (
                             /* 1. TRAY MODE (Collapsed) - Single Line */
-                            <View style={{ width: '100%' }}>
+                            <View style={styles.flexFullWidth}>
                                 <Text 
-                                    style={{ 
-                                        color: '#fff', 
-                                        fontSize: 18, 
-                                        fontWeight: '700', 
-                                        textAlign: 'center',
-                                        textShadowColor: 'rgba(0,0,0,0.5)',
-                                        textShadowOffset: { width: 0, height: 1 },
-                                        textShadowRadius: 2
-                                    }}
+                                    style={styles.trayLyricText}
                                     numberOfLines={2}
                                 >
                                     {!!currentLyricText ? currentLyricText : ''}
@@ -651,29 +726,19 @@ const MiniPlayer: React.FC = () => {
                             </View>
                         ) : (
                             /* 2. EXPANDED MODE (Half & Full) - Unified FlatList */
-                            <View style={{ flex: 1, width: '100%', paddingBottom: 20 }}>
+                            <View style={styles.expandedLyricsContainer}>
                                 <SynchronizedLyrics 
                                     lyrics={lyricsToUse || []}
-                                    currentTime={currentTime}
+                                    currentTime={isSeekingRef.current ? storePosition : storePosition} // Force fresh read
                                     onLyricPress={handleLyricPress}
-                                    isUserScrolling={false} // Dynamic Island usually auto-scrolls.
-                                    // If user drags, SynchronizedLyrics handles it via internal refs if we didn't pass external ref logic.
-                                    // But here we want to allow scrolling ONLY if fullLyricExpanded.
+                                    isUserScrolling={false} 
                                     scrollEnabled={fullLyricExpanded}
-                                    textStyle={{ 
-                                        color: '#fff', 
-                                        fontSize: 23, 
-                                        fontWeight: '800', 
-                                        textAlign: 'center',
-                                        textShadowColor: 'rgba(0,0,0,0.5)',
-                                        textShadowOffset: { width: 0, height: 1 },
-                                        textShadowRadius: 2
-                                    }}
-                                    activeLinePosition={0.35} // Slightly above mid area as requested
+                                    textStyle={styles.expandedLyricText}
+                                    activeLinePosition={0.3} 
                                     songTitle={currentSong?.title}
                                     highlightColor={mainColor}
-                                    topSpacerHeight={120} // Reduced for miniplayer (was ~350+)
-                                    bottomSpacerHeight={120}
+                                    topSpacerHeight={fullLyricExpanded ? 300 : 150} 
+                                    bottomSpacerHeight={fullLyricExpanded ? 300 : 150}
                                 />
                             </View>
                         )}
@@ -681,32 +746,11 @@ const MiniPlayer: React.FC = () => {
 
                         {/* Smooth Time Scrubber - Bottom of Island */}
                         {isIsland && expanded && (
-                             <View style={{ width: '100%', paddingHorizontal: 24, paddingBottom: 12 }}>
+                             <View style={styles.scrubberContainer}>
                                 <IslandScrubber 
-                                    currentTime={currentTime}
-                                    duration={duration > 0 ? duration : 1}
-                                    onSeek={(time) => {
-                                        if(player) {
-                                            // Lock updates
-                                            isSeekingRef.current = true;
-                                            setCurrentTime(time); // Optimistic
-
-                                            player.seekTo(time);
-                                            
-                                            // Unlock after delay
-                                            if (seekLockTimeout.current) clearTimeout(seekLockTimeout.current);
-                                            seekLockTimeout.current = setTimeout(() => {
-                                                isSeekingRef.current = false;
-                                            }, 1000);
-                                        }
-                                    }}
-                                    onScrubStart={() => {
-                                        // Optional: Pause updates or visuals
-                                        isUserScrolling.current = true; // Hijack scroll flag to pause lyrics?
-                                    }}
-                                    onScrubEnd={() => {
-                                        isUserScrolling.current = false;
-                                    }}
+                                    currentTime={storePosition}
+                                    duration={storeDuration > 0 ? storeDuration : 1}
+                                    onSeek={handleIslandSeek}
                                 />
                              </View>
                         )}
@@ -716,59 +760,100 @@ const MiniPlayer: React.FC = () => {
         ) : (
             // COLLAPSED / CLASSIC VIEW
             <>
-                {/* Cover Art (Rotating or Static?) - User asked for rotating in expanded. Collapsed usually static or small. */}
-                {currentSong.coverImageUri ? (
-                  <Animated.Image 
-                    source={{ uri: currentSong.coverImageUri }} 
-                    style={[styles.coverThumbnail, isIsland && styles.islandCover]}
-                  />
-                ) : (
-                  <View style={[styles.placeholderThumbnail, isIsland && styles.islandCover]}>
-                    <Ionicons name="musical-notes" size={20} color="#666" />
-                  </View>
-                )}
-                
-                {/* Song Info */}
-                <View style={styles.info}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {currentSong.title}
-                  </Text>
-                  <Text style={[styles.artist, isIsland && { display: 'none' }]} numberOfLines={1}>
-                    {currentSong.artist || 'Unknown Artist'}
-                  </Text>
-                </View>
-                
-                {/* Controls */}
-                {isIsland ? (
-                   <View style={[styles.islandControls, { zIndex: 10 }]}>
-                       <Pressable onPress={togglePlay} hitSlop={20}>
-                         <Animated.View style={animatedButtonStyle}>
-                             <Ionicons 
-                               name={optimisticPlaying ? 'pause' : 'play'} 
-                               size={24} 
-                               color="#fff" 
-                             />
-                         </Animated.View>
-                       </Pressable>
-                   </View>
-                ) : (
-                  /* Bar Mode Controls */
-                  <>
-                    <Text style={styles.time}>
-                      {formatTime(currentTime)} / {formatTime(duration)}
+                <View style={{ 
+                    flexDirection: 'row', 
+                    alignItems: 'center', 
+                    height: 70, 
+                    paddingHorizontal: 16, 
+                    width: '100%' 
+                }}>
+                    {/* Cover Art - PRESSABLE -> Opens Full Player */}
+                    <Pressable onPress={(e) => { e.stopPropagation(); openNowPlaying(); }}>
+                        {currentSong.coverImageUri ? (
+                        <Animated.Image 
+                            source={{ uri: currentSong.coverImageUri }} 
+                            style={[styles.coverThumbnail, isIsland && styles.islandCover]}
+                        />
+                        ) : (
+                        <View style={[styles.placeholderThumbnail, isIsland && styles.islandCover]}>
+                            <Ionicons name="musical-notes" size={20} color="#666" />
+                        </View>
+                        )}
+                    </Pressable>
+                    
+                    {/* Song Info */}
+                    <View style={styles.info}>
+                    <Text style={styles.title} numberOfLines={1}>
+                        {currentSong.title}
                     </Text>
-                    <Pressable onPress={skipBackward} style={styles.controlButton}>
-                      <Ionicons name="play-back" size={20} color="#fff" />
-                    </Pressable>
-                    <Pressable onPress={togglePlay} style={styles.playButton} hitSlop={20}>
-                      <Animated.View style={animatedButtonStyle}>
-                         <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={24} color="#fff" />
-                      </Animated.View>
-                    </Pressable>
-                    <Pressable onPress={skipForward} style={styles.controlButton}>
-                      <Ionicons name="play-forward" size={20} color="#fff" />
-                    </Pressable>
-                  </>
+                    <Text style={[styles.artist, isIsland && { display: 'none' }]} numberOfLines={1}>
+                        {currentSong.artist || 'Unknown Artist'}
+                    </Text>
+                    </View>
+                    
+                    {/* Controls */}
+                    {isIsland ? (
+                    <View style={[styles.islandControls, { zIndex: 10 }]}>
+                        <Pressable onPress={togglePlay} hitSlop={20}>
+                            <Animated.View style={animatedButtonStyle}>
+                                <Ionicons 
+                                name={optimisticPlaying ? 'pause' : 'play'} 
+                                size={24} 
+                                color="#fff" 
+                                />
+                            </Animated.View>
+                        </Pressable>
+                    </View>
+                    ) : (
+                    /* Bar Mode Controls */
+                    <>
+                        <Text style={styles.time}>
+                        {formatTime(storePosition)} / {formatTime(storeDuration)}
+                        </Text>
+                        <Pressable onPress={async (e) => { e.stopPropagation(); await skipBackward(e); }} style={styles.controlButton}>
+                        <Ionicons name="play-back" size={20} color="#fff" />
+                        </Pressable>
+                        <Pressable onPress={togglePlay} style={styles.playButton} hitSlop={20}>
+                        <Animated.View style={animatedButtonStyle}>
+                            <Ionicons name={optimisticPlaying ? 'pause' : 'play'} size={24} color="#fff" />
+                        </Animated.View>
+                        </Pressable>
+                        <Pressable onPress={async (e) => { e.stopPropagation(); await skipForward(e); }} style={styles.controlButton}>
+                        <Ionicons name="play-forward" size={20} color="#fff" />
+                        </Pressable>
+                    </>
+                    )}
+                </View>
+
+                {/* Classic Expanded Lyrics View */}
+                {!isIsland && (
+                    <GestureDetector gesture={panGesture}>
+                        <Animated.View style={[styles.classicLyricsContainer, animatedClassicLyricsStyle]}>
+                            {expanded && (
+                                <SynchronizedLyrics 
+                                    lyrics={lyricsToUse || []}
+                                    currentTime={storePosition}
+                                    onLyricPress={(time) => {
+                                        // Optional: Allow seeking in this view? "Not allow manual scrolling" but maybe tap to seek is ok?
+                                        // Island uses handleLyricPress.
+                                        // Spec says: "Auto-sync... Not allow manual scrolling".
+                                        // We'll stick to view-only primarily, but allow tap to seek if user wants.
+                                        player?.seekTo(time);
+                                    }}
+                                    isUserScrolling={false}
+                                    scrollEnabled={false} // "Not allow manual scrolling"
+                                    textStyle={styles.expandedLyricText}
+                                    activeLinePosition={0.4}
+                                    songTitle={currentSong?.title}
+                                    highlightColor={gradientColors[0]}
+                                    topSpacerHeight={50}
+                                    bottomSpacerHeight={50}
+                                />
+                            )}
+                            {/* Close Indicator */}
+                             <View style={styles.dragHandle} />
+                        </Animated.View>
+                    </GestureDetector>
                 )}
             </>
         )}
@@ -786,9 +871,9 @@ const styles = StyleSheet.create({
   },
   barContainer: {
     bottom: 0, 
-    backgroundColor: '#111',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
+    marginBottom: 69, // Overlap by 1px to ensure NO GAP between player and translucent nav bar
+    // backgroundColor: '#111', // REMOVED for transparency
+    borderTopWidth: 0, 
   },
   islandContainer: {
     top: Platform.OS === 'ios' ? 58 : 40, 
@@ -801,7 +886,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     height: 50, 
     width: '100%',
-    paddingHorizontal: 16,
+    paddingHorizontal: 8, // Reduced from 16 to move content left
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -820,20 +905,129 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 15,
   },
-  progressBarContainer: {
-    height: 4,
-    backgroundColor: 'transparent',
-    zIndex: 10,
+  classicScrubberTarget: {
+    position: 'absolute',
+    top: -10, // Extend hit area upwards
+    left: 0,
+    right: 0,
+    height: 20, // Hit area height
+    justifyContent: 'center',
+    zIndex: 200,
+    backgroundColor: 'transparent', // Debug: 'rgba(255,0,0,0.2)'
   },
-  progressBarTouchable: {
+  progressBarTrackBase: {
+    width: '100%',
     height: 20,
-    marginTop: -10,
     justifyContent: 'center',
   },
-  progressBarTrack: {
-    height: 3,
-    backgroundColor: '#333',
+  progressBarTrackAnimated: {
     width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    overflow: 'hidden',
+    // Height controlled by animation (2 -> 6)
+  },
+  progressFillAnimated: {
+      height: '100%',
+      backgroundColor: '#fff',
+  },
+  scrubberDot: {
+      position: 'absolute',
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: '#fff',
+      marginLeft: -6, // Center on end of line
+      top: 4, // Center vertically (20/2 - 12/2 = 4)
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.5,
+      shadowRadius: 2,
+      elevation: 3,
+  },
+  trayLyricText: {
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '700', 
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
+  },
+  expandedLyricsContainer: {
+    flex: 1, 
+    width: '100%', 
+    paddingBottom: 20
+  },
+  expandedLyricText: {
+    color: '#fff', 
+    fontSize: 23, 
+    fontWeight: '800', 
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
+  },
+  expandedContent: {
+    flex: 1, 
+    width: '100%', 
+    paddingHorizontal: 10, 
+    paddingVertical: 10
+  },
+  expandedTopRow: {
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    marginBottom: 15, 
+    paddingBottom: 5, 
+    backgroundColor: 'transparent'
+  },
+  vinylMargin: {
+    marginRight: 12
+  },
+  expandedInfo: {
+    flex: 1, 
+    marginRight: 8
+  },
+  expandedTitle: {
+    color: '#fff',
+    fontSize: 16, 
+    marginBottom: 2,
+    fontWeight: '600'
+  },
+  expandedControls: {
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12
+  },
+  dragHandle: {
+    position: 'absolute',
+    bottom: -10,
+    left: '50%',
+    marginLeft: -20,
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2
+  },
+  unifiedLyricsPressable: {
+    flex: 1, 
+    width: '100%',
+    justifyContent: 'center', 
+    alignItems: 'center',
+    minHeight: 40,
+    paddingHorizontal: 8,
+  },
+  unifiedLyricsMargin: {
+    marginTop: 10
+  },
+  flexFullWidth: {
+    flex: 1, 
+    width: '100%'
+  },
+  scrubberContainer: {
+    width: '100%', 
+    paddingHorizontal: 24, 
+    paddingBottom: 12
   },
   progressFill: {
     height: '100%',
@@ -842,8 +1036,18 @@ const styles = StyleSheet.create({
   content: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 16,
+    height: 70, // Base height
+    overflow: 'hidden', // Clip expanded content
+    // width: '100%', // ensure full width
   },
+  classicLyricsContainer: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: 'transparent', // Transparent to show blurred background
+    paddingTop: 10,
+  },
+
   coverThumbnail: {
     width: 48,
     height: 48,

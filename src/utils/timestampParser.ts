@@ -12,10 +12,9 @@
 import { LyricLine } from '../types/song';
 
 // Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
-// Regex patterns for timestamp detection (Supports 00:00.00 and 00:00)
 // Now permissive for 1-digit seconds to handle "dirty" lyrics like [0:3.75]
 const TIMESTAMP_REGEX = /[[(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\])]?/g;
-const SINGLE_TIMESTAMP_REGEX = /[[(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\])]?/;
+const SINGLE_TIMESTAMP_REGEX = /[[(]?(\d{1,2})[:.](\d{1,2})(\.\d+)?[\])]?/; // No global flag
 
 /**
  * Parse a timestamp string into seconds
@@ -37,17 +36,32 @@ const parseTimeToSeconds = (minutes: string, seconds: string, milliseconds?: str
  * @returns Array of LyricLine objects
  */
 export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
-  const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (!rawText) return [];
+  
+  // Handle potential escaped newlines if the source didn't decode correctly
+  let textToParse = rawText;
+  if (textToParse.includes('\\n')) {
+      textToParse = textToParse.replace(/\\n/g, '\n');
+  }
+  
+  const lines = textToParse.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
   const lyrics: LyricLine[] = [];
+  
+  console.log(`[Parser] Raw text length: ${rawText.length}, Lines: ${lines.length}`);
+  if (lines.length > 0) {
+      console.log(`[Parser] First line: "${lines[0]}"`);
+  }
   
   let currentTimestamp = 0;
   let currentTextLines: string[] = [];
   let lineOrder = 0;
   
   // First check if there are ANY timestamps
-  const hasTimestamps = rawText.match(TIMESTAMP_REGEX);
+  TIMESTAMP_REGEX.lastIndex = 0;
+  const hasTimestamps = TIMESTAMP_REGEX.test(textToParse);
   
   if (!hasTimestamps) {
+    console.log('[Parser] No timestamps detected in text');
     // If no timestamps, treat every line as a separate lyric line
     return lines.map((text, index) => ({
       timestamp: 0,
@@ -74,7 +88,10 @@ export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
       }
       
       // Parse new timestamp
-      currentTimestamp = parseTimeToSeconds(match[1], match[2], match[3]);
+      let rawTimestamp = parseTimeToSeconds(match[1], match[2], match[3]);
+      
+      // Use raw timestamp (Dynamic offset applied in renderer instead of "saving" it)
+      currentTimestamp = rawTimestamp;
       
       // Clean the line text by removing ALL timestamps and common separators
       let cleanedText = line.replace(TIMESTAMP_REGEX, '').trim();
@@ -85,7 +102,14 @@ export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
         // Inline timestamp with text
         currentTextLines.push(cleanedText);
       }
-      // If cleanedText is empty, it was a timestamp-only line, currentTimestamp is updated for next block
+      
+      // IMPORTANT: If this line had a timestamp, it marks the START of a new block (usually).
+      // However, if the text was inline (e.g. "[00:10] Hello"), we want to commit it immediately 
+      // if the NEXT line also has a timestamp.
+      // But the current structure accumulates widely.
+      // Let's stick to the current logic: A timestamp triggers the commit of the *previous* block.
+      // The current block starts here.
+      
     } else {
       // Regular text line - add to current block
       currentTextLines.push(line);
@@ -93,12 +117,16 @@ export const parseTimestampedLyrics = (rawText: string): LyricLine[] => {
   }
   
   // Don't forget the last block
-  if (currentTextLines.length > 0) {
-    lyrics.push({
-      timestamp: currentTimestamp,
-      text: currentTextLines.join('\n'),
-      lineOrder: lineOrder,
-    });
+  if (currentTextLines.length > 0 || currentTimestamp > 0) {
+    // Even if text is empty, if we have a timestamp, we might want a spacer (instrumental)? 
+    // But for now, only push if text exists OR we want to support instrumental markers.
+    if (currentTextLines.length > 0) {
+        lyrics.push({
+        timestamp: currentTimestamp,
+        text: currentTextLines.join('\n'),
+        lineOrder: lineOrder,
+        });
+    }
   }
   
   return lyrics;

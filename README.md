@@ -8,13 +8,15 @@
 > **A Premium, Privacy-First, Local Lyrics Experience.**
 > LuvLyrics is a visual instrument designed to turn your lyric-reading into a cinematic experience. This document provides a comprehensive breakdown of the project's architecture, technical decisions, and file-by-file organization.
 
-### 🚀 **V8 COMPLETE ENGINE OVERHAUL**
-The latest v8 update transforms LuvLyrics into a production-grade media player with:
-- **Native Hardware Sync**: Full Bluetooth, Lock Screen, and Control Center integration.
-- **Dynamic Island UI**: A premium, compact, right-aligned island player that sits perfectly with the brand header.
-- **Unified Lyric Selection**: Parallel fetching from **LRCLIB**, **JioSaavn**, and **Lyrica/Genius**.
-- **Instant Playback**: Zero-latency audio start using optimistic comparison and background hydration.
-- **On-Device Reliability**: Powered by a robust SQLite engine—runs 100% standalone.
+### 🚀 **V9 COMPLETE ENGINE**
+The latest v9 update brings a complete overhaul with:
+- **Multi-Source Parallel Lyrics Engine**: Fetches from LRCLIB, JioSaavn, and Lyrica simultaneously with smart ranking
+- **Batch Review & Download System**: Process multiple songs with queue management
+- **Dynamic Island & Island Scrubber**: Premium compact player UI with system integration
+- **Reels & Social Features**: Vertical short-form content experience
+- **Playlist Management**: Full CRUD with favorites and smart sorting
+- **Transliteration Support**: Romanized lyrics for regional languages
+- **AI Generator Modal**: AI-powered lyrics generation
 
 ---
 
@@ -24,14 +26,15 @@ The latest v8 update transforms LuvLyrics into a production-grade media player w
    - [The 60fps Scroll Engine](#60fps-scroll-engine)
    - [The Robust Database Singleton](#robust-database-singleton)
    - [Smart Timestamp Engine](#smart-timestamp-engine)
+   - [Parallel Search Strategy](#parallel-search-strategy)
 3. [Directory Architecture](#directory-architecture)
    - [src/components](#srccomponents)
-   - [src/database](#srcdatabase)
    - [src/screens](#srcscreens)
+   - [src/services](#srcservices)
    - [src/store](#srcstore)
-   - [src/utils](#srcutils)
+   - [src/database](#srcdatabase)
 4. [Design System](#design-system)
-5. [Future Roadmap](#future-roadmap)
+5. [Key Features](#key-features)
 
 ---
 
@@ -57,23 +60,21 @@ Traditional lyrics apps often use `setInterval` for auto-scrolling, which leads 
 Expo SQLite with WAL mode for concurrent access.
 - **Solution**: Promise-based singleton in `db.ts` prevents multiple simultaneous connections
 - **WAL Mode**: `PRAGMA journal_mode = WAL` enables concurrent reads/writes
-- **Simplified**: Removed complex retry/queue logic that caused empty lyrics bug
 - **Migration System**: Automatic column additions via PRAGMA table_info checks
+- **Playlist Support**: Dedicated `playlistQueries.ts` for playlist CRUD operations
 
 ### Smart Timestamp Engine
 The app handles "messy" data intelligently.
 - **Flexible Formats**: Supports `[0:00]`, `(0:00)`, `0:00`, and `0.00`.
-- **Regex**: `[\[\(]?(\d{1,2})[:.](\d{2})[\]\)]?`
+- **Regex**: `[\\[\\(]?(\\d{1,2})[:.](\\d{2})[\\]\\)]?`
 - **Cleansing**: It doesn't just extract timestamps; it aggressively cleans the display text by stripping leading hyphens, colons, and pipes (`|`) that often result from AI-generated lyric templates.
 
-### Smart Lyric Search Engine (Lyrica API) 🪄
+### Parallel Search Strategy
 Unified lyrics fetching with intelligent fallback strategy.
-- **Lyrica API**: Single endpoint aggregating 6+ lyrics sources (LRCLIB, Genius, Musixmatch, etc.)
 - **Waterfall Strategy**: synced-fast → synced-slow → plain text fallback
-- **Response Parsing**: Handles nested `data.data.lyrics` structure
-- **Instrumental Detection**: Converts empty timestamped lines to `[INSTRUMENTAL]`
-- **Lyric Preview Mode**: Full-screen preview with ScrollView before applying
-- **Service**: `src/services/LyricaService.ts`
+- **Parallel Race**: Hits LRCLIB, JioSaavn, and Lyrica simultaneously (5s race)
+- **Match Scoring**: Results are ranked by `SmartLyricMatcher.ts`
+- **Service**: `MultiSourceLyricsService.ts`
 
 ### Dynamic Theme Engine 🎨
 - **Magic Button**: The "Sparkle" button now dynamically shifts its background gradient based on the current song's `gradientId`, creating a unified, premium appearance.
@@ -90,44 +91,109 @@ Unified lyrics fetching with intelligent fallback strategy.
 ## 📂 Directory Architecture
 
 ### `src/components/` (The Building Blocks)
-- **`LrcSearchModal.tsx`**: New unified search interface with list filtering, source badges, and **Preview Mode**.
-- **`AuroraHeader.tsx`**: **Skia-powered** organic blurred background system.
-- **`LyricsLine.tsx`**: Animated line component with distance-based blur and glow.
-- **`VinylRecord.tsx`**: Realistic rotating vinyl UI for the player.
-- **`PlayerControls.tsx`**: Core playback interaction buttons with ±10s skip.
-- **`Scrubber.tsx`**: Timeline progress bar with optimistic seeking.
-
-### `src/database/` (The Persistence Layer)
-- **`db.ts`**: Core SQLite initialization, singleton management, and recovery logic.
-- **`queries.ts`**: CRUD operations with built-in retry logic and error handling.
-- **`sampleData.ts`**: Template metadata to populate the app on first run.
+| Component | Description |
+|-----------|-------------|
+| `LrcSearchModal.tsx` | Unified search interface with list filtering, source badges, and **Preview Mode** |
+| `AuroraHeader.tsx` | **Skia-powered** organic blurred background system |
+| `LyricsLine.tsx` | Animated line component with distance-based blur and glow |
+| `VinylRecord.tsx` | Realistic rotating vinyl UI for the player |
+| `PlayerControls.tsx` | Core playback interaction buttons with ±10s skip |
+| `Scrubber.tsx` | Timeline progress bar with optimistic seeking |
+| `MiniPlayer.tsx` | Compact player for background playback |
+| `IslandScrubber.tsx` | Dynamic Island style progress indicator |
+| `SynchronizedLyrics.tsx` | High-precision synced lyrics renderer |
+| `MagicModeModal.tsx` | AI-powered magic lyrics search |
+| `ManualSyncModal.tsx` | Manual timestamp synchronization tool |
+| `LanguagePickerModal.tsx` | Transliteration language selector |
+| `AIGeneratorModal.tsx` | AI lyrics generation interface |
+| `BatchReviewModal.tsx` | Batch lyrics review and apply |
+| `BulkSwapModal.tsx` | Bulk operations for multiple songs |
+| `CoverFlow.tsx` | 3D cover art carousel |
+| `MosaicCover.tsx` | Grid mosaic cover display |
+| `DownloadGridCard.tsx` | Download item card |
+| `DownloadQueueModal.tsx` | Download queue management |
+| `FloatingDownloadIndicator.tsx` | Active download progress indicator |
+| `ReelCard.tsx` | Social reels card |
+| `ReelsVaultModal.tsx` | Reels collection vault |
+| `PlaylistItem.tsx` | Playlist list item |
+| `AddToPlaylistModal.tsx` | Add song to playlist |
+| `CreatePlaylistModal.tsx` | Create new playlist |
+| `PlaylistSelectionModal.tsx` | Select playlist |
+| `GradientPicker.tsx` | Theme gradient selector |
+| `GradientBackground.tsx` | Animated morphing gradients |
+| `Toast.tsx` | Spring-animated notifications |
+| `CustomMenu.tsx` | iOS-style anchored menus |
+| `ProcessingOverlay.tsx` | Loading/processing overlay |
+| `QualitySelector.tsx` | Audio quality selector |
 
 ### `src/screens/` (The Orchestration Layer)
-- **`LibraryScreen.tsx`**: Home view with grid/list hybrid layout.
-- **`NowPlayingScreen.tsx`**: Main reader with 60fps scroll engine, **Magic Button (Dynamic Gradient)**, and search integration.
-- **`AddEditLyricsScreen.tsx`**: Manual entry and metadata management.
-- **`SearchScreen.tsx`**: Real-time cross-field search engine.
-- **`SettingsScreen.tsx`**: iOS-style configuration with clear data option.
+| Screen | Description |
+|--------|-------------|
+| `LibraryScreen.tsx` | Home view with grid/list hybrid layout |
+| `NowPlayingScreen.tsx` | Main reader with 60fps scroll engine, **Magic Button**, and search integration |
+| `AddEditLyricsScreen.tsx` | Manual entry and metadata management |
+| `SearchScreen.tsx` | Real-time cross-field search engine |
+| `SettingsScreen.tsx` | iOS-style configuration with clear data option |
+| `AudioDownloaderScreen.tsx` | Multi-source audio downloader |
+| `CoverArtSearchScreen.tsx` | Cover art search and selection |
+| `LikedSongsScreen.tsx` | Favorited songs collection |
+| `PlaylistDetailScreen.tsx` | Individual playlist view |
+| `PlaylistsScreen.tsx` | All playlists management |
+| `ReelsScreen.tsx` | Vertical short-form content feed |
+| `YoutubeBrowserScreen.tsx` | YouTube audio browser |
 
 ### `src/services/` (The Core Engine)
-- **`LyricaService.ts`**: Unified Lyrica API client with waterfall strategy
-- **`LrcLibService.ts`**: (Legacy) LRCLIB API client for synced lyrics
-- **`GeniusService.ts`**: (Legacy) Robust scraper with metadata scrubbing
-- **`audioService.ts`**: Audio playback management with expo-audio
-- **`whisperService.ts`**: (Legacy) Whisper.cpp transcription support
+| Service | Description |
+|---------|-------------|
+| `MultiSourceLyricsService.ts` | Parallel fetching from all providers (5s race) |
+| `JioSaavnLyricsService.ts` | Official JioSaavn API wrapper |
+| `LyricaService.ts` | Lyrica API client |
+| `LrcLibService.ts` | LRCLIB API client |
+| `GeniusService.ts` | Robust scraper with metadata scrubbing |
+| `SmartLyricMatcher.ts` | Match scoring logic |
+| `Tamil2LyricsService.ts` | Tamil lyrics service |
+| `TransliterationService.ts` | Romanization for regional languages |
+| `LyricsRepository.ts` | Unified search orchestration |
+| `DownloadManager.ts` | Download queue and management |
+| `AudioExtractorService.ts` | Audio extraction |
+| `MusicSearchService.ts` | Music search |
+| `NativeSearchService.ts` | Native search |
+| `ImageSearchService.ts` | Cover art search |
+| `mediaScanner.ts` | Local media scanning |
+| `ReelsBufferManager.ts` | Reels buffer management |
+| `ReelsRecommendationEngine.ts` | Content recommendations |
 
 ### `src/store/` (Reactive State - Zustand)
-- **`songsStore.ts`**: Master song list and metadata state.
-- **`playerStore.ts`**: Playback state and session queue.
-- **`tasksStore.ts`**: Persistent background task queue for tracking AI processing across songs (Whisper & Karaoke separation).
-- **`artHistoryStore.ts`**: Tracks "Recent Art" for quick reuse across songs.
-- **`settingsStore.ts`**: Persists UI preferences to disk.
+| Store | Description |
+|-------|-------------|
+| `songsStore.ts` | Master song list and metadata state |
+| `playerStore.ts` | Playback state and session queue |
+| `settingsStore.ts` | UI preferences and persistence |
+| `playlistStore.ts` | Playlist management state |
+| `downloadQueueStore.ts` | Download queue state |
+| `lyricsScanQueueStore.ts` | Lyrics scan queue |
+| `reelsFeedStore.ts` | Reels feed state |
+| `reelsPreferencesStore.ts` | Reels preferences |
+| `dailyStatsStore.ts` | Daily listening statistics |
+| `artHistoryStore.ts` | Recent cover art history |
+
+### `src/database/` (The Persistence Layer)
+| File | Description |
+|------|-------------|
+| `db.ts` | Core SQLite initialization, singleton management, and recovery logic |
+| `queries.ts` | CRUD operations with built-in retry logic and error handling |
+| `playlistQueries.ts` | Playlist-specific CRUD operations |
+| `db_migration.ts` | Database migration management |
+| `sampleData.ts` | Template metadata to populate the app on first run |
 
 ### `src/utils/` (Logic Helpers)
-- **`timestampParser.ts`**: The engine that converts raw text into structured `LyricLine` objects.
-- **`audioConverter.ts`**: FFmpeg-based audio conversion for Whisper (16kHz WAV) and AI Karaoke (PCM decoding).
-- **`exportImport.ts`**: JSON serialization for library backups.
-- **`formatters.ts`**: Time and text formatting utilities.
+| File | Description |
+|------|-------------|
+| `timestampParser.ts` | The engine that converts raw text into structured `LyricLine` objects |
+| `formatters.ts` | Time and text formatting utilities |
+| `gradients.ts` | Gradient generation and utilities |
+| `imageAnalyzer.ts` | Image brightness analysis |
+| `exportImport.ts` | JSON serialization for library backups |
 
 ---
 
@@ -151,6 +217,12 @@ Located in `src/constants/`:
 - **Glow effects**: Active lyrics have white glow (opacity: 0.6, radius: 20px)
 - **Skip controls**: ±10 second seek buttons instead of previous/next song
 
+### Smart Lyric Search (The Magic Button) ✨
+- **Parallel Fetching**: Hits **LRCLIB**, **JioSaavn**, and **Lyrica** simultaneously
+- **Match Scoring**: System assigns a confidence score to every result
+- **Preview Mode**: Full-screen preview before applying lyrics
+- **Dynamic Theme**: Magic button gradient matches current song's theme
+
 ### Cover Art Management
 - **Custom uploads**: Long-press (1.5s) cover art in Now Playing or Library to upload from gallery
 - **Recent art reuse**: Quick access to recently used cover art
@@ -162,17 +234,23 @@ Located in `src/constants/`:
 - **List view details**: Shows thumbnail, title, artist, duration (MM:SS format)
 - **Long-press actions**: Access cover art upload from any song card
 - **Recently Played**: Horizontal scrolling list of your last 10 listened songs
+- **Playlists**: Create, edit, and manage playlists
 
-### ✨ Magic Timestamp Search
-- **Smart Matching**: Aligns your pasted lyrics with audio using advanced string matching.
-- **Unified Search**: Hit multiple databases (LRCLIB, JioSaavn, Genius) simultaneously.
-- **Visual Progress**: Real-time feedback with live progress bars.
-- **Match Scoring**: System assigns a confidence score to every result to help you pick the best one.
+### Audio Download & Streaming
+- **Multi-source download**: Download from JioSaavn, Wynk, Gaana, NetEase
+- **Quality selection**: Choose audio quality (128k, 320k, FLAC)
+- **Download queue**: Manage multiple downloads
+- **Batch processing**: Process multiple songs at once
 
-### 🎵 Premium Playback
-- **60fps Scroll Engine**: Uses `requestAnimationFrame` for buttery-smooth scrolling.
-- **Dynamic Theme Engine**: 24+ curated vibrant presets and organic Skia-powered blurs.
-- **Hardware Integration**: Full Bluetooth, Lock Screen, and Control Center synchronization.
+### Reels & Social Features
+- **Reels feed**: Vertical short-form content
+- **Recommendations**: AI-powered content suggestions
+- **Vault**: Save favorite reels
+
+### Transliteration Support
+- **Romanization**: Convert Tamil, Hindi, and other regional lyrics to Roman script
+- **Language picker**: Select source and target languages
+- **Toggle view**: Switch between original and transliterated lyrics
 
 ### UI/UX Enhancements
 - **Auto-hide controls**: Player controls fade out after 3.5s when playing, stay visible when paused. Re-appears on interaction.
@@ -180,7 +258,7 @@ Located in `src/constants/`:
 - **Vinyl Record**: 60% cover art, 3% center hole for better proportions
 - **Toast notifications**: Success feedback on song save (auto-dismisses after 2s)
 - **Navigation**: Fallback to Main screen if goBack() fails
-- **Solid Controls**: Now Playing controls feature a semi-transparent dark blurred background for better visibility against vibrant covers.
+- **Solid Controls**: Now Playing controls feature a semi-transparent dark blurred background
 
 ---
 
@@ -205,29 +283,71 @@ CREATE TABLE songs (
   text_case TEXT DEFAULT 'normal',
   audio_uri TEXT,
   is_liked INTEGER DEFAULT 0,
-  vocal_stem_uri TEXT,
+  lyricSource TEXT,
+  transliterated_lyrics TEXT,
   instrumental_stem_uri TEXT,
+  vocal_stem_uri TEXT,
   separation_status TEXT DEFAULT 'none',
   separation_progress INTEGER DEFAULT 0
 );
+
+CREATE TABLE playlists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  cover_image_uri TEXT,
+  is_default INTEGER DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,
+  date_created TEXT NOT NULL,
+  date_modified TEXT NOT NULL
+);
+
+CREATE TABLE playlist_songs (
+  playlist_id TEXT,
+  song_id TEXT,
+  order_index INTEGER,
+  PRIMARY KEY (playlist_id, song_id)
+);
 ```
 
-### Key State Management
-- **Song interface**: Added `lyricsAlign?: 'left' | 'center' | 'right'` and `textCase?: 'normal' | 'uppercase' | 'titlecase' | 'sentencecase'`
-- **Player controls**: `controlsOpacity` and `controlsTranslateY` animated values for auto-hide
-- **Text transformation**: Applied in `renderLyric` callback, transforms on-the-fly without modifying stored data
+### Key Type Definitions (src/types/song.ts)
 
-### Performance Optimizations
-- **No getItemLayout**: Removed fixed item heights to allow dynamic sizing for multi-line lyrics
-- **Memoized LyricItem**: Extracted to separate component with `React.memo` to prevent hook violations in FlatList
-- **Consistent font weight**: Same weight (600) for active/inactive to prevent text reflow
-- **Title case logic**: Split by spaces, capitalize first letter only (handles contractions like "You're" correctly)
+```typescript
+export interface Song {
+  id: string;
+  title: string;
+  artist?: string;
+  album?: string;
+  gradientId: string;
+  duration: number;
+  lyrics: LyricLine[];
+  lyricsAlign?: 'left' | 'center' | 'right';
+  textCase?: 'normal' | 'uppercase' | 'titlecase' | 'sentencecase';
+  transliteratedLyrics?: LyricLine[];
+  // ... more fields
+}
 
-### Event Handling
-- **CustomMenu event passthrough**: `onPress` accepts optional event parameter for submenu positioning
-- **Long-press detection**: 1.5s delay for cover art, immediate for song cards in library
-- **Scroll gesture detection**: Tracks `scrollYRef` to determine scroll direction for control visibility
-- **Hardware Remote Commands**: Subscribed to system `play`, `pause`, `next`, and `previous` events via `expo-audio`.
+export interface UnifiedSong {
+  id: string;
+  title: string;
+  artist: string;
+  highResArt: string;
+  downloadUrl: string;
+  source: 'Saavn' | 'Wynk' | 'NetEase' | 'SoundCloud' | 'Audiomack' | 'Gaana' | 'Local';
+  duration?: number;
+  hasLyrics?: boolean;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  coverImageUri?: string;
+  isDefault: boolean;
+  sortOrder: number;
+  songCount?: number;
+}
+```
 
 ---
 
@@ -283,4 +403,5 @@ If you don't have the Android SDK installed, use Expo EAS:
 </p>
 
 ---
+
 *LuvLyrics: Created with ❤️ for lyrics lovers.*

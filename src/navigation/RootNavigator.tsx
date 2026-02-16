@@ -39,6 +39,7 @@ export const RootNavigator: React.FC = () => {
     >
       <View style={{ flex: 1 }}>
         <Stack.Navigator
+          id="RootStack"
           screenOptions={{
             headerShown: false,
             animation: 'slide_from_bottom',

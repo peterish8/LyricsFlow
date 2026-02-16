@@ -18,7 +18,7 @@
 
 ### UI & Animation
 - **@shopify/react-native-skia**: 2.2.12 - High-performance graphics and blur effects
-- **react-native-reanimated**: ~4.1.1 - Smooth 60fps animations (used for Auto-Hide & Dynamic Backgrounds)
+- **react-native-reanimated**: ~4.1.1 - Smooth 60fps animations
 - **react-native-gesture-handler**: ~2.28.0 - Touch gesture handling
 - **expo-linear-gradient**: ^15.0.8 - Gradient backgrounds
 - **expo-blur**: ~15.0.8 - Blur effects
@@ -41,14 +41,15 @@
 - **expo-av**: ~16.0.8 - Audio/video playback
 - **expo-audio**: ~1.1.1 - Core audio engine with system media session sync
 - **expo-media-library**: ~18.2.1 - Local file access
-- **react-native-worklets**: 0.5.1 - High-performance audio processing (Stem separation)
+- **react-native-worklets**: 0.5.1 - High-performance audio processing
 
 ### Search & Services
 ### Unified Search Engine
 - **MultiSourceLyricsService**: Orchestrates parallel fetching from all providers (5s race)
 - **JioSaavn Service**: Official API wrapper for high-quality synced lyrics
+- **Lyrica Service**: Alternative lyrics provider
 - **LRCLIB API**: Public source for synced lyrics (.lrc)
-- **Genius Scraper**: Fallback source for plain text lyrics with robust metadata scrubbing
+- **Genius Scraper**: Fallback source for plain text lyrics
 - **Smart Lyric Matcher**: Fuzzy matching and scoring logic for ranking results
 
 ### Development Tools
@@ -140,17 +141,18 @@ expo start --web
 - **requestAnimationFrame**: High-precision timing loop
 - **deltaTime Calculations**: Sub-millisecond accuracy
 - **Memoized Components**: React.memo for LyricItem to prevent re-renders
-- **Animated.View Wrapper**: Used for rotating background images to ensure smooth performance on Android (bypassing Animated.Image limitations).
-- **Battery Saver Mode**: Option to disable background animations to reduce GPU usage.
+- **Animated.View Wrapper**: Used for rotating background images to ensure smooth performance
+- **Battery Saver Mode**: Option to disable background animations to reduce GPU usage
 
 ### Database Optimizations
 - **Singleton Pattern**: Single connection prevents race conditions
 - **Retry Mechanism**: Automatic recovery from NullPointerException
 - **PRAGMA Checks**: Efficient schema migrations
+- **WAL Mode**: Concurrent read/write access
 
 ### High-Precision Sync
-- **Sub-millisecond Timing**: Ensuring lyrics never drift from audio.
-- **Standalone Execution**: All library and sync logic runs locally without backend costs.
+- **Sub-millisecond Timing**: Ensuring lyrics never drift from audio
+- **Standalone Execution**: All library and sync logic runs locally without backend costs
 
 ## Version Control
 - **Git**: Version control system

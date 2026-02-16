@@ -9,7 +9,7 @@ import Animated, {
   Easing, 
   cancelAnimation 
 } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+
 
 interface InstrumentalWaveformProps {
   active: boolean;

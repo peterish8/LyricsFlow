@@ -211,7 +211,7 @@ export const YoutubeBrowserScreen = ({ navigation }: any) => {
       setIsExtracting(false);
       hideFab();
     }
-  }, [isVideoPage]);
+  }, [isVideoPage, hideFab]);
 
   // ─── Message Handler ───────────────────────────────────────
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
@@ -246,7 +246,7 @@ export const YoutubeBrowserScreen = ({ navigation }: any) => {
     } catch (e) {
       // Ignore non-JSON messages
     }
-  }, []);
+  }, [showFab]);
 
   // ─── FAB Press ─────────────────────────────────────────────
   const handleDownloadPress = useCallback(() => {

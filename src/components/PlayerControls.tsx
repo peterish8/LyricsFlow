@@ -68,16 +68,18 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
       </AnimatedPressable>
 
       {/* Play/Pause */}
-      <Pressable
-        style={styles.playButton}
+      <AnimatedPressable
+        style={[styles.playButton, playStyle]}
         onPress={onPlayPause}
+        onPressIn={() => handlePressIn(playScale)}
+        onPressOut={() => handlePressOut(playScale)}
       >
         <Ionicons
           name={isPlaying ? 'pause-circle' : 'play-circle'}
           size={76}
           color="#fff"
         />
-      </Pressable>
+      </AnimatedPressable>
 
       {/* Skip Forward 10s */}
       <AnimatedPressable

@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useCallback } from 'react';
 import { Animated, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +29,21 @@ export const Toast: React.FC<ToastProps> = ({
   const translateY = useRef(new Animated.Value(initialY)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const progress = useRef(new Animated.Value(1)).current;
+
+  const handleDismiss = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: isIsland ? 100 : -100, // Exit direction matches entry
+        duration: 300,
+        useNativeDriver: true
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true
+      })
+    ]).start(() => onDismiss());
+  }, [isIsland, onDismiss, opacity, translateY]);
 
   // Use useLayoutEffect to prevent initial flash
   useLayoutEffect(() => {
@@ -67,22 +82,7 @@ export const Toast: React.FC<ToastProps> = ({
 
       return () => clearTimeout(timer);
     }
-  }, [visible, isIsland]);
-
-  const handleDismiss = () => {
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: isIsland ? 100 : -100, // Exit direction matches entry
-        duration: 300,
-        useNativeDriver: true
-      }),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true
-      })
-    ]).start(() => onDismiss());
-  };
+  }, [visible, isIsland, duration, handleDismiss, opacity, progress, translateY]);
 
   if (!visible) return null;
 

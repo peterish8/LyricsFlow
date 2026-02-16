@@ -6,15 +6,8 @@ import { Colors } from '../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
-const COLUMN_COUNT = 2; // For Windows/Desktop we might want dynamic, but user asked for 2 for now in previous steps, 
-// though the critique mentioned 3-4 for desktop. Let's aim for responsive.
-// Actually user said: "Using a FlatList with numColumns={2} is perfect for Windows... but on large desktop... should use 3 or 4"
-// I'll stick to 2 for simplicity or maybe use flex wrap. FlatList numColumns is rigid.
-// For now, I'll assume the parent FlatList handles numColumns, so this component just needs to be flexible width.
-
 const CARD_MARGIN = 8;
-// Calculate width based on 2 columns for now, parent can control
-const CARD_WIDTH = (width / 2) - (CARD_MARGIN * 3); 
+// Calculate width based on 2 columns for now, parent can control 
 
 interface DownloadGridCardProps {
   song: UnifiedSong;

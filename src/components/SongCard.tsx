@@ -5,7 +5,6 @@
 
 import React, { memo } from 'react';
 import { StyleSheet, View, Text, Pressable, Image } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Colors } from '../constants/colors';

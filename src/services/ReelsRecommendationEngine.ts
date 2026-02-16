@@ -79,7 +79,7 @@ class ReelsRecommendationEngine {
    * Generate personalized search queries based on "Artist Cluster" strategy
    * User Request: "Pick any 6 artists and each artist 5 songs"
    */
-  generateQueries(targetArtistCount: number = 6): string[] {
+  generateQueries(targetArtistCount: number = 6): { query: string; language: string }[] {
     // Seed from library first!
     this.seedFromLibrary();
 
@@ -101,40 +101,83 @@ class ReelsRecommendationEngine {
 
     if (candidatePool.length === 0) {
         // Fallback to trending if no library data
-        const preferredLanguages = prefsStore.getPreferredLanguages();
-        const fallbackQueries: string[] = [];
+        const weights = prefsStore.getLanguageWeights(); // Use new method
+        // Filter only active languages or default to all if none active?
+        const activeDefaults = weights.filter(w => w.weight > 0).map(w => w.language);
+        const languagesPool = activeDefaults.length > 0 ? activeDefaults : (['English', 'Hindi'] as any[]);
+
+        const fallbackQueries: { query: string; language: string }[] = [];
         for(let i=0; i<targetArtistCount; i++) {
-            const lang = preferredLanguages[Math.floor(Math.random() * preferredLanguages.length)];
-            fallbackQueries.push(`${lang} trending songs`);
+            const lang = languagesPool[Math.floor(Math.random() * languagesPool.length)];
+            fallbackQueries.push({ 
+                query: `${lang} trending songs`,
+                language: lang
+            });
         }
         return fallbackQueries;
     }
 
     // 3. Shuffle and pick 6 unique artists
-    const shuffled = candidatePool.sort(() => Math.random() - 0.5);
-    const selectedArtists = shuffled.slice(0, targetArtistCount);
+    // const shuffled = candidatePool.sort(() => Math.random() - 0.5);
+    // const selectedArtists = shuffled.slice(0, targetArtistCount);
 
-    // 4. Create nice search queries for them
-    const queries = selectedArtists.map(artist => this.createArtistQuery(artist));
+    // 4. Create Weighted Queries based on Language Preferences
+    const weights = prefsStore.getLanguageWeights();
+    const activeLanguages = weights.filter(w => w.weight > 0);
+    
+    // Sort by weight desc
+    activeLanguages.sort((a, b) => b.weight - a.weight);
 
-    console.log(`[ReelsReco] 🎨 Selected Artists Cluster: ${selectedArtists.join(', ')}`);
-    return queries;
-  }
+    const generatedQueries: { query: string; language: string }[] = [];
+    
+    // Distribute slots based on weight (Total: 6 slots)
+    // E.g. Tamil 80% (4.8 slots -> 5), English 20% (1.2 slots -> 1)
+    
+    let slotsFilled = 0;
+    
+    // Pass 1: Allocate guaranteed slots
+    activeLanguages.forEach(lang => {
+         const slots = Math.round((lang.weight / 100) * targetArtistCount);
+         if (slots > 0) {
+             for(let i=0; i<slots; i++) {
+                 // Pick an artist for this language? 
+                 // Actually, use "Language + Random Artist" or just "Language Hit Songs"
+                 // Since we don't know the artist's language easily without complex metadata, 
+                 // we will use the Language Filter in our Search Service!
+                 
+                 // Strategy: Pick a random query type
+                 const types = ['Top Songs', 'Melody', 'Trending', 'Love Songs', 'Hit Songs'];
+                 const type = types[Math.floor(Math.random() * types.length)];
+                 const q = `${lang.language} ${type}`;
+                 
+                 generatedQueries.push({ query: q, language: lang.language });
+             }
+             slotsFilled += slots;
+         }
+    });
+    
+    // Pass 2: Fill remaining slots with highest weighted language (or random active)
+    while(generatedQueries.length < targetArtistCount) {
+         const fallbackLang = activeLanguages[0]?.language || 'English';
+         const q = `${fallbackLang} Trending`;
+         generatedQueries.push({ query: q, language: fallbackLang });
+    }
 
-  private createArtistQuery(artist: string): string {
-    return `${artist} songs`; // Simple is often best for broad results
+    console.log(`[ReelsReco] 🎨 Generated ${generatedQueries.length} Weighted Queries:`, generatedQueries.map(q => q.query));
+    return generatedQueries;
   }
 
   /**
    * Search using ONLY Saavn + Gaana (no SoundCloud, Wynk, NetEase etc.)
    */
-  private async searchSaavnAndGaana(query: string): Promise<UnifiedSong[]> {
+  private async searchSaavnAndGaana(query: string, language?: string): Promise<UnifiedSong[]> {
     const results: UnifiedSong[] = [];
 
     try {
       // Search both in parallel
       const [saavnResults, gaanaResults] = await Promise.all([
-        MultiSourceSearchService.searchSaavn(query).catch(() => [] as UnifiedSong[]),
+        MultiSourceSearchService.searchSaavn(query, language).catch(() => [] as UnifiedSong[]),
+        // Gaana doesn't strictly support 'language' param in same way, but we pass query to it
         MultiSourceSearchService.searchGaana(query).catch(() => [] as UnifiedSong[]),
       ]);
 
@@ -150,14 +193,14 @@ class ReelsRecommendationEngine {
    * Fetch personalized feed - THE MIXTAPE GENERATOR
    */
   async fetchPersonalizedFeed(_totalLimit: number = 30): Promise<UnifiedSong[]> {
-    // 1. Get 6 random artists
-    const artistQueries = this.generateQueries(6);
+    // 1. Get 6 weighted queries
+    const weightedQueries = this.generateQueries(6);
     const mixtape: UnifiedSong[] = [];
 
-    // 2. Fetch songs for EACH artist
+    // 2. Fetch songs for EACH query
     // We run these in parallel for speed, effectively fetching 6 "mini-feeds"
-    const resultsPromises = artistQueries.map(async (query) => {
-        const rawSongs = await this.searchSaavnAndGaana(query);
+    const resultsPromises = weightedQueries.map(async (item) => {
+        const rawSongs = await this.searchSaavnAndGaana(item.query, item.language);
         const filtered = this.filterSongs(rawSongs);
         const deduped = this.deduplicate(filtered);
         
@@ -171,7 +214,7 @@ class ReelsRecommendationEngine {
     // 3. Flatten into one list
     itemsPerArtist.forEach(songs => mixtape.push(...songs));
 
-    console.log(`[RecoEngine] 💿 Mixtape Generated: ${mixtape.length} songs from ${artistQueries.length} artists`);
+    console.log(`[RecoEngine] 💿 Mixtape Generated: ${mixtape.length} songs from ${weightedQueries.length} artists`);
 
     // 4. SHUFFLE THE MIXTAPE (Crucial for the "randomize it" part)
     // We don't want AAABBBCCC, we want ABCBAC...
@@ -195,27 +238,54 @@ class ReelsRecommendationEngine {
   /**
    * Filter out downloaded, seen, and disliked artist songs
    */
+  /**
+   * Filter and Enrich songs
+   * 1. Swaps in LOCAL songs if they exist (Prioritize Offline)
+   * 2. Filters out seen/skipped songs
+   */
   private filterSongs(songs: UnifiedSong[]): UnifiedSong[] {
     const prefsStore = useReelsPreferencesStore.getState();
     const songsStore = useSongsStore.getState();
 
-    // Match by title+artist since IDs differ
-    const downloadedKeys = new Set(
-      songsStore.songs.map(s => `${s.title?.toLowerCase()}_${s.artist?.toLowerCase()}`)
-    );
+    // Map for fast lookups: "title_artist" -> Local Song
+    const localSongMap = new Map<string, any>();
+    songsStore.songs.forEach(s => {
+        const key = `${s.title?.toLowerCase().trim()}_${s.artist?.toLowerCase().trim()}`;
+        localSongMap.set(key, s);
+    });
 
     const skippedArtists = new Set(
       prefsStore.getSkippedArtistNames().map(a => a.toLowerCase())
     );
 
-    return songs.filter(song => {
+    return songs.map(song => {
+      // 1. Check if we have a local version
+      const key = `${song.title?.toLowerCase().trim()}_${song.artist?.toLowerCase().trim()}`;
+      const localMatch = localSongMap.get(key);
+
+      if (localMatch) {
+          console.log(`[Reels] 🏠 Found local match for ${song.title}, swapping!`);
+          // Convert Local Song to UnifiedSong
+          return {
+              id: localMatch.id,
+              title: localMatch.title,
+              artist: localMatch.artist || 'Unknown Artist',
+              highResArt: localMatch.coverImageUri || song.highResArt || '', // Use local art or fallback
+              downloadUrl: localMatch.audioUri || '',
+              source: 'Local',
+              duration: localMatch.duration,
+              hasLyrics: localMatch.lyrics?.length > 0,
+              isLocal: true,
+              isAuthentic: true
+          } as UnifiedSong;
+      }
+      return song;
+    }).filter(song => {
+      // 2. Filter invalid or unwanted songs
       if (!song.downloadUrl) return false;
 
-      // Filter downloaded songs
-      const key = `${song.title?.toLowerCase()}_${song.artist?.toLowerCase()}`;
-      if (downloadedKeys.has(key)) return false;
-
-      // Filter seen songs
+      // Filter seen songs (Enable this if you want to hide seen, but maybe not for local songs?)
+      // User might want to re-watch local reels? Let's keep filter for now to keep feed fresh.
       if (prefsStore.isSeen(song.id)) return false;
 
       // Filter skipped artists

@@ -20,7 +20,6 @@ export const CustomTabBar: React.FC<BottomTabBarProps> = ({ state, descriptors, 
         <BlurView intensity={80} tint="dark" style={styles.blur}>
           <View style={styles.tabBar}>
             {state.routes.map((route, index) => {
-              const { options } = descriptors[route.key];
               const isFocused = state.index === index;
 
               const onPress = () => {

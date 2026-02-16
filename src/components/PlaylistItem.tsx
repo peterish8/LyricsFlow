@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, interpolate, Easing, cancelAnimation, SharedValue } from 'react-native-reanimated';
 import { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import { Song } from '../types/song';
-import { usePlayerStore } from '../store/playerStore';
 import { Colors } from '../constants/colors';
 
 interface PlaylistItemProps extends RenderItemParams<Song> {
@@ -28,7 +27,15 @@ const VisualizerBar = ({ anim }: { anim: SharedValue<number> }) => {
 
 const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     // Simple 3-bar animation (Organic Mode)
-    const animations = [useSharedValue(0.3), useSharedValue(0.4), useSharedValue(0.3)];
+    // We create shared values once, or ensure they are stable. 
+    // Since useSharedValue is a hook, we can't put it inside useMemo directly if we want to create them there.
+    // But the array creation itself causes the dependency change.
+    
+    const sv1 = useSharedValue(0.3);
+    const sv2 = useSharedValue(0.4);
+    const sv3 = useSharedValue(0.3);
+
+    const animations = React.useMemo(() => [sv1, sv2, sv3], [sv1, sv2, sv3]);
     
     React.useEffect(() => {
         if (!isPlaying) {
@@ -62,7 +69,7 @@ const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
         return () => {
              animations.forEach(anim => cancelAnimation(anim));
         };
-    }, [isPlaying]);
+    }, [isPlaying, animations]);
 
     return (
         <View style={styles.visualizerContainer}>
@@ -73,29 +80,12 @@ const LiveVisualizer = ({ isPlaying }: { isPlaying: boolean }) => {
     );
 };
 
-const ActiveSongProgress = () => {
-  // ... existing ActiveSongProgress code ...
-  const position = usePlayerStore(state => state.position);
-  const duration = usePlayerStore(state => state.duration);
-
-  const format = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  return (
-      <Text style={styles.songDurationActive}>
-          {format(position)} / {format(duration)}
-      </Text>
-  );
-};
+// ActiveSongProgress removed as unused
 
 const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({ 
   item, 
   drag, 
   isActive, 
-  getIndex, 
   currentSongId, 
   isEditMode, 
   onPress,

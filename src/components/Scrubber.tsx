@@ -55,7 +55,7 @@ const Scrubber: React.FC<ScrubberProps> = ({ currentTime, duration, onSeek }) =>
         scrubProgress.value = newProgress;
       }
     })
-    .onEnd((e) => {
+    .onEnd(() => {
       const finalTime = scrubProgress.value * duration;
       runOnJS(onSeek)(finalTime);
       isScrubbing.value = false;

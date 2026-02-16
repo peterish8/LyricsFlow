@@ -4,15 +4,12 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable, Text, Platform, Image, ImageBackground } from 'react-native';
+import { View, StyleSheet, Pressable, Platform, ImageBackground } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { useSongsStore } from '../store/songsStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
-import { Colors } from '../constants/colors';
 
 export const ModernPillTabBar: React.FC<BottomTabBarProps> = ({
   state,
@@ -60,12 +57,7 @@ export const ModernPillTabBar: React.FC<BottomTabBarProps> = ({
                 const { options } = descriptors[route.key];
                 const isFocused = state.index === index;
 
-                const label =
-                  options.tabBarLabel !== undefined
-                    ? options.tabBarLabel
-                    : options.title !== undefined
-                    ? options.title
-                    : route.name;
+                // label removed as unused
 
                 const onPress = () => {
                   const event = navigation.emit({
@@ -147,13 +139,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     minWidth: 56,
-  },
-  // Removed tabItemActive style completely
-  activeLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginLeft: 4,
   },
 });
 

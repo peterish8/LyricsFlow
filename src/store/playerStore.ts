@@ -38,6 +38,7 @@ interface PlayerState {
   
   // Playlist queue actions
   setPlaylistQueue: (playlistId: string, songs: Song[], startIndex: number) => void;
+  updateQueue: (songs: Song[]) => void;
   removeFromQueue: (songId: string) => void;
   nextInPlaylist: () => void;
   previousInPlaylist: () => void;
@@ -137,6 +138,25 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   updateProgress: (position, duration) => set({ position, duration }),
 
+  // Silent Queue Update (for sorting/reordering)
+  updateQueue: (newQueue: Song[]) => set((state) => {
+      // Try to find current song in new queue to keep index correct
+      const currentId = state.currentSongId;
+      let newIndex = state.currentQueueIndex;
+      
+      if (currentId) {
+          const foundIndex = newQueue.findIndex(s => s.id === currentId);
+          if (foundIndex !== -1) {
+              newIndex = foundIndex;
+          }
+      }
+      
+      return {
+          playlistQueue: newQueue,
+          currentQueueIndex: newIndex
+      };
+  }),
+
   // Playlist queue management
   setPlaylistQueue: (playlistId: string, songs: Song[], startIndex: number) => {
     const startSongId = songs[startIndex]?.id;
@@ -157,6 +177,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
   
+
+
   removeFromQueue: (songId: string) => {
     // ... existing implementation ...
     const state = get();

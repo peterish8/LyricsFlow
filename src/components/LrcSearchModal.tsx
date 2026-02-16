@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LyricsRepository, SearchResult } from '../services/LyricsRepository';
-import { LrcLibService } from '../services/LrcLibService';
 import { Colors } from '../constants/colors';
 
 interface LrcSearchModalProps {
@@ -25,15 +24,16 @@ interface LrcSearchModalProps {
     artist: string;
     duration: number;
   };
+  autoPick?: boolean; // NEW: If true, automatically selects the best result
 }
 
 export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({ 
   visible, 
   onClose, 
   onSelect,
-  initialQuery 
+  initialQuery,
+  autoPick = false
 }) => {
-  const [query, setQuery] = useState(`${initialQuery.title} ${initialQuery.artist}`);
   const [artistName, setArtistName] = useState(initialQuery.artist);
   const [songName, setSongName] = useState(initialQuery.title);
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -41,23 +41,11 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null);
   const [editedLyrics, setEditedLyrics] = useState('');
+  const handleSearch = React.useCallback(async (overrideTitle?: string, overrideArtist?: string) => {
+    const titleToUse = overrideTitle !== undefined ? overrideTitle : songName;
+    const artistToUse = overrideArtist !== undefined ? overrideArtist : artistName;
 
-  useEffect(() => {
-    if (visible) {
-      setArtistName(initialQuery.artist);
-      setSongName(initialQuery.title);
-      setQuery(`${initialQuery.title} ${initialQuery.artist}`);
-      handleSearch();
-    } else {
-      setPreviewItem(null);
-      setEditedLyrics('');
-      setResults([]);
-      setQuery('');
-    }
-  }, [visible]);
-
-  const handleSearch = async () => {
-    if (!songName.trim()) return;
+    if (!titleToUse.trim()) return;
 
     setLoading(true);
     setStatusMessage('Searching global databases...');
@@ -65,11 +53,27 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
 
     try {
       const searchResults = await LyricsRepository.searchSmart(
-        `${songName} ${artistName}`,
-        { ...initialQuery, title: songName, artist: artistName },
+        `${titleToUse} ${artistToUse}`,
+        { ...initialQuery, title: titleToUse, artist: artistToUse },
         (msg) => setStatusMessage(msg)
       );
       setResults(searchResults);
+
+      // ✅ AUTO-PICK LOGIC
+      if (autoPick && searchResults.length > 0) {
+        // Find the best synced result
+        const bestSynced = searchResults.find(r => r.type === 'synced');
+        
+        if (bestSynced) {
+             // Auto-select immediately!
+             console.log('[Magic] Auto-picking best synced result:', bestSynced.trackName);
+             onSelect(bestSynced); 
+             // onClose is usually called by parent after onSelect, but we can do it here too just in case
+             // But let's rely on parent closing it, or just return.
+             return; 
+        }
+      }
+
     } catch (error) {
       console.error('Search failed:', error);
       Alert.alert('Error', 'Failed to fetch lyrics. Please try again.');
@@ -77,7 +81,20 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
       setLoading(false);
       setStatusMessage('');
     }
-  };
+  }, [songName, artistName, initialQuery, autoPick, onSelect]);
+
+  useEffect(() => {
+    if (visible) {
+      setArtistName(initialQuery.artist);
+      setSongName(initialQuery.title);
+      // Pass values directly to avoid waiting for state update
+      handleSearch(initialQuery.title, initialQuery.artist);
+    } else {
+      setPreviewItem(null);
+      setEditedLyrics('');
+      setResults([]);
+    }
+  }, [visible, initialQuery, handleSearch]);
 
   const handleSelect = (item: SearchResult) => {
     setPreviewItem(item);
@@ -88,7 +105,8 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
     if (!previewItem) return;
     
     // Convert edited text back into structured lines
-    const parsedLines = LrcLibService.parseLrc(editedLyrics);
+    // const parsedLines = LrcLibService.parseLrc(editedLyrics); // Unused
+
     
     // Call onSelect with the updated previewItem
     onSelect({
@@ -178,7 +196,7 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
               onChangeText={setSongName}
               placeholder="Song name"
               placeholderTextColor="#666"
-              onSubmitEditing={handleSearch}
+              onSubmitEditing={() => handleSearch()}
               returnKeyType="search"
             />
           </View>
@@ -189,11 +207,11 @@ export const LrcSearchModal: React.FC<LrcSearchModalProps> = ({
               onChangeText={setArtistName}
               placeholder="Artist name"
               placeholderTextColor="#666"
-              onSubmitEditing={handleSearch}
+              onSubmitEditing={() => handleSearch()}
               returnKeyType="search"
             />
           </View>
-          <TouchableOpacity onPress={handleSearch} style={styles.searchButton}>
+          <TouchableOpacity onPress={() => handleSearch()} style={styles.searchButton}>
             <Ionicons name="search" size={20} color="#fff" />
             <Text style={styles.searchButtonText}>Search</Text>
           </TouchableOpacity>

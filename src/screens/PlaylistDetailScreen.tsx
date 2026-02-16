@@ -14,12 +14,10 @@ import {
   Text,
   Image,
   Pressable,
-  Alert,
   ActivityIndicator,
   TextInput,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,24 +33,19 @@ import Animated, {
   interpolate,
   Extrapolation,
   withTiming,
-  runOnJS,
-  useAnimatedProps,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors } from '../constants/colors';
 import { Song } from '../types/song';
-import { getGradientColors, getGradientForSong } from '../constants/gradients';
+import { getGradientForSong } from '../constants/gradients';
 import { usePlayer } from '../contexts/PlayerContext';
 import { usePlayerStore } from '../store/playerStore';
 import { usePlaylistStore } from '../store/playlistStore'; // Assuming this store exists or is used
-import Slider from '@react-native-community/slider';
-import { useSettingsStore } from '../store/settingsStore';
 import * as playlistQueries from '../database/playlistQueries';
 import { PlaylistItem } from '../components/PlaylistItem';
 import { CustomMenu } from '../components/CustomMenu';
 import { CoverFlow } from '../components/CoverFlow';
-import { AddToPlaylistModal } from '../components/AddToPlaylistModal'; // Reuse logic if possible, or just open modal
 import Scrubber from '../components/Scrubber';
 import { ModernDeleteModal } from '../components/ModernDeleteModal';
 
@@ -78,27 +71,21 @@ export const PlaylistDetailScreen: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
-  // Show Add Modal ?
-  const [showAddCallback, setShowAddCallback] = useState(false); // Maybe later
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [songToDelete, setSongToDelete] = useState<string | null>(null);
 
   // Store Hooks
-  const {
-    currentSongId,
-    currentPlaylistId,
-    currentSong,
-    loadSong,
-    setPlaylistQueue,
-    play,
-    pause,
-    isPlaying,
-    nextInPlaylist,
-    previousInPlaylist,
-    position,
-    duration,
-    seekTo,
-  } = usePlayerStore();
+  const currentSongId = usePlayerStore(state => state.currentSongId);
+  const currentPlaylistId = usePlayerStore(state => state.currentPlaylistId);
+  const currentSong = usePlayerStore(state => state.currentSong);
+  const setPlaylistQueue = usePlayerStore(state => state.setPlaylistQueue);
+  const play = usePlayerStore(state => state.play);
+  const pause = usePlayerStore(state => state.pause);
+  const isPlaying = usePlayerStore(state => state.isPlaying);
+  const nextInPlaylist = usePlayerStore(state => state.nextInPlaylist);
+  const previousInPlaylist = usePlayerStore(state => state.previousInPlaylist);
+  const position = usePlayerStore(state => state.position);
+  const duration = usePlayerStore(state => state.duration);
   
   const activeIsPlaying = currentPlaylistId === playlistId;
 
@@ -131,7 +118,7 @@ export const PlaylistDetailScreen: React.FC = () => {
          }
      };
      loadSort();
-  }, [playlistId]);
+  }, [playlistId, SORT_PREF_KEY]);
 
   // Save Sort Settings
   const saveSort = async (option: SortOption, direction: SortDirection) => {
@@ -172,31 +159,12 @@ export const PlaylistDetailScreen: React.FC = () => {
       }
   };
 
-  const lastUpdate = usePlaylistStore(state => state.lastUpdate);
+   const player = usePlayer();
+   const isSeeking = useRef(false);
+   const seekTimeout = useRef<NodeJS.Timeout | null>(null);
 
-
-
-  // Local state for smoother scrubber updates (matches NowPlayingScreen logic)
-  const [currentTime, setCurrentTime] = useState(0);
-  const player = usePlayer(); // Get direct access to player instance
-
-  const isSeeking = useRef(false);
-  const seekTimeout = useRef<NodeJS.Timeout | null>(null);
-
-  // Sync Time & Playback State - mimicking NowPlayingScreen logic
-  useEffect(() => {
-    if (!player) return;
-
-    const interval = setInterval(() => {
-      // FORCE UPDATE: If active, pull directly from player
-      // BUT blocked if user is currently seeking or just finished seeking (to prevent glitch back)
-      if (player && activeIsPlaying && isPlaying && !isSeeking.current) {
-        setCurrentTime(player.currentTime);
-      }
-    }, 200);
-    
-    return () => clearInterval(interval);
-  }, [player, activeIsPlaying, isPlaying]);
+  // Removed manual interval polling of player.currentTime (does not exist in expo-audio)
+  // We rely on 'position' from usePlayerStore which is synced in PlayerContext.
 
   // Ensure Audio is Loaded (Robust Check)
   useEffect(() => {
@@ -226,16 +194,12 @@ export const PlaylistDetailScreen: React.FC = () => {
     };
     
     loadAudioIfNeeded();
-  }, [activeIsPlaying, currentSong?.id, player, isPlaying]);
+  }, [activeIsPlaying, currentSong, player, isPlaying]);
 
   // Reanimated Shared Values
   const scrollY = useSharedValue(0);
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // formatDuration removed as unused
 
   // Scroll Handler
   const scrollHandler = useAnimatedScrollHandler((event) => {
@@ -260,7 +224,7 @@ export const PlaylistDetailScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [playlistId, lastUpdate]); // Reload when global playlist state changes
+  }, [playlistId]); // Reload when playlistId changes
 
   useFocusEffect(
     useCallback(() => {
@@ -313,15 +277,28 @@ export const PlaylistDetailScreen: React.FC = () => {
     return result;
   }, [songs, searchQuery, sortOption, sortDirection]);
 
+  // Update Queue when Sort Changes?
+  // Only if we are CURRENTLY playing this playlist.
+  useEffect(() => {
+      if (activeIsPlaying && !searchQuery) { // Don't disrupt queue on search, only sort
+           // Check if order actually changed effectively?
+           // Easiest is to just update the queue in store without interrupting playback
+           if (usePlayerStore.getState().updateQueue) {
+                usePlayerStore.getState().updateQueue(filteredSongs);
+           }
+      }
+  }, [filteredSongs, activeIsPlaying, searchQuery]);
+
   // Dynamic Header Logic & Gradient
   // Ensure the current song actually belongs to this playlist before showing it as active
   const isSongInPlaylist = currentSong && songs.some(s => s.id === currentSong.id);
   const activeSongInPlaylist = (activeIsPlaying && isSongInPlaylist) ? currentSong : null;
   
   // Calculate neighbors for CoverFlow
-  const currentIndex = activeIsPlaying && currentSong ? songs.findIndex(s => s.id === currentSong.id) : -1;
-  const prevSong = currentIndex > 0 ? songs[currentIndex - 1] : null;
-  const nextSong = currentIndex >= 0 && currentIndex < songs.length - 1 ? songs[currentIndex + 1] : null;
+  // Calculate neighbors for CoverFlow (Use SORTED list)
+  const currentIndex = activeIsPlaying && currentSong ? filteredSongs.findIndex(s => s.id === currentSong.id) : -1;
+  const prevSong = currentIndex > 0 ? filteredSongs[currentIndex - 1] : null;
+  const nextSong = currentIndex >= 0 && currentIndex < filteredSongs.length - 1 ? filteredSongs[currentIndex + 1] : null;
   
   // If playing, use CoverFlow. Else static image (Playlist Cover).
   // Note: We use CoverFlow even if not playing? 
@@ -351,22 +328,10 @@ export const PlaylistDetailScreen: React.FC = () => {
     bgColorTop.value = withTiming(colors[0], { duration: 500 });
     // Assuming 2nd color is bottom, or last color if array > 2
     bgColorBottom.value = withTiming(colors[colors.length - 1], { duration: 500 });
-  }, [activeSongInPlaylist?.id, songs]);
+  }, [activeSongInPlaylist, songs, bgColorTop, bgColorBottom]);
   
-  // Create Animated Gradient Component
-  const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
-  
-  const animatedGradientProps = useAnimatedProps(() => {
-      // LinearGradient expects 'colors' array prop. 
-      // Reanimated can map this if component is adapted.
-      // However, modifying the 'colors' array prop directly in reanimated is tricky on some versions.
-      // A safer bet is two separate Animated Views with backgroundColor? 
-      // No, we want Gradient. 
-      // Let's try passing the colors prop.
-      return {
-          colors: [bgColorTop.value, bgColorBottom.value]
-      };
-  });
+  // Animated Gradient components removed as unused in favor of static memoized gradient
+  // which works better for these complex styles.
   
   const activeSongGradient = useMemo(() => {
      if (activeSongInPlaylist) return getGradientForSong(activeSongInPlaylist);
@@ -389,58 +354,9 @@ export const PlaylistDetailScreen: React.FC = () => {
 
   // --- ACTIONS ---
   
-  const handlePlayPause = () => {
-    // DIRECT PLAYER CONTROL 
-    // The store's 'play/pause' functions might be stale or not bound.
-    // We trust the 'player' object from context mainly.
-    
-    if (activeIsPlaying && player) {
-        if (isPlaying) {
-             player.pause();
-             usePlayerStore.getState().setIsPlaying(false); // Manually sync store
-        } else {
-             player.play();
-             usePlayerStore.getState().setIsPlaying(true); // Manually sync store
-        }
-    } else {
-        // Start new playlist - SMART RESUME LOGIC
-        if (filteredSongs.length > 0) {
-            let startIndex = 0;
-            
-            try {
-                // Check history
-                const storeState = useSettingsStore.getState();
-                const history = storeState.playlistHistory || {};
-                const lastSongId = history[playlistId];
-                
-                if (lastSongId) {
-                    const foundIndex = filteredSongs.findIndex(s => s.id === lastSongId);
-                    if (foundIndex !== -1) {
-                        startIndex = foundIndex;
-                    }
-                }
-            } catch (e) {
-                // Ignore
-            }
-
-            setPlaylistQueue(playlistId, filteredSongs, startIndex);
-            // setPlaylistQueue triggers loadSong and play() inside the store usually, 
-            // but let's be sure
-             setTimeout(() => {
-                 if(player) player.play();
-             }, 500);
-        }
-    }
-  };
-
-  const handleShuffle = () => {
-    if (filteredSongs.length > 0) {
-      const shuffled = [...filteredSongs].sort(() => Math.random() - 0.5);
-      setPlaylistQueue(playlistId, shuffled, 0);
-      play();
-    }
-  };
-
+  // handlePlayPause and handleShuffle removed as they are not currently used in the UI.
+  // These can be reinstated if Play/Shuffle buttons are added to the header.
+  
   const handleSongPress = useCallback((song: Song, index: number) => {
     // If we filter, the index passed is from filtered list.
     // We should queue the FILTERED list so "Next" matches what user sees.
@@ -468,7 +384,20 @@ export const PlaylistDetailScreen: React.FC = () => {
 
   const handleCoverPress = (event: any) => {
     if (!isEditMode) return;
-    const { pageX, pageY } = event.nativeEvent;
+    
+    let pageX = 50;
+    let pageY = 150;
+
+    if (event?.nativeEvent?.pageX !== undefined) {
+        // Standard Pressable Event
+        pageX = event.nativeEvent.pageX;
+        pageY = event.nativeEvent.pageY;
+    } else if (event?.absoluteX !== undefined) {
+        // Gesture Handler Event (from CoverFlow)
+        pageX = event.absoluteX;
+        pageY = event.absoluteY;
+    }
+
     setMenuPosition({ x: pageX, y: pageY });
     setMenuVisible(true);
   };
@@ -738,7 +667,7 @@ export const PlaylistDetailScreen: React.FC = () => {
                      {/* Scrubber - Full Width */}
                      <View style={styles.scrubberContainer}>
                          <Scrubber 
-                            currentTime={activeIsPlaying ? currentTime : 0}
+                            currentTime={activeIsPlaying ? position : 0}
                             duration={activeIsPlaying ? (duration > 0 ? duration : (currentSong?.duration || 180)) : (songs[0]?.duration || 180)}
                             onSeek={(value) => {
                                 if (activeIsPlaying && player) {
@@ -746,10 +675,7 @@ export const PlaylistDetailScreen: React.FC = () => {
                                     isSeeking.current = true;
                                     if (seekTimeout.current) clearTimeout(seekTimeout.current);
                                     
-                                    // 2. Optimistic Visual Update
-                                    setCurrentTime(value);
-
-                                    // 3. Perform Seek
+                                    // 2. Perform Seek
                                     player.seekTo(value);
 
                                     // 4. Release lock after delay (1s is usually enough for audio to catch up)
@@ -768,9 +694,8 @@ export const PlaylistDetailScreen: React.FC = () => {
                             style={styles.skipButton} 
                             onPress={() => {
                                 if (activeIsPlaying && player) {
-                                    const newTime = Math.max(0, currentTime - 10);
+                                    const newTime = Math.max(0, position - 10);
                                     player.seekTo(newTime);
-                                    setCurrentTime(newTime);
                                 }
                             }}
                             disabled={!activeIsPlaying}
@@ -810,10 +735,9 @@ export const PlaylistDetailScreen: React.FC = () => {
                         <Pressable 
                             style={styles.skipButton} 
                             onPress={() => {
-                                if (activeIsPlaying && player && player.duration > 1) {
-                                    const newTime = Math.min(player.duration - 1, currentTime + 10);
+                                if (activeIsPlaying && player && duration > 1) {
+                                    const newTime = Math.min(duration - 1, position + 10);
                                     player.seekTo(Math.floor(newTime * 1000));
-                                    setCurrentTime(newTime);
                                 }
                             }}
                             disabled={!activeIsPlaying}

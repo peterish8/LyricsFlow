@@ -1,10 +1,8 @@
-import React, { useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated, PanResponder, Dimensions } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
-
-const { width, height } = Dimensions.get('window');
 
 export const FloatingDownloadIndicator = ({ onPress }: { onPress: () => void }) => {
     const queue = useDownloadQueueStore(state => state.queue);

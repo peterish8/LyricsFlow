@@ -1,0 +1,14 @@
+﻿--------- beginning of main
+02-16 18:08:52.331 25112 27668 E Netd    : To use pid in case SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA is false, to remove build error (unused variable)
+02-16 18:08:52.428  4924  4924 E SurfaceFlinger: Attempt to update InputPolicyFlags without permission ACCESS_SURFACE_FLINGER
+02-16 18:08:52.444 27667 27667 E nder:appservic: Not starting debugger since process cannot load the jdwp agent.
+02-16 18:08:52.445  4924  4924 E SurfaceFlinger: Attempt to update InputPolicyFlags without permission ACCESS_SURFACE_FLINGER
+02-16 18:08:52.447 27667 27667 E USNET   : USNET: appName: com.samsung.android.app.galaxyfinder:appservice
+02-16 18:08:52.545  4924  4924 E SurfaceFlinger: Attempt to update InputPolicyFlags without permission ACCESS_SURFACE_FLINGER
+02-16 18:08:52.579  4924  4924 E SurfaceFlinger: Attempt to update InputPolicyFlags without permission ACCESS_SURFACE_FLINGER
+02-16 18:08:52.704 27692 27692 E settings:remot: Not starting debugger since process cannot load the jdwp agent.
+02-16 18:08:52.706 27692 27692 E USNET   : USNET: appName: com.android.settings:remote
+02-16 18:08:53.374  9407  9477 E Finsky  : [9711] [Counters] attempted to use a non-positive increment for: 4753
+02-16 18:08:53.375  9407  9477 E Finsky  : [9711] [Counters] attempted to use a non-positive increment for: 4752
+02-16 18:08:53.402  9407  9477 E Finsky  : [9711] [Counters] attempted to use a non-positive increment for: 4753
+02-16 18:08:53.934  4924  4924 E SurfaceFlinger: Attempt to update InputPolicyFlags without permission ACCESS_SURFACE_FLINGER

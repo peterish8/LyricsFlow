@@ -16,12 +16,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
-import { AuroraHeader, SongCard } from '../components';
+import { SongCard } from '../components';
 import { Colors } from '../constants/colors';
 import { Song } from '../types/song';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
@@ -124,8 +123,6 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
   }, [navigation, setCurrentSong, playInMiniPlayerOnly, playerCurrentSong?.id]);
 
   const renderResult = ({ item }: { item: Song }) => {
-    const gradient = getGradientById(item.gradientId) || GRADIENTS[0];
-    
     return (
       <Pressable
         style={styles.resultItem}

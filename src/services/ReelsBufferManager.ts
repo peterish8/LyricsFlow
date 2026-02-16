@@ -9,7 +9,6 @@ import { UnifiedSong } from '../types/song';
 
 // STRICT SLIDING WINDOW: 1 Behind + 1 Current + 4 Ahead = 6 Total
 // This ensures we always have 6 songs loaded in memory, no more, no less.
-// This ensures we always have 6 songs loaded in memory, no more, no less. 
 const BUFFER_BEHIND = 1; // Keep 1 song loaded behind for instant swipe-back
 const BUFFER_AHEAD = 4; // Pre-load 4 songs ahead for instant playback
 
@@ -24,6 +23,7 @@ class ReelsBufferManager {
   private activeIndex: number = -1;
   private isInitialized: boolean = false;
   private loadingPromises: Map<number, Promise<void>> = new Map();
+  private activeStatusCallback: ((status: any) => void) | null = null;
 
   /**
    * Enter Reels Mode - Set up audio focus for independent playback
@@ -68,6 +68,7 @@ class ReelsBufferManager {
     this.slots.clear();
     this.activeIndex = -1;
     this.isInitialized = false;
+    this.activeStatusCallback = null; // Clear callback
     
     // Reset audio mode to default
     try {
@@ -96,8 +97,12 @@ class ReelsBufferManager {
         const currentSlot = this.slots.get(this.activeIndex);
         if (currentSlot?.sound) {
             try {
-                // stopAsync rewinds to 0 and stops. smoother than pause for swipes.
-                await currentSlot.sound.stopAsync(); 
+                // Clear callback from old sound to prevent memory leaks/updates
+                currentSlot.sound.setOnPlaybackStatusUpdate(null);
+                const status = await currentSlot.sound.getStatusAsync();
+                if (status.isLoaded) {
+                    await currentSlot.sound.stopAsync(); 
+                }
             } catch (error) {
                 console.log(`[ReelsBuffer] Failed to stop slot ${this.activeIndex}:`, error);
             }
@@ -108,7 +113,10 @@ class ReelsBufferManager {
     for (const [index, slot] of this.slots.entries()) {
         if (slot.sound && index !== newIndex && index !== this.activeIndex) {
             try {
-                await slot.sound.stopAsync();
+                const status = await slot.sound.getStatusAsync();
+                if (status.isLoaded && (status.isPlaying || status.positionMillis > 0)) {
+                    await slot.sound.stopAsync();
+                }
             } catch (error) {
                 console.log(`[ReelsBuffer] Failed to stop slot ${index}:`, error);
             }
@@ -147,6 +155,11 @@ class ReelsBufferManager {
     const activeSlot = this.slots.get(index);
     if (activeSlot?.sound) {
       try {
+        // ATTACH CALLBACK if strict mode requires it here (mostly redundant if loadSlot did it)
+        if (this.activeStatusCallback) {
+            activeSlot.sound.setOnPlaybackStatusUpdate(this.activeStatusCallback);
+        }
+        
         await activeSlot.sound.replayAsync(); // replayAsync ensures it starts from 0 or resumes correctly
         console.log(`[ReelsBuffer] ▶️ Playing ${song.title}`);
       } catch (error) {
@@ -187,6 +200,13 @@ class ReelsBufferManager {
                     song,
                     isLoaded: true,
                 });
+                
+                // CRITICAL FIX: If this is the active index, attach the callback immediately!
+                if (index === this.activeIndex && this.activeStatusCallback) {
+                    console.log(`[ReelsBuffer] 🔗 Attaching stored callback to newly loaded active slot ${index}`);
+                    sound.setOnPlaybackStatusUpdate(this.activeStatusCallback);
+                }
+
                 console.log(`[ReelsBuffer] ✅ Loaded slot ${index}: ${song.title}`);
             } else {
                 // We were cancelled/unloaded mid-load
@@ -228,75 +248,39 @@ class ReelsBufferManager {
    * Manage buffer window (load ahead, unload behind)
    */
   private async manageBuffer(currentIndex: number, feedSongs: UnifiedSong[]) {
-    // Use top-level constants directly
-    // const BUFFER_AHEAD = 4;
-    // const BUFFER_BEHIND = 1; 
-    
+    // ... (unchanged logic)
     // Calculate window
     const startIndex = Math.max(0, currentIndex - BUFFER_BEHIND);
     const endIndex = Math.min(feedSongs.length - 1, currentIndex + BUFFER_AHEAD);
     
-    console.log(`[ReelsBuffer] Buffer window: ${startIndex} to ${endIndex} (current: ${currentIndex})`);
-    
     // Load all songs in window
     for (let i = startIndex; i <= endIndex; i++) {
-      if (!this.slots.has(i) && feedSongs[i]) {
-        console.log(`[ReelsBuffer] Pre-loading slot ${i}: ${feedSongs[i].title}`);
-        await this.loadSlot(i, feedSongs[i]);
-        // Small delay to prevent overwhelming the audio system
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+        if (!this.slots.has(i) && feedSongs[i]) {
+            await this.loadSlot(i, feedSongs[i]);
+            // Small delay
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
     }
     
     // Unload slots outside window
     const slotsToRemove: number[] = [];
     this.slots.forEach((_, index) => {
-      if (index < startIndex || index > endIndex) {
-        slotsToRemove.push(index);
-      }
+        if (index < startIndex || index > endIndex) {
+            slotsToRemove.push(index);
+        }
     });
     
     for (const index of slotsToRemove) {
-      const slot = this.slots.get(index);
-      if (slot?.sound) {
-        try {
-          await slot.sound.unloadAsync();
-          console.log(`[ReelsBuffer] Unloaded slot ${index}`);
-        } catch (error) {
-          console.log(`[ReelsBuffer] Failed to unload slot ${index}:`, error);
+        const slot = this.slots.get(index);
+        if (slot?.sound) {
+            try {
+                await slot.sound.unloadAsync();
+            } catch (e) {}
         }
-      }
+        this.slots.delete(index);
     }
-
-    // Visual Log of the Buffer State (User Request)
-    this.logBufferState(currentIndex, feedSongs, startIndex, endIndex);
   }
-
-  /**
-   * Log the current buffer state with symbols
-   */
-  private logBufferState(currentIndex: number, feedSongs: UnifiedSong[], start: number, end: number) {
-    console.log('\n--- 🎧 REELS BUFFER STATE 🎧 ---');
-    for (let i = start; i <= end; i++) {
-        const song = feedSongs[i];
-        if (!song) continue;
-
-        let symbol = '⏸️'; // Default: Loaded & Waiting
-        let status = 'Buffered';
-
-        if (i === currentIndex) {
-            symbol = '🔊';
-            status = 'PLAYING';
-        } else if (!this.slots.get(i)?.isLoaded) {
-            symbol = '⏳';
-            status = 'Loading...';
-        }
-
-        console.log(`${symbol} [Slot ${i}] ${song.title.substring(0, 20)}... (${status})`);
-    }
-    console.log('--------------------------------\n');
-  }
-
+  
   /**
    * Pause current playback
    */
@@ -321,13 +305,9 @@ class ReelsBufferManager {
     for (const [index, slot] of this.slots.entries()) {
         if (slot.sound) {
             try {
-                // Check if playing then stop
-                const status = await slot.sound.getStatusAsync();
-                if (status.isLoaded && (status.isPlaying || status.positionMillis > 0)) {
-                   await slot.sound.stopAsync();
-                }
+                await slot.sound.stopAsync();
             } catch (error) {
-                console.log(`[ReelsBuffer] Failed to stop slot ${index}:`, error);
+                // Ignore
             }
         }
     }
@@ -342,7 +322,10 @@ class ReelsBufferManager {
     const slot = this.slots.get(this.activeIndex);
     if (slot?.sound) {
       try {
-        await slot.sound.playAsync();
+        const status = await slot.sound.getStatusAsync();
+        if (status.isLoaded) {
+            await slot.sound.playAsync();
+        }
       } catch (error) {
         console.error('[ReelsBuffer] Failed to resume:', error);
       }
@@ -357,7 +340,10 @@ class ReelsBufferManager {
     const slot = this.slots.get(this.activeIndex);
     if (slot?.sound) {
       try {
-        await slot.sound.setPositionAsync(millis);
+        const status = await slot.sound.getStatusAsync();
+        if (status.isLoaded) {
+            await slot.sound.setPositionAsync(millis);
+        }
       } catch (error) {
         console.error('[ReelsBuffer] Failed to seek:', error);
       }
@@ -368,15 +354,21 @@ class ReelsBufferManager {
    * Register a callback for playback status updates (for the scrubber)
    */
   async setStatusUpdateCallback(callback: (status: any) => void) {
+    // Store it so we can attach it later if sound isn't ready
+    this.activeStatusCallback = callback;
+    
     if (this.activeIndex < 0) return;
     
     const slot = this.slots.get(this.activeIndex);
     if (slot?.sound) {
       try {
+        console.log(`[ReelsBuffer] Attaching status callback to active slot ${this.activeIndex}`);
         slot.sound.setOnPlaybackStatusUpdate(callback);
       } catch (error) {
         console.error('[ReelsBuffer] Failed to set status callback:', error);
       }
+    } else {
+        console.log(`[ReelsBuffer] Stored callback for active slot ${this.activeIndex} (Sound not ready yet)`);
     }
   }
 }
