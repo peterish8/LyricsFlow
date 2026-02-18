@@ -25,11 +25,18 @@ class NativeSearchServiceImpl {
             console.log(`[NativeSearch] Searching: ${query}`);
             const encodedQuery = encodeURIComponent(query);
             // Use a generic user agent to look like a browser
-            const response = await fetch(`https://www.youtube.com/results?search_query=${encodedQuery}`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }
-            });
+            const timeoutPromise = new Promise<any>((_, reject) => 
+                setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+            );
+
+            const response = await Promise.race([
+                fetch(`https://www.youtube.com/results?search_query=${encodedQuery}`, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
+                }),
+                timeoutPromise
+            ]) as Response;
 
             const html = await response.text();
 

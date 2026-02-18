@@ -10,8 +10,64 @@ const BROWSER_HEADERS = {
 // LAYER 1: JioSaavn (The Official 320kbps Standard)
 const SAAVN_API = 'https://jiosaavn-api-byprats.vercel.app/api'; 
 
-// LAYER 2: Gaana (Disabled as per request)
+// LAYER 2: Gaana (Fallback)
 const GAANA_API = 'https://gaanaapibyprats.vercel.app/api';
+
+/**
+ * ============================================================================
+ * LAYER 2: GAANA (Fallback Source)
+ * ============================================================================
+ */
+async function searchGaana(query: string): Promise<UnifiedSong[]> {
+  try {
+    console.log(`[Gaana] Searching (Fallback): ${query}`);
+    const searchUrl = `${GAANA_API}/search/songs?query=${encodeURIComponent(query)}&limit=20`;
+
+    const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 25000)
+    );
+
+    const response = await Promise.race([
+        fetch(searchUrl, {
+            headers: BROWSER_HEADERS,
+        }),
+        timeoutPromise
+    ]) as Response;
+
+    if (!response.ok) return [];
+
+    const json = await response.json();
+    if (!json.success || !json.data || !json.data.results) return [];
+
+    return json.data.results.map((song: any) => {
+      const imageArray = song.image || [];
+      const highResImage = imageArray.find((i: any) => i.quality === '500x500') || imageArray[imageArray.length - 1];
+      const urlArray = song.downloadUrl || [];
+      const topQuality = urlArray.find((u: any) => u.quality === '320kbps') || urlArray[urlArray.length - 1];
+
+      let artistName = 'Unknown Artist';
+      if (typeof song.primaryArtists === 'string') artistName = song.primaryArtists;
+      else if (song.artists?.primary?.[0]) artistName = song.artists.primary.map((a: any) => a.name).join(', ');
+
+      return {
+        id: song.id,
+        title: song.name || song.title,
+        artist: artistName,
+        highResArt: highResImage?.url || '',
+        downloadUrl: topQuality?.url || '',
+        hasLyrics: song.hasLyrics === true,
+        source: 'Gaana' as const, // Distinct source
+        duration: song.duration,
+        playCount: 0, // Gaana doesn't always provide playCount
+        language: song.language
+      };
+    }).filter((s: UnifiedSong) => s.downloadUrl);
+
+  } catch (error: any) {
+    console.warn(`[Gaana] Search failed: ${error.message}`);
+    return [];
+  }
+}
 
 /**
  * ============================================================================
@@ -23,15 +79,16 @@ async function searchSaavn(query: string): Promise<UnifiedSong[]> {
     console.log(`[Saavn] Searching: ${query}`);
     const searchUrl = `${SAAVN_API}/search/songs?query=${encodeURIComponent(query)}&limit=20`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); 
+    const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 25000)
+    );
 
-    const response = await fetch(searchUrl, {
-      headers: BROWSER_HEADERS,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
+    const response = await Promise.race([
+        fetch(searchUrl, {
+            headers: BROWSER_HEADERS,
+        }),
+        timeoutPromise
+    ]) as Response;
 
     if (!response.ok) {
         console.warn(`[Saavn] API Error: ${response.status}`);
@@ -93,10 +150,17 @@ export async function searchMusic(query: string, artistName?: string, onProgress
   onProgress?.('Searching JioSaavn...');
 
   try {
-      const saavnResults = await searchSaavn(query);
-      let results = saavnResults;
+      let results = await searchSaavn(query);
       
-      if (artistName) {
+      // FALLBACK TO GAANA
+      if (results.length === 0) {
+          console.log(`[SearchEngine] ⚠️ Saavn returned 0 results. Trying Gaana...`);
+          onProgress?.('Saavn empty. Trying Gaana...');
+          const gaanaResults = await searchGaana(query);
+          results = gaanaResults;
+      }
+
+      if (artistName && results.length > 0) {
         const lowerArtist = artistName.toLowerCase();
         results = results.filter(s => 
           s.artist.toLowerCase().includes(lowerArtist) || 
@@ -110,8 +174,12 @@ export async function searchMusic(query: string, artistName?: string, onProgress
           return (b.playCount || 0) - (a.playCount || 0);
       });
 
-  } catch (error) {
-      console.error(`[SearchEngine] ⚠️ Search Failed:`, error);
+  } catch (error: any) {
+      if (error.message === 'TIMEOUT' || error.name === 'AbortError' || error.message?.includes('Network request failed')) {
+          console.warn(`[SearchEngine] Network timeout/error for "${query}".`);
+      } else {
+          console.error(`[SearchEngine] ⚠️ Search Failed:`, error);
+      }
       return [];
   }
 }

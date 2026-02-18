@@ -71,7 +71,7 @@ export const RecentlyPlayedGrid: React.FC<RecentlyPlayedGridProps> = React.memo(
 
 const styles = StyleSheet.create({
   horizontalScroll: {
-    paddingLeft: 20,
+    paddingLeft: 26,
     paddingRight: 16,
     gap: 12,
     marginBottom: 20

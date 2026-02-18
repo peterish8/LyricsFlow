@@ -303,14 +303,19 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const isUserScrolling = useRef(false); // âœ… Track user interaction
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // âœ… Track timeout to clear it
 
+  const { lyricsDelay } = useSettingsStore();
+
   // âœ… Auto-Scroll & Sync Logic
   useEffect(() => {
     if (!processedLyrics || processedLyrics.length === 0) return;
 
     // Standard Time-Based Index Calculation
+    // Use configured delay
+    const effectiveTime = storePosition + lyricsDelay;
+    
     const index = processedLyrics.findIndex((line, i) => {
       const nextLine = processedLyrics[i + 1];
-      return storePosition >= line.timestamp && (!nextLine || storePosition < nextLine.timestamp);
+      return effectiveTime >= line.timestamp && (!nextLine || effectiveTime < nextLine.timestamp);
     });
 
     if (!isLinear) {

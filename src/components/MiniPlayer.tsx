@@ -114,7 +114,9 @@ export const MiniPlayer: React.FC = () => {
   const transitionOpacity = useSharedValue(1);
 
   // Update displayed song with cross-fade when expanded in Classic Mode
+  // Update displayed song with cross-fade when expanded in Classic Mode
   useEffect(() => {
+    // 1. Song Changed (ID mismatch)
     if (currentSong?.id !== displayedSong?.id) {
         if (!isIsland && expanded) {
             // Fade Out -> Update Data -> Fade In
@@ -129,8 +131,12 @@ export const MiniPlayer: React.FC = () => {
             setDisplayedSong(currentSong);
             transitionOpacity.value = 1;
         }
+    } 
+    // 2. Same Song, Updated Data (e.g. Lyrics found)
+    else if (currentSong !== displayedSong) {
+         setDisplayedSong(currentSong);
     }
-  }, [currentSong?.id, expanded, isIsland]);
+  }, [currentSong, expanded, isIsland]);
     
   // Create a "vignette" theme for island: Black -> Color -> Black
   const mainColor = gradientColors[1] || gradientColors[0];
@@ -282,8 +288,10 @@ export const MiniPlayer: React.FC = () => {
     ? songForLyrics.transliteratedLyrics
     : songForLyrics?.lyrics;
 
+  const lyricsDelay = useSettingsStore(state => state.lyricsDelay);
+
   const currentLyricIndex = lyricsToUse
-    ? getCurrentLineIndex(lyricsToUse, storePosition) 
+    ? getCurrentLineIndex(lyricsToUse, storePosition + lyricsDelay) // DELAY: User configured offset (default -1.2s)
     : -1;
   const currentLyricText = (currentLyricIndex !== -1 && lyricsToUse?.[currentLyricIndex]) 
     ? lyricsToUse[currentLyricIndex].text 

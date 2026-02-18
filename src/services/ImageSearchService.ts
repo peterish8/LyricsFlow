@@ -27,7 +27,15 @@ class ImageSearchServiceImpl {
             const term = encodeURIComponent(query);
             const url = `https://itunes.apple.com/search?term=${term}&media=music&entity=song&limit=${limit}`;
 
-            const response = await fetch(url);
+            const timeoutPromise = new Promise<any>((_, reject) => 
+                setTimeout(() => reject(new Error('TIMEOUT')), 20000)
+            );
+
+            const response = await Promise.race([
+                fetch(url),
+                timeoutPromise
+            ]) as Response;
+
             const data = await response.json();
 
             if (!data.results) return [];

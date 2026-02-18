@@ -23,11 +23,18 @@ export const GeniusService = {
    */
   searchGenius: async (query: string): Promise<GeniusTrack[]> => {
     try {
-      const response = await fetch(`${GENIUS_API_URL}/search?q=${encodeURIComponent(query)}`, {
-        headers: {
-          'Authorization': `Bearer ${ACCESS_TOKEN}`
-        }
-      });
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 10000)
+      );
+
+      const response = await Promise.race([
+        fetch(`${GENIUS_API_URL}/search?q=${encodeURIComponent(query)}`, {
+            headers: {
+            'Authorization': `Bearer ${ACCESS_TOKEN}`
+            }
+        }),
+        timeoutPromise
+      ]) as Response;
 
       if (!response.ok) {
         console.warn(`[GeniusService] Search failed: ${response.status}`);
@@ -47,8 +54,12 @@ export const GeniusService = {
         plainLyrics: '' // To be filled by scraping
       }));
 
-    } catch (error) {
-      console.error('[GeniusService] Search error:', error);
+    } catch (error: any) {
+      if (error.message === 'TIMEOUT') {
+          console.warn('[GeniusService] Search timed out');
+      } else {
+          console.error('[GeniusService] Search error:', error);
+      }
       return [];
     }
   },
@@ -59,8 +70,17 @@ export const GeniusService = {
    */
   scrapeGeniusLyrics: async (url: string): Promise<string | null> => {
     try {
-      const response = await fetch(url);
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+      );
+
+      const response = await Promise.race([
+        fetch(url),
+        timeoutPromise
+      ]) as Response;
+
       if (!response.ok) {
+        // Handle native crash risk by just throwing error which is caught below
         throw new Error(`Failed to fetch Genius page: ${response.status}`);
       }
 

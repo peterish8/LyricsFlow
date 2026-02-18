@@ -74,22 +74,30 @@ class LyricaService {
   }
 
   private async executeFetch(url: string, label: string): Promise<LyricaResult | null> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    // defined timeout promise
+    const timeoutPromise = new Promise<null>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 45000)
+    );
 
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-        },
-      });
-
-      clearTimeout(timeoutId);
+      const response = await Promise.race([
+        fetch(url, {
+            headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            },
+        }),
+        timeoutPromise
+      ]) as Response;
 
       if (!response.ok) {
-        const errorText = await response.text();
+        let errorText = '';
+        try {
+            errorText = await response.text();
+        } catch (e) {
+            errorText = 'Read failed';
+        }
+        
         const truncatedError = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
         console.log(`[Lyrica] ${label} HTTP ${response.status}:`, truncatedError);
         return null;
@@ -111,7 +119,6 @@ class LyricaService {
           finalLyrics = data.data.timestamped;
         }
 
-        // Handle structured timed lyrics array if plaintext is missing
         if (!finalLyrics && Array.isArray(data.data.timed_lyrics)) {
           finalLyrics = data.data.timed_lyrics
             .map((line: any) => {
@@ -171,12 +178,12 @@ class LyricaService {
       }
       return null;
     } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-         console.warn(`[Lyrica] ${label} timed out`);
-      } else {
-         console.log(`[Lyrica] ${label} failed:`, err.message);
-      }
+      if (err.message === 'TIMEOUT' || err.name === 'AbortError') {
+         console.warn(`[Lyrica] ${label} timed out safely (45s limit).`);
+         return null;
+      } 
+      
+      console.log(`[Lyrica] ${label} failed:`, err.message || 'Unknown Network Error');
       return null;
     }
   }

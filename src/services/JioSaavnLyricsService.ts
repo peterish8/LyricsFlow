@@ -66,18 +66,20 @@ export const JioSaavnLyricsService = {
       
       console.log('[JioSaavn] Search URL:', searchUrl);
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 10000)
+      );
       
-      const searchResponse = await fetch(searchUrl, {
-        signal: controller.signal,
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
-          'Accept': 'application/json',
-        }
-      });
-      clearTimeout(timeoutId);
+      const searchResponse = await Promise.race([
+        fetch(searchUrl, {
+            method: 'GET',
+            headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
+            'Accept': 'application/json',
+            }
+        }),
+        timeoutPromise
+      ]) as Response;
       
       if (!searchResponse.ok) {
         console.error('[JioSaavn] Search failed:', searchResponse.status, searchResponse.statusText);
@@ -130,7 +132,7 @@ export const JioSaavnLyricsService = {
       };
       
     } catch (error: any) {
-      if (error.name === 'AbortError') {
+      if (error.message === 'TIMEOUT' || error.name === 'AbortError') {
           console.warn('[JioSaavn] Search timed out');
       } else {
           console.error('[JioSaavn] Error:', error);
@@ -155,18 +157,20 @@ export const JioSaavnLyricsService = {
         const url = `${BASE_URL}${endpoint}`;
         console.log(`[JioSaavn] Trying endpoint: ${url}`);
         
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+        const timeoutPromiseEndpoint = new Promise<any>((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT')), 8000)
+        );
         
-        const response = await fetch(url, {
-          signal: controller.signal,
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
-            'Accept': 'application/json',
-          }
-        });
-        clearTimeout(timeoutId);
+        const response = await Promise.race([
+            fetch(url, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
+                    'Accept': 'application/json',
+                }
+            }),
+            timeoutPromiseEndpoint
+        ]) as Response;
         
         if (!response.ok) {
           console.log(`[JioSaavn] ${endpoint} returned ${response.status}`);

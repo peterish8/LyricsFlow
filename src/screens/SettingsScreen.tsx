@@ -558,6 +558,29 @@ const SettingsScreen: React.FC<Props> = () => {
               value={settings.keepScreenOn}
               onToggle={settings.setKeepScreenOn}
             />
+             <View style={{ marginBottom: 20 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="timer-outline" size={22} color={Colors.textSecondary} style={{ marginRight: 12 }} />
+                        <Text style={{ fontSize: 16, color: Colors.textPrimary, fontWeight: '500' }}>Lyrics Delay</Text>
+                    </View>
+                    <Text style={{ fontSize: 14, color: Colors.primary, fontWeight: '700' }}>{settings.lyricsDelay.toFixed(1)}s</Text>
+                </View>
+                <Slider
+                    style={{ width: '100%', height: 40 }}
+                    minimumValue={-5.0}
+                    maximumValue={5.0}
+                    step={0.1}
+                    value={settings.lyricsDelay}
+                    onSlidingComplete={settings.setLyricsDelay}
+                    minimumTrackTintColor={Colors.primary}
+                    maximumTrackTintColor={Colors.cardHover}
+                    thumbTintColor={Colors.primary}
+                />
+                 <Text style={{ fontSize: 12, color: Colors.textSecondary, marginLeft: 34 }}>
+                    Negative values delay lyrics (late). Positive values speed them up (early).
+                </Text>
+            </View>
           </View>
 
           <View style={styles.section}>

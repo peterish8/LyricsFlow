@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useCallback } from 'react';
 import { View, Dimensions, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { FlatList } from 'react-native';
@@ -15,6 +16,7 @@ import MaskedView from '@react-native-masked-view/masked-view';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 // ITEM_HEIGHT removed as unused
+import { useSettingsStore } from '../store/settingsStore';
 
 // ------------------------------------------------------------------
 // Step 1: The Animated <LyricLine> Component
@@ -155,10 +157,11 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
   const [isLayoutReady, setIsLayoutReady] = React.useState(false);
   const hasInitialScrolled = useRef(false);
   
+  const { lyricsDelay } = useSettingsStore();
+  
   // Find active index based on time
-  // GLOBAL OFFSET: 1 second earlier (User request)
-  // Means we treat current time as +1s relative to lyrics
-  const effectiveTime = currentTime + 1.0;
+  // DELAY: User configured offset (default -1.2s)
+  const effectiveTime = currentTime + lyricsDelay;
 
   const activeIndex = lyrics.findIndex((line, index) => {
     const nextLine = lyrics[index + 1];

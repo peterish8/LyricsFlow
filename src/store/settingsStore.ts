@@ -70,6 +70,10 @@ interface SettingsState {
   updatePlaylistHistory: (playlistId: string, songId: string) => void;
   setDownloadDirectory: (uri: string | null) => void;
 
+  // Advanced
+  lyricsDelay: number;
+  setLyricsDelay: (delay: number) => void;
+
   resetToDefaults: () => void;
 }
 
@@ -94,6 +98,7 @@ const DEFAULT_SETTINGS = {
   showThumbnails: true,
   showPerformanceHUD: false, // Default disabled
   downloadDirectoryUri: null,
+  lyricsDelay: -1.2,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -140,6 +145,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       // Reset
       resetToDefaults: () => set(DEFAULT_SETTINGS),
+      
+      // Advanced
+      lyricsDelay: -1.2,
+      setLyricsDelay: (lyricsDelay) => set({ lyricsDelay }),
     }),
     {
       name: 'lyricflow-settings',

@@ -56,6 +56,9 @@ import Animated, {
 // ============================================
 // ADAPTIVE PERFORMANCE DETECTION
 // ============================================
+
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any;
+
 const DEVICE_REFRESH_RATE = Platform.select({
   ios: 120,
   android: 60,
@@ -118,7 +121,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const [headerHeight, setHeaderHeight] = useState(0);
   const headerAnimatedStyle = useAnimatedStyle(() => {
      if (libraryBackgroundMode === 'black' || libraryBackgroundMode === 'grey') return { transform: [{ translateY: 0 }] };
-     // Move the header up as we scroll down
+     // Revert Parallax -> Background moves 1:1 with list (solid sheet feel)
      return { 
         transform: [{ translateY: -scrollY.value }] 
      };
@@ -175,8 +178,11 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   }, [songs, searchQuery]);
 
   const handleAddToQueue = useCallback((song: Song) => {
-      const existing = scanQueue[song.id];
+      // Access state directly to avoid re-creating callback on every queue update
+      const currentQueue = useLyricsScanQueueStore.getState().queue;
+      const existing = currentQueue[song.id];
       const isPlainResult = existing?.status === 'completed' && existing?.resultType === 'plain';
+      
       if (existing) {
          if (existing.status === 'failed' || isPlainResult) {
             addToScanQueue(song, isPlainResult);
@@ -190,7 +196,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
          Vibration.vibrate(50);
          setToast({ visible: true, message: `Searching lyrics for "${song.title}"...`, type: 'success' });
       }
-  }, [addToScanQueue, scanQueue]);
+  }, [addToScanQueue]); // Removed scanQueue dependency!
 
   const handleSearchFocus = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -493,60 +499,41 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-      <View style={[StyleSheet.absoluteFill, IS_HIGH_REFRESH ? headerAnimatedStyle : (libraryFocusMode ? styles.hidden : styles.visible)]}>
+      <Animated.View style={[StyleSheet.absoluteFill, headerAnimatedStyle]}>
         <AuroraHeader palette="library" colors={activeThemeColors} imageUri={activeImageUri} />
-      </View>
+      </Animated.View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {!isSearchFocused && (<View style={styles.brandHeader}><Text style={styles.brandName}>LuvLyrics</Text></View>)}
-        {IS_HIGH_REFRESH ? (
-          <FlashList
+
+          <AnimatedFlashList
             ref={flatListRef}
             data={filteredSongs}
+            keyExtractor={(item: any) => item.id}
             renderItem={renderItem}
             // @ts-ignore
             estimatedItemSize={80}  
-            drawDistance={2400}     // 3-4 screens buffer for faster scroll
+            drawDistance={1200}     // Reduced to prevent "slow update" warnings
             overrideItemLayout={(layout, item, index, maxColumns, extraData) => {
               // @ts-ignore
-              layout.size = 80;     // 72px item + 8px margin
-              layout.span = 1;      // Full width
+              layout.size = 80;     
+              layout.span = 1;      
             }}
-            getItemType={(item) => 'song'} // Force efficient recycling key
+            getItemType={(item) => 'song'} 
             contentContainerStyle={{ 
                 paddingBottom: 150 + insets.bottom,
-                paddingTop: 180 + insets.top, // Consistent spacing
+                paddingTop: 10, // Fixed: Reduced from 180 to 20 (plus header height naturally handles rest)
             }}
             extraData={[isSearchFocused]}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
             }
-            onScroll={scrollHandler}
+            onScroll={scrollHandler} 
             scrollEventThrottle={16}
             ListEmptyComponent={renderEmpty}
+            ListHeaderComponent={memoizedHeader} 
             keyboardShouldPersistTaps="handled" 
             keyboardDismissMode="on-drag"
           />
-        ) : (
-          <FlashList
-             ref={flatListRef}
-            key="library-list-60" data={filteredSongs} keyExtractor={(item: Song) => item.id}
-            renderItem={renderItem} ListHeaderComponent={memoizedHeader}
-            contentContainerStyle={isIsland ? styles.listPaddingIsland : styles.listPaddingDefault}
-            ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
-            ListFooterComponent={<View style={isSearchFocused ? styles.footerSearching : styles.footerDefault} />}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.textSecondary} progressViewOffset={isIsland ? 160 : 0} />}
-            onScroll={handleSimpleScroll} scrollEventThrottle={16}
-            drawDistance={2400}     // 3-4 screens buffer
-            // @ts-ignore
-            estimatedItemSize={80} // Exact height (72px + 8px margin)
-            overrideItemLayout={(layout, item, index, maxColumns, extraData) => {
-              // @ts-ignore
-              layout.size = 80;
-              layout.span = 1;
-            }}
-            getItemType={(item) => 'song'}
-          />
-        )}
       </SafeAreaView>
       <CustomMenu visible={artMenuVisible} onClose={() => setArtMenuVisible(false)} title="Cover Art Options" options={artOptions} />
       <Modal visible={recentArtVisible} transparent animationType="slide" onRequestClose={() => setRecentArtVisible(false)}>
