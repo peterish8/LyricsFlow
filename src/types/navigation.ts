@@ -24,7 +24,7 @@ export type RootStackParamList = {
     lengthSeconds?: number;
   } | undefined;
   YoutubeBrowser: undefined;
-  ReelsVault: undefined; // Reels liked songs vault
+  LuvsVault: undefined; // Luvs liked songs vault
   PlaylistDetail: { playlistId: string }; // Playlist detail screen
   CreatePlaylist: { playlistId?: string, initialName?: string } | undefined; // Create or Edit playlist modal
   AddToPlaylist: { songId?: string; playlistId?: string }; // NEW: Add song to playlist modal
@@ -33,7 +33,7 @@ export type RootStackParamList = {
 // Bottom Tab Navigator
 export type TabParamList = {
   Home: undefined; // Was Library
-  Reels: undefined;
+  Luvs: undefined;
   Library: undefined; // Was Playlists
   Settings: undefined;
 };

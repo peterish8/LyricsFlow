@@ -1,6 +1,6 @@
 /**
- * Reels Vault Modal
- * Shows liked reels in a 3-column grid with batch download functionality
+ * Luvs Vault Modal
+ * Shows liked luvs in a 3-column grid with batch download functionality
  */
 
 import React from 'react';
@@ -15,23 +15,23 @@ import {
   Dimensions,
 } from 'react-native';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { useReelsFeedStore } from '../store/reelsFeedStore';
+import { useLuvsFeedStore } from '../store/luvsFeedStore';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
 import { UnifiedSong } from '../types/song';
 import { CustomAlert } from './CustomAlert';
 
-interface ReelsVaultModalProps {
+interface LuvsVaultModalProps {
   visible: boolean;
   onClose: () => void;
 }
 
-export const ReelsVaultModal: React.FC<ReelsVaultModalProps> = ({
+export const LuvsVaultModal: React.FC<LuvsVaultModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { vault, removeFromVault, clearVault } = useReelsFeedStore();
+  const { vault, removeFromVault, clearVault } = useLuvsFeedStore();
   const addToQueue = useDownloadQueueStore((state) => state.addToQueue);
   
   const [downloadAlertVisible, setDownloadAlertVisible] = React.useState(false);
@@ -92,7 +92,7 @@ export const ReelsVaultModal: React.FC<ReelsVaultModalProps> = ({
         <View style={styles.modalContainer}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Vault ({vault.length})</Text>
+            <Text style={styles.headerTitle}>Luvs Vault ({vault.length})</Text>
             <Pressable onPress={onClose} hitSlop={10} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#fff" />
             </Pressable>
@@ -111,10 +111,10 @@ export const ReelsVaultModal: React.FC<ReelsVaultModalProps> = ({
             />
           ) : (
             <View style={styles.emptyState}>
-              <Ionicons name="heart-outline" size={64} color="rgba(255,255,255,0.3)" />
-              <Text style={styles.emptyText}>No liked reels yet</Text>
+              <MaterialCommunityIcons name="heart-multiple-outline" size={64} color="rgba(255,255,255,0.3)" />
+              <Text style={styles.emptyText}>No liked luvs yet</Text>
               <Text style={styles.emptySubtext}>
-                Tap the heart on any reel to save it here
+                Tap the heart on any luv to save it here
               </Text>
             </View>
           )}
@@ -139,7 +139,7 @@ export const ReelsVaultModal: React.FC<ReelsVaultModalProps> = ({
         <CustomAlert
           visible={emptyAlertVisible}
           title="Empty Vault"
-          message="No songs to download. Go explore some reels!"
+          message="No songs to download. Go explore some luvs!"
           onClose={() => setEmptyAlertVisible(false)}
           buttons={[{ text: 'OK', onPress: () => {} }]}
         />

@@ -67,7 +67,9 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
   const { songId } = route.params ?? {};
   const isEditing = !!songId;
 
-  const { getSong, addSong, updateSong } = useSongsStore();
+  const getSong = useSongsStore(state => state.getSong);
+  const addSong = useSongsStore(state => state.addSong);
+  const updateSong = useSongsStore(state => state.updateSong);
   const setMiniPlayerHiddenSource = usePlayerStore(state => state.setMiniPlayerHiddenSource);
 
   // Visibility Management: Hide MiniPlayer when Editor is open
@@ -142,7 +144,11 @@ const AddEditLyricsScreen = ({ navigation, route }: any) => {
     try {
       const text = await Clipboard.getStringAsync();
       if (text) {
-        setLyricsText((prev) => prev + text);
+        if (isShowingTransliteration) {
+            setTransliteratedText((prev) => prev + text);
+        } else {
+            setLyricsText((prev) => prev + text);
+        }
       }
     } catch (error) {
       console.error('Paste failed:', error);

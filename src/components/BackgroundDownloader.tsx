@@ -1,12 +1,14 @@
 import React, { useEffect, useRef } from 'react';
-import { useDownloadQueueStore } from '../store/downloadQueueStore';
-import { downloadManager } from '../services/DownloadManager';
-import { useSongsStore } from '../store/songsStore';
-import { MultiSourceLyricsService } from '../services/MultiSourceLyricsService';
-import { lyricaService } from '../services/LyricaService';
+import { View, Text, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useDownloadQueueStore } from '../store/downloadQueueStore';
+import { useSongsStore } from '../store/songsStore';
+import { lyricaService } from '../services/LyricaService';
+import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
 import { usePlaylistStore } from '../store/playlistStore';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as playlistQueries from '../database/playlistQueries';
+import { downloadManager } from '../services/DownloadManager';
 
 // Wrapper component to conditionally use the hook
 const KeepAwakeController = () => {
@@ -16,7 +18,8 @@ const KeepAwakeController = () => {
 
 export const BackgroundDownloader = () => {
     const { queue, updateItem } = useDownloadQueueStore();
-    const { addSong, fetchSongs } = useSongsStore();
+    const addSong = useSongsStore(state => state.addSong);
+    const fetchSongs = useSongsStore(state => state.fetchSongs);
     const activeDownloads = useRef<Set<string>>(new Set());
     const MAX_CONCURRENT = 1; // Only 1 download at a time
     
@@ -96,8 +99,20 @@ export const BackgroundDownloader = () => {
                 };
 
                 // 2. Start Download (Phase 1: Audio & Cover - 0% to 80%)
-                updateItem(item.id, { status: 'downloading', stageStatus: 'Downloading Audio...', progress: 0 });
+                updateItem(item.id, { status: 'downloading', stageStatus: 'Downloading audio...', progress: 0 });
                 
+                // 🔥 Parallel Optimization: Start Searching Lyrics WHILE audio is downloading
+                if (__DEV__) console.log(`[BackgroundDownloader] ⚡ Starting parallel lyrics search (synced preferred) for: ${item.song.title}`);
+                const lyricsPromise = lyricaService.fetchLyrics(
+                    item.song.title,
+                    item.song.artist,
+                    true, // Prefer synced lyrics
+                    item.song.duration
+                ).catch((_e: unknown) => {
+                    if (__DEV__) console.warn(`[BackgroundDownloader] Parallel lyrics search failed`);
+                    return null;
+                });
+
                 const newSong = await downloadManager.finalizeDownload(stagingPayload, (progress) => {
                     // Map 0-100% download progress to 0-80% total progress
                     const scaledProgress = progress * 0.8;
@@ -106,106 +121,113 @@ export const BackgroundDownloader = () => {
                     }
                 });
 
-                console.log(`[BackgroundDownloader] Audio download completed. Phase 2: Searching Lyrics...`);
+                if (__DEV__) console.log(`[BackgroundDownloader] Audio download completed. Checking parallel lyrics search results...`);
 
-                // 3. Fetch Lyrics (Phase 2: Lyrics - 80% to 100%)
+                // 3. Process Lyrics (Phase 2: Lyrics - 80% to 100%)
                 if (isActive) {
-                    updateItem(item.id, { progress: 0.85, stageStatus: 'Searching lyrics...' });
+                    updateItem(item.id, { progress: 0.85, stageStatus: 'Processing lyrics...' });
                     
                     try {
-                        const results = await MultiSourceLyricsService.fetchLyricsParallel(
-                            item.song.title,
-                            item.song.artist,
-                            item.song.duration
-                        );
+                        // Await the promise we started earlier
+                        const res = await lyricsPromise;
                         
-                        // Select best lyrics (Synced > Plain) using regex check
-                        const isSynced = (text: string) => /\[\d{2}:\d{2}\.\d{2,3}\]/.test(text);
-                        const bestLyrics = results.find(l => isSynced(l.lyrics)) || results[0];
-                        
-                        if (bestLyrics && bestLyrics.lyrics) {
-                            const type = isSynced(bestLyrics.lyrics) ? 'Synced' : 'Plain';
-                            console.log(`[BackgroundDownloader] ✅ Found lyrics (${type})`);
+                        if (res && res.lyrics) {
+                            const isSynced = lyricaService.hasTimestamps(res.lyrics);
+                            const type = isSynced ? 'Synced' : 'Plain';
+                            if (__DEV__) console.log(`[BackgroundDownloader] ✅ Found lyrics (${type}) via ${res.source}`);
                             updateItem(item.id, { progress: 0.95, stageStatus: 'Saving lyrics...' });
                             
                             // Write to file
                             const songDir = newSong.audioUri?.substring(0, newSong.audioUri.lastIndexOf('/'));
                             if (songDir) {
                                const lyricsPath = `${songDir}/lyrics.lrc`;
-                               await FileSystem.writeAsStringAsync(lyricsPath, bestLyrics.lyrics);
-                               console.log(`[BackgroundDownloader] Wrote lyrics to: ${lyricsPath}`);
+                               await FileSystem.writeAsStringAsync(lyricsPath, res.lyrics);
+                               if (__DEV__) console.log(`[BackgroundDownloader] Wrote lyrics to: ${lyricsPath}`);
                                
                                // Update song object
-                               newSong.lyrics = lyricaService.parseLrc(bestLyrics.lyrics, newSong.duration);
-                               newSong.lyricSource = bestLyrics.source as any; 
+                               newSong.lyrics = lyricaService.parseLrc(res.lyrics, newSong.duration);
+                               newSong.lyricSource = res.source as never; 
                             }
                         } else {
-                            console.log(`[BackgroundDownloader] ❌ No lyrics found`);
+                            if (__DEV__) console.log(`[BackgroundDownloader] ❌ No lyrics found for ${item.song.title}`);
                             updateItem(item.id, { stageStatus: 'No lyrics found' });
                         }
-                    } catch (e) {
-                         console.warn(`[BackgroundDownloader] Lyrics fetch failed:`, e);
+                    } catch (_lyricsError: unknown) {
+                         if (__DEV__) console.warn(`[BackgroundDownloader] Lyrics processing failed`);
                          // Continue saving song even if lyrics fail
                     }
                 }
 
                 // 4. Complete
-                console.log(`[BackgroundDownloader] ✅ Completed: ${item.song.title}`);
+                if (__DEV__) console.log(`[BackgroundDownloader] ✅ Completed: ${item.song.title}`);
                 
                 // CRITICAL: Remove from active downloads BEFORE updating state
-                // This ensures that when the effect re-runs due to status change, 
-                // it sees that we have a free slot!
                 activeDownloads.current.delete(item.id);
-                console.log(`[BackgroundDownloader] Removed from active set. Active: ${activeDownloads.current.size}`);
+                if (__DEV__) console.log(`[BackgroundDownloader] Removed from active set. Active: ${activeDownloads.current.size}`);
 
-                // CRITICAL: Double check if item is still in queue (it might have been removed during download)
-                // We use the Ref of active downloads or check the store directly. 
-                // Since we removed it from activeDownloads above, we should check if it was cancelled
-                // But wait, we removed it from activeDownloads ourself!
-                // So we need to check if the store still has it?
-                // Actually, if the user invoked 'remove', the store updates 'queue' state.
                 const currentQueue = useDownloadQueueStore.getState().queue;
                 const isStillInQueue = currentQueue.some(q => q.id === item.id);
                 
                 if (!isStillInQueue) {
-                    console.log(`[BackgroundDownloader] Item ${item.id} was removed from queue. Aborting save.`);
+                    if (__DEV__) console.log(`[BackgroundDownloader] Item ${item.id} was removed from queue. Aborting save.`);
                     return;
                 }
 
-                console.log(`[BackgroundDownloader] Calling updateItem with status=completed...`);
+                if (__DEV__) console.log(`[BackgroundDownloader] Calling updateItem with status=completed...`);
                 updateItem(item.id, { status: 'completed', progress: 1, stageStatus: 'Done' });
                 
-                console.log(`[BackgroundDownloader] Calling addSong...`);
+                if (__DEV__) console.log(`[BackgroundDownloader] Calling addSong...`);
                 await addSong(newSong);
-                console.log(`[BackgroundDownloader] addSong completed, calling fetchSongs...`);
-                await fetchSongs();
-                console.log(`[BackgroundDownloader] fetchSongs completed`);
 
-                // 5. Add to Playlist if requested
-                if (item.targetPlaylistId) {
+                // 🎵 Enqueue lyrics scan BEFORE fetchSongs to avoid race condition
+                // (fetchSongs triggers re-render cascade; scan must be queued first)
+                const hasSyncedLyrics = Array.isArray(newSong.lyrics) && 
+                  newSong.lyrics.some((line: { timestamp?: number }) => line.timestamp !== undefined && line.timestamp > 0);
+                if (!hasSyncedLyrics) {
                     try {
-                        console.log(`[BackgroundDownloader] Adding to playlist: ${item.targetPlaylistId}`);
-                        await usePlaylistStore.getState().addSongToPlaylist(item.targetPlaylistId, newSong.id);
-                        console.log(`[BackgroundDownloader] Added to playlist successfully`);
-                    } catch (e) {
-                         console.error(`[BackgroundDownloader] Failed to add to playlist:`, e);
+                        const { addToQueue } = useLyricsScanQueueStore.getState();
+                        addToQueue(newSong, true); // forceSynced = true
+                        if (__DEV__) console.log(`[BackgroundDownloader] Enqueued ${newSong.title} for synced lyrics retry`);
+                    } catch (_retryError: unknown) {
+                        if (__DEV__) console.warn(`[BackgroundDownloader] Failed to enqueue for lyrics retry`);
                     }
                 }
 
-            } catch (error: any) {
-                console.error(`[BackgroundDownloader] ❌ Error for ${item.song.title}:`, error);
-                console.error(`[BackgroundDownloader] Error stack:`, error.stack);
+                if (__DEV__) console.log(`[BackgroundDownloader] addSong completed, calling fetchSongs...`);
+                await fetchSongs();
+
+                // 5. Add to Playlist if requested (Respect sortOrder)
+                if (item.targetPlaylistId) {
+                    try {
+                        if (__DEV__) console.log(`[BackgroundDownloader] Adding to playlist: ${item.targetPlaylistId} with order: ${item.sortOrder}`);
+                        await playlistQueries.addSongToPlaylistWithOrder(
+                            item.targetPlaylistId, 
+                            newSong.id, 
+                            item.sortOrder || 0
+                        );
+                        // Trigger store refresh
+                        await usePlaylistStore.getState().fetchPlaylists();
+                    } catch (_playlistError: unknown) {
+                         if (__DEV__) console.error(`[BackgroundDownloader] Failed to add to playlist`);
+                    }
+                }
+
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                if (__DEV__) {
+                    console.error(`[BackgroundDownloader] ❌ Error for ${item.song.title}:`, error);
+                }
                 
                 // Also remove from active set on error before updating status
                 activeDownloads.current.delete(item.id);
                 
-                updateItem(item.id, { status: 'failed', error: error.message, stageStatus: 'Failed' });
+                updateItem(item.id, { status: 'failed', error: errorMessage, stageStatus: 'Failed' });
             } finally {
                 // Double check cleanup just in case
                 if (activeDownloads.current.has(item.id)) {
                     activeDownloads.current.delete(item.id);
                 }
-                console.log(`[BackgroundDownloader] Finished ${item.song.title} block`);
+                if (__DEV__) console.log(`[BackgroundDownloader] Finished ${item.song.title} block`);
                 // The effect will re-run due to queue changes (status update) and pick up next items
             }
         };
@@ -213,12 +235,12 @@ export const BackgroundDownloader = () => {
         // Find all pending items
         const pendingItems = queue.filter(item => item.status === 'pending');
         
-        console.log(`[BackgroundDownloader] Pending: ${pendingItems.length}, Active: ${activeDownloads.current.size}/${MAX_CONCURRENT}`);
+        if (__DEV__) console.log(`[BackgroundDownloader] Pending: ${pendingItems.length}, Active: ${activeDownloads.current.size}/${MAX_CONCURRENT}`);
         
         // Start downloads up to the limit (don't await - let them run in parallel)
-        for (const item of pendingItems) {
-            if (activeDownloads.current.size < MAX_CONCURRENT && !activeDownloads.current.has(item.id)) {
-                processItem(item); // Fire and forget - runs in background
+        for (const pendingItem of pendingItems) {
+            if (activeDownloads.current.size < MAX_CONCURRENT && !activeDownloads.current.has(pendingItem.id)) {
+                processItem(pendingItem); // Fire and forget - runs in background
             }
         }
 
@@ -233,3 +255,4 @@ export const BackgroundDownloader = () => {
         </>
     );
 };
+export default BackgroundDownloader;

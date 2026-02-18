@@ -9,21 +9,56 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const player = useAudioPlayer();
   const setControls = usePlayerStore(state => state.setControls);
 
-
-
   useEffect(() => {
     if (player) {
         setControls({
-            play: () => player.play(),
-            pause: () => player.pause(),
-            seekTo: (pos: number) => player.seekTo(pos)
+            play: () => setTimeout(() => player.play(), 0),
+            pause: () => setTimeout(() => player.pause(), 0),
+            seekTo: (pos: number) => setTimeout(() => player.seekTo(pos), 0)
         });
     }
   }, [player, setControls]);
 
-  // ... (Lock Screen Effect remains same) ...
+  const currentSong = usePlayerStore(state => state.currentSong);
 
-  // Stop playback (Effect remains same)
+  useEffect(() => {
+    if (player && currentSong) {
+      // Set metadata and enable lock screen controls
+      player.setActiveForLockScreen(true, {
+        title: currentSong.title,
+        artist: currentSong.artist || 'Unknown Artist',
+        artworkUrl: currentSong.coverImageUri,
+        albumTitle: currentSong.album || ''
+      }, {
+        showSeekBackward: true,
+        showSeekForward: true
+      });
+    } else if (player && !currentSong) {
+        // Stop playback if current song is cleared (e.g. deleted)
+        // Wrap in setTimeout to avoid "accessed on wrong thread" issues during state transitions
+        setTimeout(() => {
+            player.pause();
+        }, 0);
+    }
+  }, [player, currentSong]);
+
+  // Remote Commands
+  useEffect(() => {
+    if (!player) return;
+    
+    // Listen for remote Next/Prev commands from native side
+    const subscription = (player as any).addListener('remoteCommand', (event: { command: string }) => {
+      if (__DEV__) console.log('[PlayerContext] Remote command received:', event.command);
+      const store = usePlayerStore.getState();
+      if (event.command === 'next') {
+        store.nextInPlaylist();
+      } else if (event.command === 'previous') {
+        store.previousInPlaylist();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [player]);
 
   const status = useAudioPlayerStatus(player);
 
@@ -34,8 +69,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const store = usePlayerStore.getState();
       
       // Batch updates if possible, or only update if changed significantly
-      // Position changes constantly, so we update it, but we should be careful
-      // as it will trigger re-renders in components listening to 'position'.
       store.updateProgress(currentTime, duration);
       
       if (store.isPlaying !== playing) {
@@ -49,12 +82,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       if (playbackState === 'finished') {
-        console.log('[PlayerContext] Song finished, playing next...');
+        if (__DEV__) console.log('[PlayerContext] Song finished, playing next...');
         store.nextInPlaylist();
       }
     }
-  }, [status]); // status contains currentTime, so this runs frequently. 
-                // Now that PlayerProvider is NOT listening to the whole store, this won't loop.
+  }, [status]);
 
   return <PlayerContext.Provider value={player}>{children}</PlayerContext.Provider>;
 };

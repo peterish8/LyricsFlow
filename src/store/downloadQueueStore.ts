@@ -10,13 +10,14 @@ export interface QueueItem {
   stageStatus?: string; // e.g. "Fetching Lyrics...", "Downloading Audio..."
   error?: string;
   targetPlaylistId?: string;
+  sortOrder?: number;
 }
 
 interface DownloadQueueStore {
   queue: QueueItem[];
   isProcessing: boolean;
   
-  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string) => void;
+  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string, sortOrders?: number[]) => void;
   updateItem: (id: string, updates: Partial<QueueItem>) => void;
   removeItem: (id: string) => void;
   clearCompleted: () => void;
@@ -31,18 +32,19 @@ export const useDownloadQueueStore = create<DownloadQueueStore>((set) => ({
   queue: [],
   isProcessing: false,
 
-  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string) => {
+  addToQueue: (songs: UnifiedSong[], targetPlaylistId?: string, sortOrders?: number[]) => {
     set(state => {
       // Filter out duplicates
       const newItems = songs
         .filter(s => !state.queue.find(q => q.id === s.id))
-        .map(s => ({
+        .map((s, index) => ({
           id: s.id,
           song: s,
           status: 'pending' as const,
           progress: 0,
           stageStatus: 'Waiting...',
-          targetPlaylistId // Add playlist ID if provided
+          targetPlaylistId, // Add playlist ID if provided
+          sortOrder: sortOrders ? sortOrders[index] : undefined
         }));
       
       return {

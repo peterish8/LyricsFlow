@@ -1,18 +1,19 @@
 import React, { memo } from 'react';
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, interpolate, Easing, cancelAnimation, SharedValue } from 'react-native-reanimated';
-import { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
+import { RenderItemParams } from 'react-native-draggable-flatlist';
 import { Song } from '../types/song';
+import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
 import { Colors } from '../constants/colors';
 
-interface PlaylistItemProps extends RenderItemParams<Song> {
+interface PlaylistItemProps extends Partial<RenderItemParams<Song>> {
+  item: Song;
   currentSongId: string | null;
   isEditMode: boolean;
   onPress: (song: Song, index: number) => void;
   onMagicPress?: (song: Song) => void;
-  isScanning?: boolean;
-  isCompleted?: boolean;
   onDelete: (songId: string) => void;
   isPlaying: boolean;
   displayIndex: number;
@@ -84,13 +85,17 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
   isEditMode, 
   onPress,
   onMagicPress,
-  isScanning,
-  isCompleted,
   onDelete,
   isPlaying,
   displayIndex
 }) => {
   const isActiveSong = currentSongId === item.id;
+  // console.log("PlaylistItem rendered", item.id); // Debug Log
+  
+  // Internal Subscription
+  const scanJob = useLyricsScanQueueStore(state => state.queue[item.id]);
+  const isScanning = scanJob?.status === 'scanning' || scanJob?.status === 'pending';
+  const isCompleted = scanJob?.status === 'completed';
   
   // Triple Tap Logic
   const tapCountRef = React.useRef(0);
@@ -133,8 +138,7 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
   };
 
   return (
-    <ScaleDecorator>
-      <Pressable
+    <Pressable
         onLongPress={isEditMode ? drag : undefined}
         onPress={handlePress}
         disabled={isActive}
@@ -160,7 +164,12 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
         {/* Album Art (Small) */}
         <View style={styles.smallCoverContainer}>
           {item.coverImageUri ? (
-            <Image source={{ uri: item.coverImageUri }} style={styles.smallCover} />
+            <Image 
+                source={{ uri: item.coverImageUri }} 
+                style={styles.smallCover} 
+                contentFit="cover"
+                cachePolicy="memory-disk"
+            />
           ) : (
             <View style={[styles.smallCover, styles.placeholderCover]}>
               <Ionicons name="musical-note" size={20} color="#666" />
@@ -184,7 +193,7 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
 
         {/* Info */}
         <View style={styles.songInfo}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.titleRow}>
             <Text 
               style={[styles.songTitle, isActiveSong && !isEditMode && styles.songTitleActive]} 
               numberOfLines={1}
@@ -192,7 +201,7 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
               {item.title}
             </Text>
             {(isCompleted || (item.lyrics && item.lyrics.length > 0)) && (
-               <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={{ marginLeft: 4 }} />
+               <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={styles.checkIcon} />
             )}
           </View>
           <Text style={styles.songArtist} numberOfLines={1}>
@@ -216,7 +225,6 @@ const PlaylistItemComponent: React.FC<PlaylistItemProps> = ({
         )}
 
       </Pressable>
-    </ScaleDecorator>
   );
 };
 
@@ -224,25 +232,21 @@ const styles = StyleSheet.create({
   songRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    height: 76, // FIXED HEIGHT
     paddingHorizontal: 16,
-    borderRadius: 8, // Added rounding for the "box" look
-    marginHorizontal: 8, // Spacing for the box
+    borderRadius: 8,
+    marginHorizontal: 8,
   },
   songRowActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)', // Much subtler "glass" look instead of solid grey
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
   },
   songRowDragging: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
+    // SHADOWS REMOVED FOR GPU PERFORMANCE - using simple elevation for Android if needed, but keeping it flat is faster
     transform: [{ scale: 1.02 }],
   },
   leftAction: {
-    width: 30, // Reduced width since no icon
+    width: 30,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
@@ -253,18 +257,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   songNumberActive: {
-      color: Colors.primary // Green number, but white text? User said "not name as green", didn't specify number.
-      // Actually image shows White Text for title. Let's make number green to indicate play, or white.
-      // User: "its not highlighting the song name as green"
-      // Let's keep number green for subtle indication, active text white.
+      color: Colors.primary 
   },
   smallCoverContainer: {
     marginRight: 12,
   },
   smallCover: {
-    width: 48, // Slightly bigger per image
+    width: 48,
     height: 48,
     borderRadius: 4,
+    backgroundColor: '#333'
   },
   placeholderCover: {
     backgroundColor: '#333',
@@ -288,7 +290,7 @@ const styles = StyleSheet.create({
       right: 0,
       left: 0,
       top: 0,
-      backgroundColor: 'rgba(0,0,0,0.4)', // Slightly darken cover to make white bars pop
+      backgroundColor: 'rgba(0,0,0,0.4)',
       borderRadius: 4,
       justifyContent: 'center',
       alignItems: 'center',
@@ -301,12 +303,16 @@ const styles = StyleSheet.create({
   },
   visualizerBar: {
       width: 3,
-      backgroundColor: '#FFF', // White bars
+      backgroundColor: '#FFF',
       borderRadius: 2,
   },
   songInfo: {
     flex: 1,
     justifyContent: 'center',
+  },
+  titleRow: {
+    flexDirection: 'row', 
+    alignItems: 'center' 
   },
   songTitle: {
     fontSize: 16,
@@ -315,8 +321,11 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   songTitleActive: {
-    color: '#fff', // Explicitly White, not green
+    color: '#fff',
     fontWeight: '600',
+  },
+  checkIcon: {
+    marginLeft: 4
   },
   songArtist: {
     fontSize: 13,
@@ -332,7 +341,7 @@ const styles = StyleSheet.create({
       color: Colors.primary,
       fontWeight: '600',
       marginLeft: 8,
-      fontVariant: ['tabular-nums'], // Prevent jitter
+      fontVariant: ['tabular-nums'],
   },
   moreButton: {
     padding: 8,

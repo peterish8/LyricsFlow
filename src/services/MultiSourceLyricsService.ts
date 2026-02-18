@@ -1,5 +1,5 @@
 import { lyricaService, LyricaResult } from './LyricaService';
-// import { LrcLibService } from './LrcLibService';
+import { LrcLibService } from './LrcLibService';
 import { JioSaavnLyricsService } from './JioSaavnLyricsService';
 import { GeniusService } from './GeniusService';
 import { UnifiedSong } from '../types/song';
@@ -15,7 +15,7 @@ export const MultiSourceLyricsService = {
             const results: LyricaResult[] = [];
             let finishedCount = 0;
             let resolved = false;
-            const totalSources = 2; // Lyrica + Saavn
+            const totalSources = 3; // Lyrica + Saavn + LrcLib
             
             return new Promise((resolve) => {
                 const safeResolve = (value: LyricaResult[]) => {
@@ -32,11 +32,11 @@ export const MultiSourceLyricsService = {
                 };
 
                 // 1. Lyrica Service
-                lyricaService.fetchLyrics(title, artist)
+                lyricaService.fetchLyrics(title, artist, false, duration)
                     .then(res => {
                         if (res) {
                             results.push(res);
-                            if (/[[(]?\d{1,2}[:.]\d{1,2}[\])]?/.test(res.lyrics)) {
+                            if (lyricaService.hasTimestamps(res.lyrics)) {
                                 console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via Lyrica');
                                 safeResolve([res]);
                                 return;
@@ -67,7 +67,32 @@ export const MultiSourceLyricsService = {
                     .catch(e => console.warn('[LyricsEngine] JioSaavn failed:', e))
                     .finally(checkCompletion);
 
-                // 3. Timeout (8s)
+                // 3. LrcLib Service
+                LrcLibService.getLyrics(title, artist, undefined, duration)
+                    .then(res => {
+                        if (res && (res.syncedLyrics || res.plainLyrics)) {
+                            const result = {
+                                lyrics: res.syncedLyrics || res.plainLyrics,
+                                source: 'LRCLIB',
+                                metadata: {
+                                    title: res.trackName,
+                                    artist: res.artistName,
+                                    duration: res.duration
+                                }
+                            } as LyricaResult;
+                            results.push(result);
+
+                            if (res.syncedLyrics) {
+                                console.log('[LyricsEngine] ⚡ Fast exit: Found synced lyrics via LRCLIB');
+                                safeResolve([result]);
+                                return;
+                            }
+                        }
+                    })
+                    .catch(e => console.warn('[LyricsEngine] LRCLIB failed:', e))
+                    .finally(checkCompletion);
+
+                // 4. Timeout (8s)
                 setTimeout(() => {
                     if (!resolved) {
                         console.log('[LyricsEngine] Timeout reached, returning collected results');

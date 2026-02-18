@@ -1,11 +1,10 @@
 import { create } from 'zustand';
 import { Song } from '../types/song';
-// import { LyricsRepository, SearchResult } from '../services/LyricsRepository'; // Removed
 
 import { lyricaService } from '../services/LyricaService';
 import { useSongsStore } from './songsStore';
 
-interface ScanJob {
+export interface ScanJob {
   songId: string;
   title: string;
   artist: string;
@@ -20,7 +19,8 @@ interface ScanJob {
 
 
 interface LyricsScanQueueState {
-  queue: ScanJob[];
+  /** Record keyed by songId for O(1) lookups */
+  queue: Record<string, ScanJob>;
   processing: boolean;
   
   addToQueue: (song: Song, forceSynced?: boolean) => void;
@@ -30,12 +30,12 @@ interface LyricsScanQueueState {
 }
 
 export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) => ({
-  queue: [],
+  queue: {},
   processing: false,
 
   addToQueue: (song: Song, forceSynced?: boolean) => {
     const { queue, processQueue } = get();
-    const existing = queue.find(j => j.songId === song.id);
+    const existing = queue[song.id];
     
     if (existing) {
         // If failed OR (if it's plain and we want synced)
@@ -43,13 +43,16 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
         
         if (existing.status === 'failed' || isPlainRetry) {
             set(state => ({
-                queue: state.queue.map(j => j.songId === song.id ? {
-                    ...j,
-                    status: 'pending' as const,
-                    attempts: 0,
-                    isForcedSynced: forceSynced,
-                    log: [...j.log, isPlainRetry ? 'Retrying specifically for synced lyrics...' : 'Retrying...']
-                } : j)
+                queue: {
+                    ...state.queue,
+                    [song.id]: {
+                        ...state.queue[song.id],
+                        status: 'pending' as const,
+                        attempts: 0,
+                        isForcedSynced: forceSynced,
+                        log: [...state.queue[song.id].log, isPlainRetry ? 'Retrying specifically for synced lyrics...' : 'Retrying...']
+                    }
+                }
             }));
             if (!get().processing) processQueue();
         }
@@ -68,7 +71,7 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
       log: [`Queued`],
     };
 
-    set({ queue: [...queue, newJob] });
+    set({ queue: { ...queue, [song.id]: newJob } });
     
     if (!get().processing) {
       processQueue();
@@ -76,13 +79,14 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
   },
 
   removeFromQueue: (songId: string) => {
-    set(state => ({
-      queue: state.queue.filter(j => j.songId !== songId)
-    }));
+    set(state => {
+      const { [songId]: _, ...rest } = state.queue;
+      return { queue: rest };
+    });
   },
   
   getJobStatus: (songId: string) => {
-      return get().queue.find(j => j.songId === songId);
+      return get().queue[songId];
   },
 
   processQueue: async () => {
@@ -92,25 +96,30 @@ export const useLyricsScanQueueStore = create<LyricsScanQueueState>((set, get) =
     try {
       while (true) {
         const { queue } = get();
-        const nextJob = queue.find(j => j.status === 'pending');
+        const nextJob = Object.values(queue).find(j => j.status === 'pending');
         
         if (!nextJob) break;
 
         // Mark as scanning
         set(state => ({
-          queue: state.queue.map(j => j.songId === nextJob.songId ? { ...j, status: 'scanning' as const } : j)
+          queue: {
+            ...state.queue,
+            [nextJob.songId]: { ...state.queue[nextJob.songId], status: 'scanning' as const }
+          }
         }));
 
         const updateJob = (updates: Partial<ScanJob> | ((prev: ScanJob) => Partial<ScanJob>)) => {
-            set(state => ({
-                queue: state.queue.map(j => {
-                    if (j.songId === nextJob.songId) {
-                         const newValues = typeof updates === 'function' ? updates(j) : updates;
-                         return { ...j, ...newValues };
+            set(state => {
+                const prev = state.queue[nextJob.songId];
+                if (!prev) return state;
+                const newValues = typeof updates === 'function' ? updates(prev) : updates;
+                return {
+                    queue: {
+                        ...state.queue,
+                        [nextJob.songId]: { ...prev, ...newValues }
                     }
-                    return j;
-                })
-            }));
+                };
+            });
         };
 
         updateJob(prev => ({ 

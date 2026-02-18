@@ -29,7 +29,8 @@ export const LyricsLine: React.FC<LyricsLineProps> = memo(({
   distanceFromActive,
   onPress,
 }) => {
-  const { lyricsFontSize, lineSpacing } = useSettingsStore();
+  const lyricsFontSize = useSettingsStore(state => state.lyricsFontSize);
+  const lineSpacing = useSettingsStore(state => state.lineSpacing);
   const fontSizes = FONT_SIZE_MAP[lyricsFontSize];
   const lineHeight = LINE_SPACING_MAP[lineSpacing];
 

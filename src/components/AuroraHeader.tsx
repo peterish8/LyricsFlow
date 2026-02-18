@@ -22,7 +22,7 @@ const AURORA_HEIGHT = SCREEN_HEIGHT * 1.0; // Increased to full height per user 
 const COLOR_1 = '#EA7980'; // Saturated but slightly softer Peach/Rose
 const COLOR_2 = '#1D728F'; // Saturated Deep Teal Blue
 const COLOR_3 = '#155252'; // Richer Dark Evergreen
-const BASE_DARK = '#050505';
+const BASE_DARK = '#000000';
 
 export type AuroraPalette = 'library' | 'search' | 'settings' | 'nowPlaying';
 
@@ -135,7 +135,7 @@ export const AuroraHeader: React.FC<AuroraBackgroundProps> = ({
         )}
 
         <LinearGradient
-          colors={['transparent', 'rgba(5,5,5,0.05)', 'rgba(5,5,5,0.6)', BASE_DARK]}
+          colors={['transparent', 'rgba(0,0,0,0.05)', 'rgba(0,0,0,0.6)', BASE_DARK]}
           locations={[0.1, 0.45, 0.8, 1]}
           style={styles.fadeToBlack}
         />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, LayoutAnimation, UIManager, FlatList } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Image, Dimensions, Platform, UIManager, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -33,11 +33,9 @@ const { width } = Dimensions.get('window');
 // Create Animated Pressable
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// UIManager.setLayoutAnimationEnabledExperimental removed to avoid New Architecture warning
 
-const MiniPlayer: React.FC = () => {
+export const MiniPlayer: React.FC = () => {
   const player = usePlayer();
   const currentSong = usePlayerStore(state => state.currentSong);
   const showTransliteration = usePlayerStore(state => state.showTransliteration);
@@ -49,7 +47,8 @@ const MiniPlayer: React.FC = () => {
   const realPosition = usePlayerStore(state => state.position);
   const realDuration = usePlayerStore(state => state.duration);
   const storePlaying = usePlayerStore(state => state.isPlaying);
-  const { miniPlayerStyle, libraryFocusMode } = useSettingsStore();
+  const miniPlayerStyle = useSettingsStore(state => state.miniPlayerStyle);
+  const libraryFocusMode = useSettingsStore(state => state.libraryFocusMode);
   const navigation = useNavigation();
   
   // Use store instead of navigation state to avoid root-level crashes
@@ -154,9 +153,7 @@ const MiniPlayer: React.FC = () => {
   const storePosition = optimizedPosition;
   const storeDuration = realDuration;
   
-  // Plan:
-  // 1. Remove the lines 155-157 I added.
-  // 2. Go to line 296 and update `storePosition` to use `optimizedPosition`.
+
 
 
   // ProgressBar width state (kept for classic mode)
@@ -281,7 +278,7 @@ const MiniPlayer: React.FC = () => {
   // Use displayedSong if expanded/classic to prevent instant jump, else currentSong
   const songForLyrics = (!isIsland && expanded) ? displayedSong : currentSong;
   
-  const lyricsToUse = (showTransliteration && songForLyrics?.transliteratedLyrics)
+  const lyricsToUse = (showTransliteration && songForLyrics?.transliteratedLyrics && songForLyrics.transliteratedLyrics.length > 0)
     ? songForLyrics.transliteratedLyrics
     : songForLyrics?.lyrics;
 
@@ -306,16 +303,27 @@ const MiniPlayer: React.FC = () => {
   
   const skipForward = (e?: any) => {
     e?.stopPropagation();
-    if (!player) return;
-    const newTime = Math.min(storePosition + 10, storeDuration);
-    player.seekTo(newTime);
+    // usePlayerStore.getState().nextInPlaylist() handles the logic
+    usePlayerStore.getState().nextInPlaylist();
   };
   
   const skipBackward = (e?: any) => {
     e?.stopPropagation();
-    if (!player) return;
-    const newTime = Math.max(0, storePosition - 10);
-    player.seekTo(newTime);
+    // Spotify Rule: Restart if > 3s, else Previous Track
+    if (storePosition > 3 && player) {
+        // Optimistic UI Update: Instant reset to 0
+        isSeekingRef.current = true;
+        setOptimizedPosition(0);
+        player.seekTo(0);
+        
+        // Release lock after delay to allow engine to catch up
+        if (seekLockTimeout.current) clearTimeout(seekLockTimeout.current);
+        seekLockTimeout.current = setTimeout(() => {
+            isSeekingRef.current = false;
+        }, 1000); // 1s cushion
+    } else {
+        usePlayerStore.getState().previousInPlaylist();
+    }
   };
 
   const handleSeekPress = (e: any) => {
@@ -594,7 +602,7 @@ const MiniPlayer: React.FC = () => {
                                  </Animated.View>
                              </Pressable>
                              <Pressable onPress={skipForward} hitSlop={10}>
-                                 <Ionicons name="play-forward" size={24} color="#fff" />
+                                 <Ionicons name="play-skip-forward" size={24} color="#fff" />
                              </Pressable>
                         </View>
 
@@ -718,7 +726,7 @@ const MiniPlayer: React.FC = () => {
                     /* Bar Mode Controls */
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Pressable onPress={(e) => { e.stopPropagation(); skipBackward(e); }} style={styles.controlButton}>
-                        <Ionicons name="play-back" size={24} color="#fff" />
+                        <Ionicons name="play-skip-back" size={24} color="#fff" />
                         </Pressable>
                         
                         <Pressable onPress={(e) => { e.stopPropagation(); togglePlay(e); }} style={[styles.playButton, { marginHorizontal: 12 }]} hitSlop={20}>
@@ -728,7 +736,7 @@ const MiniPlayer: React.FC = () => {
                         </Pressable>
                         
                         <Pressable onPress={(e) => { e.stopPropagation(); skipForward(e); }} style={styles.controlButton}>
-                        <Ionicons name="play-forward" size={24} color="#fff" />
+                        <Ionicons name="play-skip-forward" size={24} color="#fff" />
                         </Pressable>
                     </View>
                     )}

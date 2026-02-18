@@ -75,12 +75,14 @@ export interface UnifiedSong {
   duration?: number; // in seconds
   hasLyrics?: boolean;
   isLocal?: boolean; // Whether the song is from local library
+  playCount?: number;
   
   // Selection/Download Properties
   selectedQuality?: { url: string; quality: string; format: string };
   selectedLyrics?: string;
   selectedCoverUri?: string;
   isAuthentic?: boolean; // Whether song matches the exact requested artist
+  language?: string;    // Song language (e.g. 'hindi', 'english')
 }
 
 /**

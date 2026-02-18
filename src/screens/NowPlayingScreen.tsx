@@ -39,7 +39,10 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const storePlaying = usePlayerStore(state => state.isPlaying);
 
   const toggleLike = useSongsStore(state => state.toggleLike);
-  const { autoHideControls, setAutoHideControls, animateBackground, setAnimateBackground } = useSettingsStore();
+  const autoHideControls = useSettingsStore(state => state.autoHideControls);
+  const setAutoHideControls = useSettingsStore(state => state.setAutoHideControls);
+  const animateBackground = useSettingsStore(state => state.animateBackground);
+  const setAnimateBackground = useSettingsStore(state => state.setAnimateBackground);
   const { songId } = route.params;
   
   const flatListRef = useRef<any>(null);
@@ -195,7 +198,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
         // If store is empty/wrong, fetch DB immediately
         if (!songToPlay || !songToPlay.audioUri) {
-             console.log('[NowPlaying] Fetching song from DB...');
+             if (__DEV__) console.log('[NowPlaying] Fetching song from DB...');
              songToPlay = await queries.getSongById(targetSongId);
         }
 
@@ -207,11 +210,11 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         // 2. Play Audio (Priority)
         // Check if ALREADY loaded
         if (loadedAudioId === targetSongId && storeDuration && storeDuration > 0) {
-           console.log('[NowPlaying] Audio already loaded & valid');
+           if (__DEV__) console.log('[NowPlaying] Audio already loaded & valid');
            if (!storePlaying) player?.play();
         } else {
            // Load new
-           console.log('[NowPlaying] Loading audio:', songToPlay.title);
+           if (__DEV__) console.log('[NowPlaying] Loading audio:', songToPlay.title);
            await player?.replace(songToPlay.audioUri); // This is the heavy op
            setLoadedAudioId(targetSongId);
            player?.play();
@@ -221,7 +224,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         // If the initial song didn't have lyrics (common from Library list), fetch them now
         // We do this AFTER audio starts to avoid delaying playback
         if (!songToPlay.lyrics || songToPlay.lyrics.length === 0) {
-            console.log('[NowPlaying] Hydrating lyrics in background...');
+            if (__DEV__) console.log('[NowPlaying] Hydrating lyrics in background...');
             const fullSong = await queries.getSongById(targetSongId);
             if (fullSong && fullSong.lyrics.length > 0) {
                 updateCurrentSong({ lyrics: fullSong.lyrics, lyricSource: (fullSong.lyricSource || 'plain') as any });
@@ -229,7 +232,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
         }
 
       } catch (error) {
-        console.error('Failed to load song:', error);
+        if (__DEV__) console.error('Failed to load song:', error);
         Alert.alert('Error', 'Could not load audio file.');
       }
     };
@@ -375,16 +378,23 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const skipForward = async () => {
     resetHideTimer();
-    if (!player || !storeDuration) return;
-    const newTime = Math.min(storePosition + 10, storeDuration);
-    await player.seekTo(newTime);
+    // usePlayerStore.getState().nextInPlaylist();
+    usePlayerStore.getState().nextInPlaylist();
   };
 
   const skipBackward = async () => {
     resetHideTimer();
     if (!player) return;
-    const newTime = Math.max(0, storePosition - 10);
-    await player.seekTo(newTime);
+    
+    // Spotify Rule: Restart if > 3s, else Previous Track
+    if (storePosition > 3) {
+         // Optimistic Update for NowPlaying Scrubber
+         // We use the store's updateProgress to force the UI to 0 immediately
+         usePlayerStore.getState().updateProgress(0, storeDuration);
+         await player.seekTo(0);
+    } else {
+         usePlayerStore.getState().previousInPlaylist();
+    }
   };
 
   const handleScrub = useCallback((seconds: number) => {
@@ -396,6 +406,8 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleLyricTap = async (timestamp: number) => {
       resetHideTimer();
       if (!player) return;
+      // Optimistic update: immediately jump lyrics to tapped position
+      usePlayerStore.getState().updateProgress(timestamp, storeDuration);
       await player.seekTo(timestamp); // Timestamp is in seconds.
       player.play(); // Ensure playback continues
   };
@@ -589,7 +601,7 @@ const NowPlayingScreen: React.FC<Props> = ({ navigation, route }) => {
                         // Corrected: Pass the full updated song object
                         await queries.updateSong(updatedSong);
                    } catch (e) {
-                       console.error('[NowPlaying] Failed to save cover:', e);
+                       if (__DEV__) console.error('[NowPlaying] Failed to save cover:', e);
                        // Revert optimistic update if needed, but user just sees error
                    }
                }

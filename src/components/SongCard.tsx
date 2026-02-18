@@ -4,7 +4,7 @@
  */
 
 import React, { memo } from 'react';
-import { StyleSheet, View, Text, Pressable, Image } from 'react-native';
+import { StyleSheet, View, Text, Pressable, Image, GestureResponderEvent, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getGradientById, GRADIENTS } from '../constants/gradients';
 import { Colors } from '../constants/colors';
@@ -56,6 +56,7 @@ export const SongCard: React.FC<SongCardProps> = memo(({
 
   // Animation State
   const flipRotation = useSharedValue(0); // 0 to 180
+  const cardScale = useSharedValue(1);
 
   // Tap Handling State
   const lastTapRef = React.useRef<number>(0);
@@ -76,9 +77,18 @@ export const SongCard: React.FC<SongCardProps> = memo(({
       flipRotation.value = withTiming(nextState ? 180 : 0, { duration: 500 });
   };
 
+  const handlePressIn = () => {
+      cardScale.value = withTiming(0.96, { duration: 100 });
+  };
+
+  const handlePressOut = () => {
+      cardScale.value = withTiming(1, { duration: 100 });
+  };
+
+
   const handlePress = () => {
     const now = Date.now();
-    const delay = 400; // time to wait for next tap
+    const delay = 250; // time to wait for next tap (reduced from 400 for snappiness)
 
     if (now - lastTapRef.current < delay) {
       tapCountRef.current += 1;
@@ -86,6 +96,14 @@ export const SongCard: React.FC<SongCardProps> = memo(({
       tapCountRef.current = 1;
     }
     lastTapRef.current = now;
+
+    // Trigger feedback for every tap
+    if (cardScale.value === 1) {
+        cardScale.value = withSequence(
+            withTiming(0.96, { duration: 50 }),
+            withTiming(1, { duration: 100 })
+        );
+    }
 
     if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -122,12 +140,13 @@ export const SongCard: React.FC<SongCardProps> = memo(({
     return {
         transform: [
             { perspective: 1000 },
-            { rotateY }
+            { rotateY },
+            { scale: cardScale.value }
         ],
         opacity: interpolate(flipRotation.value, [85, 95], [1, 0]),
         zIndex: flipRotation.value < 90 ? 1 : 0,
         backfaceVisibility: 'hidden',
-    } as any;
+    } as ViewStyle;
   });
 
   const backAnimatedStyle = useAnimatedStyle(() => {
@@ -135,16 +154,22 @@ export const SongCard: React.FC<SongCardProps> = memo(({
     return {
         transform: [
             { perspective: 1000 },
-            { rotateY }
+            { rotateY },
+            { scale: cardScale.value }
         ],
         opacity: interpolate(flipRotation.value, [85, 95], [0, 1]),
         zIndex: flipRotation.value > 90 ? 1 : 0,
         backfaceVisibility: 'hidden',
-    } as any;
+    } as ViewStyle;
   });
+
+  const sharedAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: cardScale.value }]
+  }));
+
   
   // Heart Press Handle
-  const handleHeartPress = (e: any) => {
+  const handleHeartPress = (e: GestureResponderEvent) => {
       e.stopPropagation(); // Standard React Event stop
       onLikePress?.();
   };
@@ -154,7 +179,10 @@ export const SongCard: React.FC<SongCardProps> = memo(({
       style={styles.container}
       onPress={handlePress}
       onLongPress={onLongPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       delayLongPress={500}
+      unstable_pressDelay={70}
     >
         {/* FLIP CONTAINER */}
         <View>

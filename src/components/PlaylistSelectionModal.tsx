@@ -18,7 +18,10 @@ interface PlaylistSelectionModalProps {
 }
 
 export const PlaylistSelectionModal = ({ visible, onClose, onSelect, onSkip }: PlaylistSelectionModalProps) => {
-    const { playlists, fetchPlaylists, createPlaylist, isLoading: storeLoading } = usePlaylistStore();
+    const playlists = usePlaylistStore(state => state.playlists);
+    const fetchPlaylists = usePlaylistStore(state => state.fetchPlaylists);
+    const createPlaylist = usePlaylistStore(state => state.createPlaylist);
+    const storeLoading = usePlaylistStore(state => state.isLoading);
     const [searchQuery, setSearchQuery] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState('');

@@ -5,7 +5,8 @@ export interface BulkItem {
   id: string;
   query: { title: string; artist: string };
   result: UnifiedSong | null;
-  status: 'pending' | 'searching' | 'found' | 'not_found';
+  status: 'pending' | 'searching' | 'found' | 'not_found' | 'already_present';
+  originalIndex: number;
 }
 
 export interface SearchTab {

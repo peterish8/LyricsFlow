@@ -4,7 +4,7 @@
 
 import * as SQLite from 'expo-sqlite';
 
-export { migratePlaylistData } from './db_migration';
+// export { migratePlaylistData } from './db_migration'; // MOVED to direct import in App.tsx to break require cycle
 
 const DATABASE_NAME = 'lyricflow.db';
 const LOG_PREFIX = '[DB]';
@@ -165,6 +165,10 @@ const initializeTables = async (database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_lyrics_song_id ON lyrics(song_id);
     CREATE INDEX IF NOT EXISTS idx_lyrics_timestamp ON lyrics(timestamp);
     CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, sort_order);
+
+    -- Seed default playlist
+    INSERT OR IGNORE INTO playlists (id, name, description, is_default, sort_order, date_created, date_modified)
+    VALUES ('default_liked', 'Liked Songs', 'Your favorite tracks', 1, -1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
   `);
   
   // Migration: Add lyrics_align if missing

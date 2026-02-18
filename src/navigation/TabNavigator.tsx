@@ -1,17 +1,17 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { TabParamList } from '../types/navigation';
 import { Colors } from '../constants/colors';
-import { CustomTabBar } from '../components';
+import { CustomTabBar } from '../components/CustomTabBar';
 import { ModernPillTabBar } from '../components/ModernPillTabBar';
 import { useSettingsStore } from '../store/settingsStore';
 
 // Import screens
 import LibraryScreen from '../screens/LibraryScreen';
-import ReelsScreen from '../screens/ReelsScreen';
+import LuvsScreen from '../screens/LuvsScreen';
 import PlaylistsScreen from '../screens/PlaylistsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
@@ -64,13 +64,13 @@ export const TabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Reels"
-        component={ReelsScreen}
+        name="Luvs"
+        component={LuvsScreen}
         options={{
-          tabBarLabel: 'Reels',
+          tabBarLabel: 'Luvs',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'flame' : 'flame-outline'}
+            <MaterialCommunityIcons
+              name={focused ? 'heart-multiple' : 'heart-multiple-outline'}
               size={24}
               color={color}
             />

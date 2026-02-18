@@ -10,7 +10,12 @@ interface DownloadQueueModalProps {
 }
 
 export const DownloadQueueModal = ({ visible, onClose }: DownloadQueueModalProps) => {
-  const { queue, removeItem, clearCompleted, pauseItem, resumeItem, retryItem } = useDownloadQueueStore();
+  const queue = useDownloadQueueStore(state => state.queue);
+  const removeItem = useDownloadQueueStore(state => state.removeItem);
+  const clearCompleted = useDownloadQueueStore(state => state.clearCompleted);
+  const pauseItem = useDownloadQueueStore(state => state.pauseItem);
+  const resumeItem = useDownloadQueueStore(state => state.resumeItem);
+  const retryItem = useDownloadQueueStore(state => state.retryItem);
 
   const renderItem = ({ item }: { item: QueueItem }) => {
     if (!item || !item.song) return null;

@@ -1,5 +1,5 @@
 /**
- * Reels Screen - Full-screen immersive TikTok/Instagram-style feed
+ * Luvs Screen - Full-screen immersive TikTok/Instagram-style feed
  * No nav bar, back button only, full-screen height
  */
 
@@ -23,24 +23,25 @@ import Animated, {
   useDerivedValue 
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { useReelsFeedStore } from '../store/reelsFeedStore';
-import { reelsBufferManager } from '../services/ReelsBufferManager';
-import { ReelCard } from '../components/ReelCard';
-import { reelsRecommendationEngine } from '../services/ReelsRecommendationEngine';
-import { useReelsPreferencesStore } from '../store/reelsPreferencesStore';
+import { useFocusEffect, useNavigation, useIsFocused } from '@react-navigation/native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLuvsFeedStore } from '../store/luvsFeedStore';
+import { luvsBufferManager } from '../services/LuvsBufferManager';
+import { LuvCard } from '../components/LuvCard';
+import { luvsRecommendationEngine } from '../services/LuvsRecommendationEngine';
+import { useLuvsPreferencesStore } from '../store/luvsPreferencesStore';
 import { UnifiedSong } from '../types/song';
-import { ReelsVaultModal } from '../components/ReelsVaultModal';
+import { LuvsVaultModal } from '../components/LuvsVaultModal';
 import { PerformanceHUD } from '../components/PerformanceHUD';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Full screen - no tab bar deduction
-const REEL_HEIGHT = SCREEN_HEIGHT;
+const LUV_HEIGHT = SCREEN_HEIGHT;
 
-const ReelsScreen: React.FC = () => {
+const LuvsScreen: React.FC = () => {
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
 
   const {
     feedSongs,
@@ -54,22 +55,22 @@ const ReelsScreen: React.FC = () => {
     removeFromVault,
     isInVault,
     setIsLoading,
-  } = useReelsFeedStore();
+  } = useLuvsFeedStore();
   
   const insets = useSafeAreaInsets();
 
-  const activeIndexRef = useRef(-1);
+  const viewTrackingRef = useRef(-1);
   const flatListRef = useRef<FlatList>(null);
   const [showVault, setShowVault] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false); // Start paused by default
   const viewStartTimeRef = useRef<number>(Date.now());
 
-  const { recordInteraction, loadFromStorage } = useReelsPreferencesStore();
+  const { recordInteraction, loadFromStorage } = useLuvsPreferencesStore();
 
   const scrollY = useSharedValue(0);
   const currentIndexSV = useDerivedValue(() => {
     'worklet';
-    return scrollY.value / REEL_HEIGHT;
+    return scrollY.value / LUV_HEIGHT;
   });
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -97,48 +98,26 @@ const ReelsScreen: React.FC = () => {
       return () => {
         // Show status bar when leaving
         StatusBar.setHidden(false);
-        // FORCE STOP ALL REEL AUDIO
+        // FORCE STOP ALL LUV AUDIO
         setIsPlaying(false);
-        reelsBufferManager.stopAll();
+        luvsBufferManager.stopAll();
       };
     }, [currentIndex, feedSongs.length])
   );
 
   // Load initial feed using recommendation engine
   const loadInitialFeed = useCallback(async () => {
-    console.log('[Reels] 🎯 Loading personalized feed...');
-    setIsLoading(true);
-    try {
-      const songs = await reelsRecommendationEngine.fetchPersonalizedFeed(6);
-
-      if (songs.length > 0) {
-        setFeedSongs(songs);
-        console.log(`[Reels] ✅ Loaded ${songs.length} personalized songs into feed`);
-      } else {
-        console.warn('[Reels] ⚠️ No personalized songs found!');
-      }
-    } catch (error) {
-      console.error('[Reels] ❌ Failed to load feed:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setFeedSongs, setIsLoading]);
+    if (feedSongs.length > 0) return; // Already loaded via prefetch
+    await luvsRecommendationEngine.refreshRecommendation();
+  }, [feedSongs.length]);
 
   // Reload Feed Button Logic
   const handleReload = async () => {
-    console.log('[Reels] 🔄 Reloading feed...');
+    if (__DEV__) console.log('[Luvs] 🔄 Reloading feed...');
     setIsPlaying(false);
-    await reelsBufferManager.stopAll(); // Stop audio first
-    
-    setIsLoading(true);
-    setFeedSongs([]); // Clear current feed
-    setCurrentIndex(0);
-    activeIndexRef.current = -1; // Reset ref
-    
-    // Slight delay to allow UI to clear
-    setTimeout(async () => {
-        await loadInitialFeed();
-    }, 100);
+    await luvsBufferManager.stopAll(); // Stop audio first
+    await luvsRecommendationEngine.refreshRecommendation();
+    setIsPlaying(true); // Auto-play after reload
   };
 
   // Initialize: Load preferences and enter reels mode
@@ -150,7 +129,7 @@ const ReelsScreen: React.FC = () => {
       await loadFromStorage();
       
       // Engine now auto-seeds from song library on first query
-      await reelsBufferManager.enterReelsMode();
+      await luvsBufferManager.enterLuvsMode();
 
       if (feedSongs.length === 0 && mounted) {
         await loadInitialFeed();
@@ -161,25 +140,36 @@ const ReelsScreen: React.FC = () => {
 
     return () => {
       mounted = false;
-      reelsBufferManager.exitReelsMode();
+      luvsBufferManager.exitLuvsMode();
     };
-  }, [loadFromStorage, feedSongs.length, loadInitialFeed]);
+  }, [loadFromStorage, loadInitialFeed]); 
+
+  // Ensure we start playing when screen is focused
+  useEffect(() => {
+    if (isFocused) {
+      setIsPlaying(true);
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    luvsBufferManager.setSuspended(!isFocused);
+    
+    if (isFocused && feedSongs.length > 0) {
+      // If we are coming BACK to the screen, we might want to respect autoPlay
+      // But usually isPlaying state is what we want to maintain during a session.
+      if (isPlaying) {
+        luvsBufferManager.resume();
+      }
+    } else if (!isFocused) {
+      luvsBufferManager.pause();
+    }
+  }, [isFocused, feedSongs.length > 0]);
 
   // Load more songs using recommendation engine
   const loadMoreSongs = useCallback(async () => {
     if (isLoading) return;
-
-    setIsLoading(true);
-    try {
-      const songs = await reelsRecommendationEngine.loadMoreSongs(6);
-      appendFeedSongs(songs);
-      console.log(`[Reels] 🎯 Appended ${songs.length} more personalized songs`);
-    } catch (error) {
-      console.error('[Reels] Failed to load more:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, appendFeedSongs, setIsLoading]);
+    await luvsRecommendationEngine.loadMoreSongs();
+  }, [isLoading]);
 
   // Handle viewable items change + track interactions
   const handleViewableChange = useCallback(
@@ -187,9 +177,9 @@ const ReelsScreen: React.FC = () => {
       if (!viewableItems || viewableItems.length === 0) return;
 
       const newIndex = viewableItems[0]?.index;
-      if (newIndex != null && newIndex !== activeIndexRef.current) {
+      if (newIndex != null && newIndex !== viewTrackingRef.current) {
         // Record interaction for PREVIOUS song
-        const prevIndex = activeIndexRef.current;
+        const prevIndex = viewTrackingRef.current;
         const prevSong = feedSongs[prevIndex];
         if (prevSong) {
           const watchDuration = (Date.now() - viewStartTimeRef.current) / 1000;
@@ -207,18 +197,18 @@ const ReelsScreen: React.FC = () => {
           });
 
           if (skipped) {
-            console.log(`[Reels] ⏭️ Skipped: ${prevSong.title} (${watchDuration.toFixed(1)}s)`);
+            if (__DEV__) console.log(`[Luvs] ⏭️ Skipped: ${prevSong.title} (${watchDuration.toFixed(1)}s)`);
           } else {
-            console.log(`[Reels] 👀 Watched: ${prevSong.title} for ${watchDuration.toFixed(1)}s`);
+            if (__DEV__) console.log(`[Luvs] 👀 Watched: ${prevSong.title} for ${watchDuration.toFixed(1)}s`);
           }
         }
 
         // Reset timer for new song
         viewStartTimeRef.current = Date.now();
-        activeIndexRef.current = newIndex;
-        setCurrentIndex(newIndex);
-        // Keep current play/pause state when swiping
-        reelsBufferManager.updateActiveIndex(newIndex, feedSongs);
+        viewTrackingRef.current = newIndex;
+        // ALWAYS FORCE PLAY ON SWIPE
+        setIsPlaying(true); 
+        luvsBufferManager.updateActiveIndex(newIndex, feedSongs, true);
 
         if (newIndex >= feedSongs.length - 2) {
           loadMoreSongs();
@@ -248,7 +238,7 @@ const ReelsScreen: React.FC = () => {
         message: `🎵 Check out "${song.title}" by ${song.artist || 'Unknown Artist'}!`,
       });
     } catch {
-      console.log('Share cancelled');
+      if (__DEV__) console.log('Share cancelled');
     }
   }, []);
 
@@ -259,10 +249,10 @@ const ReelsScreen: React.FC = () => {
 
   const handlePlayPause = useCallback(async () => {
     if (isPlaying) {
-      await reelsBufferManager.pause();
+      await luvsBufferManager.pause();
       setIsPlaying(false);
     } else {
-      await reelsBufferManager.resume();
+      await luvsBufferManager.resume();
       setIsPlaying(true);
     }
   }, [isPlaying]);
@@ -274,17 +264,19 @@ const ReelsScreen: React.FC = () => {
   const renderItem = useCallback(
     ({ item, index }: { item: UnifiedSong; index: number }) => {
       const isActive = index === currentIndex;
+      const isNearActive = Math.abs(index - currentIndex) <= 1;
       return (
-        <ReelCard
+        <LuvCard
           song={item}
           isActive={isActive}
+          isNearActive={isNearActive}
           isLiked={isInVault(item.id)}
           isPlaying={isActive && isPlaying}
           onLike={() => handleLikePress(item)}
           onShare={() => handleSharePress(item)}
           onDownload={() => handleDownloadPress(item)}
           onPlayPause={handlePlayPause}
-          reelHeight={REEL_HEIGHT}
+          luvHeight={LUV_HEIGHT}
           index={index}
           currentIndex={currentIndexSV}
         />
@@ -295,8 +287,8 @@ const ReelsScreen: React.FC = () => {
 
   const getItemLayout = useCallback(
     (_: any, index: number) => ({
-      length: REEL_HEIGHT,
-      offset: REEL_HEIGHT * index,
+      length: LUV_HEIGHT,
+      offset: LUV_HEIGHT * index,
       index,
     }),
     []
@@ -311,22 +303,22 @@ const ReelsScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           pagingEnabled
-          snapToInterval={REEL_HEIGHT}
+          snapToInterval={LUV_HEIGHT}
           decelerationRate="fast"
           showsVerticalScrollIndicator={false}
           onScroll={scrollHandler}
-          scrollEventThrottle={1}
-          windowSize={5}
-          maxToRenderPerBatch={2}
+          scrollEventThrottle={16}
+          windowSize={2}
+          maxToRenderPerBatch={1}
           removeClippedSubviews={true}
-          initialNumToRender={3}
-          updateCellsBatchingPeriod={16}
+          initialNumToRender={1}
+          updateCellsBatchingPeriod={100}
           viewabilityConfig={viewabilityConfig}
           onViewableItemsChanged={handleViewableChange}
           getItemLayout={getItemLayout}
           extraData={vault} 
           onScrollToIndexFailed={(info) => {
-            console.warn('[Reels] Scroll to index failed:', info.index);
+            if (__DEV__) console.warn('[Luvs] Scroll to index failed:', info.index);
             setTimeout(() => {
               flatListRef.current?.scrollToIndex({
                  index: Math.min(info.index, feedSongs.length - 1),
@@ -339,7 +331,7 @@ const ReelsScreen: React.FC = () => {
         !isLoading && (
           <View style={styles.emptyState}>
             <Ionicons name="musical-notes-outline" size={80} color="rgba(255,255,255,0.3)" />
-            <Text style={styles.emptyText}>No reels available</Text>
+            <Text style={styles.emptyText}>No luvs available</Text>
             <Text style={styles.emptySubtext}>
               Pull down to refresh or check your connection
             </Text>
@@ -353,17 +345,17 @@ const ReelsScreen: React.FC = () => {
       </Pressable>
 
       {/* Vault Button - Top Right */}
-      {vault.length > 0 && (
-        <Pressable
-          style={[styles.vaultButton, { top: insets.top + 16 }]}
-          onPress={() => setShowVault(true)}
-        >
-          <Ionicons name="heart" size={22} color="#fff" />
+      <Pressable
+        style={[styles.vaultButton, { top: insets.top + 16 }]}
+        onPress={() => setShowVault(true)}
+      >
+        <MaterialCommunityIcons name="heart-multiple" size={22} color="#fff" />
+        {vault.length > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{vault.length}</Text>
           </View>
-        </Pressable>
-      )}
+        )}
+      </Pressable>
 
       {/* Reload Button - Top Right (Below Vault) */}
       <Pressable
@@ -381,8 +373,8 @@ const ReelsScreen: React.FC = () => {
         </View>
       )}
 
-      {/* Vault Modal */}
-      <ReelsVaultModal visible={showVault} onClose={() => setShowVault(false)} />
+      {/* Luvs Vault Modal */}
+      <LuvsVaultModal visible={showVault} onClose={() => setShowVault(false)} />
 
       {/* Performance HUD (Dev only) */}
       <PerformanceHUD />
@@ -480,4 +472,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ReelsScreen;
+export default LuvsScreen;

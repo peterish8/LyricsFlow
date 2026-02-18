@@ -1,5 +1,5 @@
 /**
- * ModernPillTabBar - Premium pill-shaped navigation bar
+ * LyricFlow - Premium pill-shaped navigation bar
  * Matches Dynamic Island aesthetic with live song color theming
  */
 
@@ -19,9 +19,9 @@ export const ModernPillTabBar: React.FC<BottomTabBarProps> = ({
   const coverImageUri = usePlayerStore(s => s.currentSong?.coverImageUri);
   const isDynamicIsland = useSettingsStore(s => s.miniPlayerStyle === 'island');
   
-  // Completely hide tab bar on Reels
+  // Completely hide tab bar on Luvs
   const currentRoute = state.routes[state.index];
-  if (currentRoute.name === 'Reels') {
+  if (currentRoute.name === 'Luvs') {
     return null;
   }
 
@@ -59,7 +59,7 @@ export const ModernPillTabBar: React.FC<BottomTabBarProps> = ({
 
                 // label removed as unused
 
-                const onPress = () => {
+                const onPress = async () => {
                   const event = navigation.emit({
                     type: 'tabPress',
                     target: route.key,
@@ -68,6 +68,17 @@ export const ModernPillTabBar: React.FC<BottomTabBarProps> = ({
 
                   if (!isFocused && !event.defaultPrevented) {
                     navigation.navigate(route.name, route.params);
+                    
+                    // Trigger refresh if navigating to Luvs AND feed is empty
+                    if (route.name === 'Luvs') {
+                        const { feedSongs } = (await import('../store/luvsFeedStore')).useLuvsFeedStore.getState();
+                        if (feedSongs.length === 0) {
+                            import('../services/LuvsRecommendationEngine').then(m => m.luvsRecommendationEngine.refreshRecommendation()).catch(console.error);
+                        }
+                    }
+                  } else if (isFocused && route.name === 'Luvs') {
+                    // Refresh even if already focused (user tapping the button again)
+                    import('../services/LuvsRecommendationEngine').then(m => m.luvsRecommendationEngine.refreshRecommendation()).catch(console.error);
                   }
                 };
 

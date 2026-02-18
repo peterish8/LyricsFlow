@@ -10,11 +10,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // useSongStaging removed as unused
 import { Colors } from '../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
-import { QueueItem } from '../store/downloadQueueStore';
 import { Toast } from '../components/Toast';
 import { MultiSourceSearchService } from '../services/MultiSourceSearchService';
 import { UnifiedSong } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
+import { useSongsStore } from '../store/songsStore';
 import { Audio } from 'expo-av';
 // ImageSearchService removed as unused
 
@@ -31,6 +31,9 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { usePlaylistStore } from '../store/playlistStore';
 import { BulkItem } from '../store/downloaderTabStore';
+import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
+import stringSimilarity from 'string-similarity';
+import * as playlistQueries from '../database/playlistQueries';
 
 // Safe area dimensions removed as unused in this block
 
@@ -175,7 +178,7 @@ export const AudioDownloaderScreen: React.FC<AudioDownloaderProps> = ({ navigati
         toggleSelection, clearAllSelections, getSelectedSongs 
     } = useDownloaderTabStore();
     
-    const { addToQueue } = useDownloadQueueStore();
+    const addToQueue = useDownloadQueueStore(state => state.addToQueue);
     const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
 
     // Local UI State
@@ -544,40 +547,103 @@ Only provide the JSON array, no other text.`;
                 id: `bulk-${Date.now()}-${index}`,
                 query: { title: item.title || '', artist: item.artist || '' },
                 result: null,
-                status: 'pending'
+                status: 'pending',
+                originalIndex: index
             }));
 
             // Update tab with pending items
             updateTab(activeTabId, { bulkItems, status: 'Searching...', isSearching: true });
 
             // Process sequentially to be nice to APIs (or parallel chunks)
-            const updatedItems = [...bulkItems];
-            
-            for (let i = 0; i < updatedItems.length; i++) {
-                const item = updatedItems[i];
-                item.status = 'searching';
-                updateTab(activeTabId, { bulkItems: [...updatedItems] }); // Force UI update
+            for (let i = 0; i < bulkItems.length; i++) {
+                // Fetch the LATEST items from store to avoid overwriting manual updates
+                const latestTab = useDownloaderTabStore.getState().tabs.find(t => t.id === activeTabId);
+                if (!latestTab || !latestTab.bulkItems) break;
+                
+                const currentItem = latestTab.bulkItems[i];
+                if (!currentItem || currentItem.status === 'found') continue; // Skip if manually swapped or already found
+                
+                // Mark ONLY this item as searching
+                const searchingItems = [...latestTab.bulkItems];
+                searchingItems[i] = { ...searchingItems[i], status: 'searching' };
+                updateTab(activeTabId, { bulkItems: searchingItems });
 
-                const query = `${item.query.title} ${item.query.artist}`;
+                const queryTitle = currentItem.query.title.toLowerCase().trim();
+                const queryArtist = currentItem.query.artist.toLowerCase().trim();
+
                 try {
-                    const results = await MultiSourceSearchService.searchMusic(query, item.query.artist);
-                    if (results.length > 0) {
-                        // Prefer authentic result if marked
-                        const bestMatch = results.find(r => r.isAuthentic) || results[0];
-                        item.result = bestMatch;
-                        item.status = bestMatch.isAuthentic ? 'found' : 'found'; // keeping generic status, but we trust the service sorting
+                    // 1. Check local library first
+                    const localSongs = useSongsStore.getState().songs;
+                    const existingSong = localSongs.find(s => 
+                        s.title.toLowerCase().trim() === queryTitle && 
+                        (s.artist || '').toLowerCase().trim() === queryArtist
+                    );
+
+                    const reReadTab = useDownloaderTabStore.getState().tabs.find(t => t.id === activeTabId);
+                    if (!reReadTab || !reReadTab.bulkItems) break;
+                    const updatedItems = [...reReadTab.bulkItems];
+
+                    if (existingSong) {
+                        updatedItems[i] = {
+                            ...updatedItems[i],
+                            status: 'already_present',
+                            result: {
+                                id: existingSong.id,
+                                title: existingSong.title,
+                                artist: existingSong.artist || 'Unknown Artist',
+                                highResArt: existingSong.coverImageUri || '',
+                                downloadUrl: existingSong.audioUri || '',
+                                source: 'Local',
+                                isLocal: true,
+                                duration: existingSong.duration
+                            }
+                        };
                     } else {
-                        item.status = 'not_found';
+                        // 2. Search online if not found locally
+                        const query = `${currentItem.query.title} ${currentItem.query.artist}`;
+                        const results = await MultiSourceSearchService.searchMusic(query, currentItem.query.artist);
+                        
+                        if (results.length > 0) {
+                            // STRICT TITLE MATCHING: Pick the best result
+                            const matches = results.map(r => ({
+                                result: r,
+                                rating: stringSimilarity.compareTwoStrings(
+                                    `${queryTitle} ${queryArtist}`,
+                                    `${r.title.toLowerCase()} ${r.artist.toLowerCase()}`
+                                )
+                            }));
+                            
+                            // Sort by similarity rating
+                            matches.sort((a, b) => b.rating - a.rating);
+                            
+                            // Pick best match if it meets threshold, otherwise take first but warn
+                            const bestMatch = matches[0].rating > 0.4 ? matches[0].result : results[0];
+
+                            updatedItems[i] = {
+                                ...updatedItems[i],
+                                status: 'found',
+                                result: bestMatch
+                            };
+                        } else {
+                            updatedItems[i] = {
+                                ...updatedItems[i],
+                                status: 'not_found'
+                            };
+                        }
                     }
-                } catch {
-                    item.status = 'not_found';
+                    updateTab(activeTabId, { bulkItems: updatedItems });
+                } catch (error) {
+                    console.warn(`[BulkSearch] Item ${i} failed:`, error);
+                    const tabAfterError = useDownloaderTabStore.getState().tabs.find(t => t.id === activeTabId);
+                    if (tabAfterError && tabAfterError.bulkItems) {
+                        const errorItems = [...tabAfterError.bulkItems];
+                        errorItems[i] = { ...errorItems[i], status: 'not_found' };
+                        updateTab(activeTabId, { bulkItems: errorItems });
+                    }
                 }
                 
-                // Update item in local array
-                updatedItems[i] = item;
-                // Sync to store every few items or on completion of one? 
-                // Updating store triggers re-render, so per-item is good for progress feedback.
-                updateTab(activeTabId, { bulkItems: [...updatedItems] });
+                // Small delay to be nice to API
+                await new Promise(r => setTimeout(r, 600));
             }
 
             updateTab(activeTabId, { isSearching: false, status: 'Completed' });
@@ -606,24 +672,51 @@ Only provide the JSON array, no other text.`;
             // 1. Create Playlist
             const playlistId = await usePlaylistStore.getState().createPlaylist(bulkPlaylistName);
             
-            // 2. Queue Downloads
-            const songsToDownload = validItems.map(i => i.result!);
+            // 2. Queue actions
+            const downloadItems = validItems.filter(i => i.status === 'found');
+            const localItems = validItems.filter(i => i.status === 'already_present');
             
-            const queueItems = songsToDownload.map(song => ({
-                ...song,
-                highResArt: song.highResArt || song.thumbnail || '',
-                downloadUrl: song.downloadUrl || song.streamUrl || '',
-                streamUrl: song.downloadUrl || song.streamUrl || '',
-                selectedQuality: {
-                    url: song.downloadUrl || song.streamUrl || '',
-                    quality: '320kbps',
-                    format: 'mp3'
-                },
-                selectedLyrics: '',
-                selectedCoverUri: song.highResArt || song.thumbnail || ''
-            }));
-            
-            addToQueue(queueItems as UnifiedSong[], playlistId);
+            // Queue downloads for new songs with sort orders
+            if (downloadItems.length > 0) {
+                const songsToDownload = downloadItems.map(i => i.result!);
+                const sortOrders = downloadItems.map(i => i.originalIndex);
+                
+                const queueItems = songsToDownload.map(song => ({
+                    ...song,
+                    highResArt: song.highResArt || song.thumbnail || '',
+                    downloadUrl: song.downloadUrl || song.streamUrl || '',
+                    streamUrl: song.downloadUrl || song.streamUrl || '',
+                    selectedQuality: {
+                        url: song.downloadUrl || song.streamUrl || '',
+                        quality: '320kbps',
+                        format: 'mp3'
+                    },
+                    selectedLyrics: '',
+                    selectedCoverUri: song.highResArt || song.thumbnail || ''
+                }));
+                
+                useDownloadQueueStore.getState().addToQueue(queueItems as UnifiedSong[], playlistId, sortOrders);
+            }
+
+            // Immediately add existing songs to playlist with correct sort order
+            if (localItems.length > 0) {
+                for (const item of localItems) {
+                    const songId = item.result!.id;
+                    const order = item.originalIndex;
+                    await playlistQueries.addSongToPlaylistWithOrder(playlistId, songId, order);
+                    
+                    // AUTO LYRICS SCAN: Check if existing song needs magic lyrics
+                    const song = useSongsStore.getState().songs.find(s => s.id === songId);
+                    if (song) {
+                        const hasSynced = song.lyrics && song.lyrics.some(l => l.timestamp && l.timestamp > 0);
+                        if (!hasSynced) {
+                            useLyricsScanQueueStore.getState().addToQueue(song, true);
+                            if (__DEV__) console.log(`[BulkImport] Queued existing song "${song.title}" for lyrics scan`);
+                        }
+                    }
+                }
+                await usePlaylistStore.getState().fetchPlaylists();
+            }
             
             // 3. Add to Playlist (Ordered)
             // Note: We're adding the metadata immediately. The `bindPlaylist` logic 
@@ -709,7 +802,16 @@ Only provide the JSON array, no other text.`;
              // and just Create Playlist + Download. 
              // I will address the linking in the next step by checking Queue Store.
              
-            setToast({ visible: true, message: `Playlist '${bulkPlaylistName}' created! Downloading ${queueItems.length} songs...`, type: 'success' });
+            let msg = `Playlist '${bulkPlaylistName}' created! `;
+            if (downloadItems.length > 0 && localItems.length > 0) {
+                msg += `Downloading ${downloadItems.length} and adding ${localItems.length} existing songs.`;
+            } else if (downloadItems.length > 0) {
+                msg += `Downloading ${downloadItems.length} songs.`;
+            } else if (localItems.length > 0) {
+                msg += `Added ${localItems.length} existing songs.`;
+            }
+            
+            setToast({ visible: true, message: msg, type: 'success' });
 
         } catch {
             setToast({ visible: true, message: 'Failed to process bulk download', type: 'error' });
@@ -870,7 +972,7 @@ Only provide the JSON array, no other text.`;
                                             
                                             // Render matched item
                                             return (
-                                                <View style={{ width: '50%', padding: 4 }}>
+                                                <View style={styles.gridCardWrapper}>
                                                     <DownloadGridCard
                                                         song={item.result}
                                                         isSelected={true} 
@@ -882,17 +984,21 @@ Only provide the JSON array, no other text.`;
                                                         selectionMode={false}
                                                     />
                                                     {/* Swap Overlay Label */}
-                                                    <View style={{ 
-                                                        position: 'absolute', 
-                                                        top: 12, 
-                                                        right: 12, 
-                                                        backgroundColor: 'rgba(0,0,0,0.6)', 
-                                                        padding: 4, 
-                                                        borderRadius: 40,
-                                                        pointerEvents: 'none'
-                                                    }}>
+                                                    <View style={styles.swapOverlay}>
                                                         <Ionicons name="sync" size={12} color="#fff" />
                                                     </View>
+                                                    
+                                                    {item.status === 'already_present' && (
+                                                        <View style={styles.alreadyPresentOverlay}>
+                                                            <View style={styles.alreadyPresentBadge}>
+                                                                <Ionicons name="library" size={14} color="#fff" />
+                                                                <Text style={styles.alreadyPresentBadgeText}>Already in Library</Text>
+                                                            </View>
+                                                            <Text style={styles.alreadyPresentText}>
+                                                                we will import to ur library dont worry!
+                                                            </Text>
+                                                        </View>
+                                                    )}
                                                 </View>
                                             );
                                         }}
@@ -1340,6 +1446,54 @@ const styles = StyleSheet.create({
 
     // Section Header 
     sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, marginBottom: 8, marginHorizontal: 4 },
-    sectionHeaderText: { color: '#444', fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1.2 }
+    sectionHeaderText: { color: '#444', fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1.2 },
+    
+    // Already Present Overlay
+    gridCardWrapper: { width: '50%', padding: 4 },
+    swapOverlay: { 
+        position: 'absolute', 
+        top: 12, 
+        left: 12, 
+        backgroundColor: 'rgba(0,0,0,0.6)', 
+        padding: 4, 
+        borderRadius: 40,
+        pointerEvents: 'none'
+    },
+    alreadyPresentOverlay: {
+        position: 'absolute',
+        bottom: 8,
+        left: 8,
+        right: 8,
+        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        padding: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: Colors.primary + '44',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none'
+    },
+    alreadyPresentBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.primary,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 20,
+        marginBottom: 6,
+        gap: 4
+    },
+    alreadyPresentBadgeText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 'bold'
+    },
+    alreadyPresentText: {
+        color: '#ccc',
+        fontSize: 10,
+        textAlign: 'center',
+        lineHeight: 14,
+        fontWeight: '500'
+    }
 });
 

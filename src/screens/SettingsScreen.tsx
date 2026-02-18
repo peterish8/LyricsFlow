@@ -28,10 +28,10 @@ import { CustomAlert } from '../components/CustomAlert';
 import { Colors } from '../constants/colors';
 import { exportAllSongs, shareExportedFile, importSongsFromJson } from '../utils/exportImport';
 import { clearAllData } from '../database/queries';
-import { useReelsPreferencesStore } from '../store/reelsPreferencesStore';
+import { useLuvsPreferencesStore } from '../store/luvsPreferencesStore';
 
-const ReelsLanguagesModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
-    const { preferredLanguages, updateLanguageWeight } = useReelsPreferencesStore();
+const LuvsLanguagesModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
+    const { preferredLanguages, updateLanguageWeight } = useLuvsPreferencesStore();
     
     // Sort so active ones are on top or just alphabetical? Let's do alphabetical or fixed order
     // Fixed order from store is fine.
@@ -62,14 +62,14 @@ const ReelsLanguagesModal = ({ visible, onClose }: { visible: boolean; onClose: 
                     
                     <ScrollView style={{ width: '100%' }}>
                         <Text style={{ color: Colors.textSecondary, marginBottom: 16, fontSize: 13 }}>
-                             Adjust preferences to curate your Reels feed. Set weight to 0% to disable a language.
+                             Adjust preferences to curate your Luvs feed. Set weight to 0% to disable a language.
                         </Text>
                         
                         {preferredLanguages.map((item) => (
                             <View key={item.language} style={{ marginBottom: 20 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                                    <Text style={{ fontSize: 16, color: Colors.textPrimary, fontWeight: '600' }}>{item.language}</Text>
-                                    <Text style={{ fontSize: 14, color: Colors.primary }}>{item.weight}%</Text>
+                                    <Text style={{ fontSize: 16, color: Colors.textPrimary, fontWeight: '600', fontFamily: 'Inter-SemiBold' }}>{item.language}</Text>
+                                    <Text style={{ fontSize: 14, color: Colors.primary, fontWeight: '700' }}>{item.weight === 0 ? 'DISABLED' : `${item.weight}%`}</Text>
                                 </View>
                                 <Slider
                                     style={{ width: '100%', height: 40 }}
@@ -93,6 +93,10 @@ const ReelsLanguagesModal = ({ visible, onClose }: { visible: boolean; onClose: 
 import { useSongsStore } from '../store/songsStore';
 import { scanAudioFiles, convertAudioFileToSong } from '../services/mediaScanner';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
+
+
 
 type Props = TabScreenProps<'Settings'>;
 
@@ -112,7 +116,8 @@ const SettingsScreen: React.FC<Props> = () => {
   const setMiniPlayerHidden = usePlayerStore(state => state.setMiniPlayerHidden);
   const [hiddenSongsVisible, setHiddenSongsVisible] = React.useState(false);
   const { hiddenSongs, fetchHiddenSongs, hideSong: unhideSong } = useSongsStore();
-  const [reelsLangModalVisible, setReelsLangModalVisible] = React.useState(false);
+  const [luvsLangModalVisible, setLuvsLangModalVisible] = React.useState(false);
+  const { luvsLanguages } = useLuvsPreferencesStore();
 
   // Visibility Management: Hide MiniPlayer when Settings is focus
   useFocusEffect(
@@ -420,6 +425,25 @@ const SettingsScreen: React.FC<Props> = () => {
     setSelectedFiles(newSelected);
   };
 
+  const handleSetDownloadLocation = async () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert('Not Available', 'Custom download folders are only supported on Android. On iOS, downloads are saved to the app documents.');
+      return;
+    }
+
+    try {
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+      if (permissions.granted) {
+        const uri = permissions.directoryUri;
+        settings.setDownloadDirectory(uri);
+        Alert.alert('Success', 'Download location updated! Future downloads will be saved here.');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Failed to set download location.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* AuroraHeader removed */}
@@ -563,11 +587,13 @@ const SettingsScreen: React.FC<Props> = () => {
               value={
                   settings.libraryBackgroundMode === 'daily' ? 'Most Played Yesterday' :
                   settings.libraryBackgroundMode === 'current' ? 'Current Song' :
+                  settings.libraryBackgroundMode === 'black' ? 'Pure Black' :
+                  settings.libraryBackgroundMode === 'grey' ? 'Spotify Grey' :
                   'Standard (Aurora)'
               }
               onPress={() => {
-                  // Cycle through modes: daily -> current -> aurora -> daily
-                  const modes: ('daily' | 'current' | 'aurora')[] = ['daily', 'current', 'aurora'];
+                  // Cycle through modes: daily -> current -> aurora -> black -> grey -> daily
+                  const modes: ('daily' | 'current' | 'aurora' | 'black' | 'grey')[] = ['daily', 'current', 'aurora', 'black', 'grey'];
                   const currentIndex = modes.indexOf(settings.libraryBackgroundMode);
                   const nextMode = modes[(currentIndex + 1) % modes.length];
                   settings.setLibraryBackgroundMode(nextMode);
@@ -581,6 +607,12 @@ const SettingsScreen: React.FC<Props> = () => {
                   fetchHiddenSongs();
                   setHiddenSongsVisible(true);
               }}
+            />
+            <SettingsRow
+              icon="save-outline"
+              label="Download Location"
+              value={settings.downloadDirectoryUri ? 'Custom Folder' : 'Default (App Storage)'}
+              onPress={handleSetDownloadLocation}
             />
           </View>
 
@@ -599,12 +631,12 @@ const SettingsScreen: React.FC<Props> = () => {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>REELS & DISCOVERY</Text>
+            <Text style={styles.sectionTitle}>LUVS & DISCOVERY</Text>
             <SettingsRow
               icon="language-outline"
               label="Music Languages"
               value="Configure Weights"
-              onPress={() => setReelsLangModalVisible(true)}
+              onPress={() => setLuvsLangModalVisible(true)}
             />
           </View>
 
@@ -825,9 +857,9 @@ const SettingsScreen: React.FC<Props> = () => {
         </Pressable>
       </Modal>
 
-      <ReelsLanguagesModal 
-        visible={reelsLangModalVisible} 
-        onClose={() => setReelsLangModalVisible(false)} 
+      <LuvsLanguagesModal 
+        visible={luvsLangModalVisible} 
+        onClose={() => setLuvsLangModalVisible(false)} 
       />
     </View>
   );

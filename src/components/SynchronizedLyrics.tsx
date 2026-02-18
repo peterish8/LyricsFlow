@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { View, FlatList, Dimensions, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import { View, Dimensions, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import { FlatList } from 'react-native';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
   withTiming, 
+  withSpring,
   interpolateColor, 
   interpolate,
   Extrapolation 
@@ -31,26 +33,33 @@ const LyricLine = React.memo(({ text, isActive, isPassed, onPress, textStyle, so
   const activeValue = useSharedValue(isActive ? 1 : 0);
 
   useEffect(() => {
-    activeValue.value = withTiming(isActive ? 1 : 0, { duration: 150 });
+    // Apple Music style: Smooth spring-based transition
+    activeValue.value = withSpring(isActive ? 1 : 0, {
+       mass: 1,
+       damping: 15,
+       stiffness: 100,
+       overshootClamping: false
+    });
   }, [isActive, activeValue]);
 
   const animatedStyle = useAnimatedStyle(() => {
-    // Interpolate Scale: 1.0 -> 1.1
-    const scale = interpolate(activeValue.value, [0, 1], [1.0, 1.1], Extrapolation.CLAMP);
+    // Interpolate Scale: 1.0 -> 1.05 (Subtle pop)
+    const scale = interpolate(activeValue.value, [0, 1], [1.0, 1.05], Extrapolation.CLAMP);
 
     // Interpolate Opacity: 
     // If active (1) -> 1.0
-    // If inactive (0) -> isPassed ? 0.4 : 0.2
-    const targetOpacity = isPassed ? 0.6 : 0.3; // Tweaked for better visibility on dark bg
+    // If inactive (0) -> isPassed ? 0.5 : 0.3 (More contrast)
+    const targetOpacity = isPassed ? 0.5 : 0.3;
     const opacity = interpolate(activeValue.value, [0, 1], [targetOpacity, 1.0], Extrapolation.CLAMP);
 
-    // Interpolate Color: Dimmed -> Bright White
+    // Interpolate Color: Grey/Transparent -> Solid White
     const color = interpolateColor(
         activeValue.value,
         [0, 1],
-        ['rgba(255,255,255,0.7)', '#FFFFFF']
+        ['rgba(255,255,255,0.6)', '#FFFFFF']
     );
     
+    // Blur simulation via opacity and scale
     return {
       transform: [{ scale }],
       opacity,
@@ -147,9 +156,9 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
   const hasInitialScrolled = useRef(false);
   
   // Find active index based on time
-  // Compensation: Add 1.5s to currentTime to anticipate the line change (Dynamic Offset Fix)
-  // This counteracts the animation delay + polling interval + inherent player latency
-  const effectiveTime = currentTime + 1.5;
+  // GLOBAL OFFSET: 1 second earlier (User request)
+  // Means we treat current time as +1s relative to lyrics
+  const effectiveTime = currentTime + 1.0;
 
   const activeIndex = lyrics.findIndex((line, index) => {
     const nextLine = lyrics[index + 1];
@@ -190,7 +199,7 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
                 hasInitialScrolled.current = true;
             }
         } catch (e) {
-            console.log('[SynchronizedLyrics] Scroll failed:', e);
+            if (__DEV__) console.log('[SynchronizedLyrics] Scroll failed:', e);
             // If failed, we don't set hasInitialScrolled to true, so it will retry
         }
     };
@@ -263,18 +272,11 @@ const SynchronizedLyrics: React.FC<SynchronizedLyricsProps> = ({
           }}
           showsVerticalScrollIndicator={false}
           onScrollToIndexFailed={(info) => {
-            const wait = new Promise(resolve => setTimeout(resolve, 500));
-            wait.then(() => {
-              flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: activeLinePosition });
-            });
+              const wait = new Promise(resolve => setTimeout(resolve, 500));
+              wait.then(() => {
+                flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: activeLinePosition });
+              });
           }}
-          // Optimization: getItemLayout Removed. 
-          // Lyrics have variable height (wrapping), so fixed height causes massive scroll errors.
-          // Reliance on onScrollToIndexFailed and retry logic is better for accuracy (if numToRender is high enough).
-          removeClippedSubviews={Platform.OS === 'android'} // Force cleanup on Android
-          initialNumToRender={50} // High enough to cover early song, low enough to stop jitter
-          maxToRenderPerBatch={50}
-          windowSize={15}
         />
       </MaskedView>
     </Animated.View>

@@ -15,6 +15,8 @@ import { usePlayerStore } from './store/playerStore';
 import { Colors } from './constants/colors';
 import { PlayerProvider } from './contexts/PlayerContext';
 import { setAudioModeAsync } from 'expo-audio';
+import * as Font from 'expo-font';
+import { Ionicons } from '@expo/vector-icons';
 
 const App: React.FC = () => {
   const [isReady, setIsReady] = useState(false);
@@ -38,11 +40,18 @@ const App: React.FC = () => {
             interruptionMode: 'doNotMix',
           });
 
+          // Preload Icons
+          await Font.loadAsync(Ionicons.font);
+
           // Initialize database
           await initDatabase();
           
           // Fetch initial songs
           await fetchSongs();
+          
+          // Initialize Playlists & Liked Songs Cache
+          const { usePlaylistStore } = await import('./store/playlistStore');
+          await usePlaylistStore.getState().fetchPlaylists();
           
           // Restore Last Played Song
           const lastPlayed = await import('./database/queries').then(m => m.getLastPlayedSong());
@@ -50,17 +59,20 @@ const App: React.FC = () => {
               usePlayerStore.getState().setInitialSong(lastPlayed);
           }
 
+          // Pre-fetch Luvs for instant playback
+          import('./services/LuvsRecommendationEngine').then(m => m.luvsRecommendationEngine.prefetch()).catch(console.error);
+
           console.log('[APP] Initialization successful');
           setIsReady(true);
           
           // Run playlist migration AFTER UI renders (prevents startup freeze)
           import('react-native').then(({ InteractionManager }) => {
             InteractionManager.runAfterInteractions(async () => {
-              const { migratePlaylistData } = await import('./database/db');
+              const { migratePlaylistData } = await import('./database/db_migration');
               await migratePlaylistData();
             });
           });
-          
+
           return; // Success - exit retry loop
         } catch (err) {
           lastError = err instanceof Error ? err : new Error('Unknown error');

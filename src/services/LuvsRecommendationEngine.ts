@@ -1,12 +1,12 @@
 /**
- * Reels Recommendation Engine
+ * Luvs Recommendation Engine
  * Uses ONLY Saavn + Gaana APIs
  * Seeds from user's existing song library for instant personalization
  * Generates personalized search queries based on user's artists & genres
  */
 
 import { UnifiedSong, Song } from '../types/song';
-import { useReelsPreferencesStore, LanguagePreference } from '../store/reelsPreferencesStore';
+import { useLuvsPreferencesStore, LanguagePreference } from '../store/luvsPreferencesStore';
 import { useSongsStore } from '../store/songsStore';
 import { MultiSourceSearchService } from './MultiSourceSearchService';
 
@@ -17,7 +17,7 @@ interface GeneratedQuery {
 
 // Trending/discovery queries - Removed as we now generate on the fly
 
-class ReelsRecommendationEngine {
+class LuvsRecommendationEngine {
   private seededFromLibrary = false;
 
   /**
@@ -26,11 +26,11 @@ class ReelsRecommendationEngine {
    */
   seedFromLibrary() {
     const songsStore = useSongsStore.getState();
-    const prefsStore = useReelsPreferencesStore.getState();
+    const prefsStore = useLuvsPreferencesStore.getState();
     const songs = songsStore.songs;
 
     if (songs.length === 0) {
-      console.log('[RecoEngine] No songs in library, skipping seed');
+      if (__DEV__) console.log('[LuvsRecoEngine] No songs in library, skipping seed');
       this.seededFromLibrary = true;
       return;
     }
@@ -45,7 +45,7 @@ class ReelsRecommendationEngine {
         return;
     }
 
-    console.log(`[RecoEngine] 🌱 Seeding from ${songs.length} library songs...`);
+    if (__DEV__) console.log(`[LuvsRecoEngine] 🌱 Seeding from ${songs.length} library songs...`);
 
     // Record each song as a "liked" interaction to build artist preferences
     // We do this efficiently by batch updating if possible, or just strict loop
@@ -71,8 +71,8 @@ class ReelsRecommendationEngine {
     prefsStore.analyzePreferences();
 
     this.seededFromLibrary = true;
-    console.log('[RecoEngine] ✅ Seeded preferences from library!');
-    console.log('[RecoEngine] Top artists derived:', prefsStore.getTopArtistNames(10));
+    if (__DEV__) console.log('[LuvsRecoEngine] ✅ Seeded preferences from library!');
+    if (__DEV__) console.log('[LuvsRecoEngine] Top artists derived:', prefsStore.getTopArtistNames(10));
   }
 
   /**
@@ -103,8 +103,9 @@ class ReelsRecommendationEngine {
     this.seedFromLibrary();
 
     const songsStore = useSongsStore.getState();
-    const prefsStore = useReelsPreferencesStore.getState();
+    const prefsStore = useLuvsPreferencesStore.getState();
     const languageWeights = prefsStore.getLanguageWeights();
+    if (__DEV__) console.log('[LuvsReco] 📊 Current Language Weights:', languageWeights.filter(w => w.weight > 0).map(w => `${w.language}: ${w.weight}%`));
     
     // 1. Get Top Artists (Explicitly Liked / Watched)
     const topArtists = prefsStore.getTopArtistNames(20);
@@ -122,11 +123,11 @@ class ReelsRecommendationEngine {
     const cleanPool = [...topArtists, ...libraryArtists].filter(a => !skippedArtists.has(a.toLowerCase()));
     const uniquePool = Array.from(new Set(cleanPool));
     
-    console.log(`[RecoEngine] 🎱 Candidate Artist Pool Size: ${uniquePool.length}`);
+    if (__DEV__) console.log(`[LuvsRecoEngine] 🎱 Candidate Artist Pool Size: ${uniquePool.length}`);
 
     if (uniquePool.length === 0) {
         // Fallback to trending if no library/history data
-        console.log('[RecoEngine] ⚠️ No personalized artists found. Using Language Trending fallback.');
+        if (__DEV__) console.log('[LuvsRecoEngine] ⚠️ No personalized artists found. Using Language Trending fallback.');
         const fallbackQueries: GeneratedQuery[] = [];
         const activeLanguages = languageWeights.filter(w => w.weight > 0);
         
@@ -154,46 +155,78 @@ class ReelsRecommendationEngine {
         const modifiers = ['songs', 'hit songs', 'melody songs', 'best songs'];
         const mod = modifiers[Math.floor(Math.random() * modifiers.length)];
         
+        // CRITICAL: Include the language in the query to force the API to respect it
+        const query = `${artist} ${selectedLang} ${mod}`;
+
         generatedQueries.push({ 
-            query: `${artist} ${mod}`, 
+            query, 
             language: selectedLang 
         });
     });
 
-    // 5. Fill remaining slots
-    while(generatedQueries.length < targetArtistCount) {
-         const selectedLang = this.selectLanguageByWeight(languageWeights);
-         const mod = ['Trending', 'Viral', 'New'].sort(() => Math.random() - 0.5)[0];
-         generatedQueries.push({
-             query: `${selectedLang} ${mod}`,
-             language: selectedLang
-         });
-    }
+     while(generatedQueries.length < targetArtistCount) {
+          const selectedLang = this.selectLanguageByWeight(languageWeights);
+          const mod = ['Trending', 'Viral', 'New'].sort(() => Math.random() - 0.5)[0];
+          generatedQueries.push({
+              query: `${selectedLang} ${mod}`,
+              language: selectedLang
+          });
+     }
 
-    console.log(`[ReelsReco] 🎨 Generated ${generatedQueries.length} Personalized Queries:`, generatedQueries.map(q => `${q.query} (${q.language})`));
+    if (__DEV__) console.log(`[LuvsReco] 🎨 Generated ${generatedQueries.length} Personalized Queries:`, generatedQueries.map(q => `${q.query} (${q.language})`));
     return generatedQueries;
   }
 
   /**
-   * Search using ONLY Saavn + Gaana (no SoundCloud, Wynk, NetEase etc.)
+   * Search using ONLY Saavn (Gaana is disabled)
    */
-  private async searchSaavnAndGaana(query: string, language?: string): Promise<UnifiedSong[]> {
+  private async searchSaavnOnly(query: string, _language?: string): Promise<UnifiedSong[]> {
     const results: UnifiedSong[] = [];
 
     try {
-      // Search both in parallel
-      const [saavnResults, gaanaResults] = await Promise.all([
-        MultiSourceSearchService.searchSaavn(query, language).catch(() => [] as UnifiedSong[]),
-        // Gaana doesn't strictly support 'language' param in same way, but we pass query to it
-        MultiSourceSearchService.searchGaana(query).catch(() => [] as UnifiedSong[]),
-      ]);
-
-      results.push(...saavnResults, ...gaanaResults);
+      // Search Saavn
+      const saavnResults = await MultiSourceSearchService.searchSaavn(query).catch(() => [] as UnifiedSong[]);
+      results.push(...saavnResults);
     } catch (error) {
-      console.warn(`[RecoEngine] Search failed for "${query}":`, error);
+      if (__DEV__) console.warn(`[LuvsRecoEngine] Search failed for "${query}":`, error);
     }
 
     return results;
+  }
+
+  /**
+   * Strictly groups songs by artist and interleaves them.
+   * Prevents seeing same artist twice in a row.
+   */
+  private interleaveResults(songs: UnifiedSong[]): UnifiedSong[] {
+    const artistGroups: Record<string, UnifiedSong[]> = {};
+    const artistCount: Record<string, number> = {};
+    
+    songs.forEach(s => {
+      const a = (s.artist || 'Unknown').split(/[&,]/)[0].trim().toLowerCase();
+      if ((artistCount[a] || 0) >= 5) return; // Respect "each artist 5 songs" rule
+      
+      if (!artistGroups[a]) artistGroups[a] = [];
+      artistGroups[a].push(s);
+      artistCount[a] = (artistCount[a] || 0) + 1;
+    });
+
+    const interleaved: UnifiedSong[] = [];
+    const artists = Object.keys(artistGroups).sort(() => Math.random() - 0.5);
+    let hasMore = true;
+    let depth = 0;
+
+    while (hasMore) {
+      hasMore = false;
+      artists.forEach(a => {
+        if (artistGroups[a][depth]) {
+          interleaved.push(artistGroups[a][depth]);
+          hasMore = true;
+        }
+      });
+      depth++;
+    }
+    return interleaved;
   }
 
   /**
@@ -207,7 +240,7 @@ class ReelsRecommendationEngine {
     // 2. Fetch songs for EACH query
     // We run these in parallel for speed, effectively fetching 6 "mini-feeds"
     const resultsPromises = weightedQueries.map(async (item) => {
-        const rawSongs = await this.searchSaavnAndGaana(item.query, item.language);
+        const rawSongs = await this.searchSaavnOnly(item.query, item.language);
         const filtered = this.filterSongs(rawSongs);
         const deduped = this.deduplicate(filtered);
         
@@ -221,14 +254,13 @@ class ReelsRecommendationEngine {
     // 3. Flatten into one list
     itemsPerArtist.forEach(songs => mixtape.push(...songs));
 
-    console.log(`[RecoEngine] 💿 Mixtape Generated: ${mixtape.length} songs from ${weightedQueries.length} artists`);
+    if (__DEV__) console.log(`[LuvsRecoEngine] 💿 Mixtape Generated: ${mixtape.length} songs from ${weightedQueries.length} artists`);
 
-    // 4. SHUFFLE THE MIXTAPE (Crucial for the "randomize it" part)
-    // We don't want AAABBBCCC, we want ABCBAC...
-    const finalFeed = mixtape.sort(() => Math.random() - 0.5);
+    // 4. Interleave and Shuffle segments for maximum variety
+    const finalFeed = this.interleaveResults(mixtape);
 
     // Mark as seen
-    const prefsStore = useReelsPreferencesStore.getState();
+    const prefsStore = useLuvsPreferencesStore.getState();
     finalFeed.forEach(s => prefsStore.markSeen(s.id));
 
     return finalFeed;
@@ -243,12 +275,75 @@ class ReelsRecommendationEngine {
   }
 
   /**
+   * Identical to fetchPersonalizedFeed but named for compatibility
+   */
+  async refreshRecommendation(): Promise<UnifiedSong[]> {
+      const { setFeedSongs, setCurrentIndex } = (await import('../store/luvsFeedStore')).useLuvsFeedStore.getState();
+      setCurrentIndex(0);
+      const songs = await this.fetchPersonalizedFeed(30);
+      setFeedSongs(songs);
+      return songs;
+  }
+
+  /**
+   * Prefetch initial songs for instant playback
+   */
+  async prefetch() {
+      const { setFeedSongs, feedSongs } = (await import('../store/luvsFeedStore')).useLuvsFeedStore.getState();
+      if (feedSongs.length >= 5) return;
+      const songs = await this.fetchPersonalizedFeed(10);
+      setFeedSongs(songs);
+  }
+
+  /**
+   * discoverSimilar (Magic Button)
+   * Ported and hardened from old RecommendationService
+   */
+  async discoverSimilar(songId: string) {
+    const { feedSongs, setFeedSongs, currentIndex } = (await import('../store/luvsFeedStore')).useLuvsFeedStore.getState();
+    const { addMagicLike, getLanguageWeights } = (await import('../store/luvsPreferencesStore')).useLuvsPreferencesStore.getState();
+    const librarySongs = (await import('../store/songsStore')).useSongsStore.getState().songs;
+    const currentSong = feedSongs[currentIndex];
+
+    try {
+      addMagicLike(songId);
+      
+      let recs = await MultiSourceSearchService.getRecommendations(songId);
+      
+      if (currentSong && (recs.length < 5)) {
+        const langPref = getLanguageWeights().find(w => w.weight > 0)?.language || '';
+        const searchResults = await MultiSourceSearchService.searchSaavn(`${currentSong.artist} ${langPref} hits 2024`);
+        recs = [...recs, ...searchResults.slice(0, 10)];
+      }
+
+      const filtered = this.filterSongs(recs);
+      const existingKeys = new Set(feedSongs.map(s => `${s.title}|${s.artist}`.toLowerCase().replace(/\s+/g, '')));
+      const libraryKeys = new Set(librarySongs.map(s => `${s.title}|${s.artist}`.toLowerCase().replace(/\s+/g, '')));
+      
+      const finalRecs = filtered.filter(s => {
+        const key = `${s.title}|${s.artist}`.toLowerCase().replace(/\s+/g, '');
+        return !existingKeys.has(key) && !libraryKeys.has(key);
+      });
+
+      if (finalRecs.length === 0) return;
+
+      const toInject = finalRecs.slice(0, 8);
+      const newFeed = [...feedSongs];
+      newFeed.splice(currentIndex + 1, 0, ...toInject);
+      setFeedSongs(newFeed);
+      if (__DEV__) console.log(`[LuvsReco] 🪄 Injected ${toInject.length} similar songs.`);
+    } catch (error) {
+      if (__DEV__) console.error('[LuvsReco] Discover similar failed:', error);
+    }
+  }
+
+  /**
    * Filter and Enrich songs
    * 1. Swaps in LOCAL songs if they exist (Prioritize Offline)
    * 2. Filters out seen/skipped songs
    */
   private filterSongs(songs: UnifiedSong[]): UnifiedSong[] {
-    const prefsStore = useReelsPreferencesStore.getState();
+    const prefsStore = useLuvsPreferencesStore.getState();
     const songsStore = useSongsStore.getState();
 
     // Map for fast lookups: "title_artist" -> Local Song
@@ -275,7 +370,7 @@ class ReelsRecommendationEngine {
       const localMatch = localSongMap.get(key);
 
       if (localMatch) {
-          console.log(`[Reels] 🏠 Found local match for ${song.title}, swapping!`);
+          if (__DEV__) console.log(`[Luvs] 🏠 Found local match for ${song.title}, swapping!`);
           // Convert Local Song to UnifiedSong
           return {
               id: localMatch.id,
@@ -311,7 +406,7 @@ class ReelsRecommendationEngine {
       );
       
       if (isDevotional) {
-          console.log(`[Reels] 🕊️ Filtered devotional content: ${song.title}`);
+          if (__DEV__) console.log(`[Luvs] 🕊️ Filtered devotional content: ${song.title}`);
           return false;
       }
 
@@ -327,10 +422,37 @@ class ReelsRecommendationEngine {
       );
 
       if (isUnwanted) {
-          console.log(`[Reels] 🚫 Filtered unwanted edit: ${song.title}`);
+          if (__DEV__) console.log(`[Luvs] 🚫 Filtered unwanted edit: ${song.title}`);
           return false;
       }
 
+      // 5. Filter by Language Weight (Hyper-Strict Enforcement)
+      const languageWeights = prefsStore.getLanguageWeights();
+      // A set is restricted if any language has 0% weight
+      const isLanguageRestricted = languageWeights.some(w => w.weight === 0);
+      const songLang = (song.language || '').toLowerCase().trim();
+      
+      // If song has NO language property, and we have restrictions, we MUST be cautious.
+      if (!songLang) {
+          if (isLanguageRestricted) {
+              console.log(`[Luvs] 🚫 Filtered song with MISSING language (Restriction Active): ${song.title}`);
+              return false;
+          }
+          return true;
+      }
+
+      // Find the weight for this song's language
+      const langPref = languageWeights.find(w => w.language.toLowerCase() === songLang);
+      
+      // BLOCK if weight is explicitly 0 or language not found in a restricted set
+      if (isLanguageRestricted) {
+          if (!langPref || langPref.weight === 0) {
+              console.log(`[Luvs] 🌍 Filtered forbidden/unknown language (${song.language || 'none'}): ${song.title}`);
+              return false;
+          }
+      }
+
+      if (__DEV__) console.log(`[Luvs] ✅ PASSED Filter: ${song.title} (${song.language || 'no-lang'}) | Weight: ${langPref?.weight}%`);
       return true;
     });
   }
@@ -339,9 +461,16 @@ class ReelsRecommendationEngine {
    * Score songs by how well they match user preferences
    */
   private scoreAndRank(songs: UnifiedSong[]): UnifiedSong[] {
-    const prefsStore = useReelsPreferencesStore.getState();
+    const prefsStore = useLuvsPreferencesStore.getState();
     const topArtists = prefsStore.getTopArtistNames(10);
     const topArtistSet = new Set(topArtists.map(a => a.toLowerCase()));
+    const languageWeights = prefsStore.getLanguageWeights();
+
+    // Build language weight map for fast lookup
+    const langWeightMap = new Map<string, number>();
+    languageWeights.forEach(lw => {
+      if (lw.weight > 0) langWeightMap.set(lw.language.toLowerCase(), lw.weight);
+    });
 
     const scored = songs.map(song => {
       let score = 0;
@@ -350,6 +479,14 @@ class ReelsRecommendationEngine {
       // Artist match = BIG bonus
       if (artistLower && topArtistSet.has(artistLower)) {
         score += 50;
+      }
+
+      // Language match = bonus proportional to user's weight preference
+      if (song.language) {
+        const langWeight = langWeightMap.get(song.language.toLowerCase());
+        if (langWeight) {
+          score += (langWeight / 100) * 25; // Up to 25 pts for 100% weight
+        }
       }
 
       // Has cover art
@@ -383,4 +520,4 @@ class ReelsRecommendationEngine {
   }
 }
 
-export const reelsRecommendationEngine = new ReelsRecommendationEngine();
+export const luvsRecommendationEngine = new LuvsRecommendationEngine();

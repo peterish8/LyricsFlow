@@ -37,6 +37,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { Colors } from '../constants/colors';
 import { Song } from '../types/song';
@@ -61,6 +62,7 @@ type PlaylistDetailRouteProp = RouteProp<
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const AnimatedDraggableFlatList = Animated.createAnimatedComponent(DraggableFlatList) as unknown as typeof DraggableFlatList;
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as unknown as React.FC<any>;
 
 export const PlaylistDetailScreen: React.FC = () => {
   const route = useRoute<PlaylistDetailRouteProp>();
@@ -99,7 +101,7 @@ export const PlaylistDetailScreen: React.FC = () => {
   const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
 
   const handleAddToQueue = useCallback((song: Song) => {
-      const existing = scanQueue.find(j => j.songId === song.id);
+      const existing = scanQueue[song.id];
       
       // If result is plain, we allow "Upgrading" to synced
       const isPlainResult = existing?.status === 'completed' && existing?.resultType === 'plain';
@@ -481,9 +483,7 @@ export const PlaylistDetailScreen: React.FC = () => {
 
   // Passing props to memoized component
    const renderItem = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Song>) => {
-    const scanJob = scanQueue.find(j => j.songId === item.id);
-    const isScanning = scanJob?.status === 'scanning' || scanJob?.status === 'pending';
-    const isCompleted = scanJob?.status === 'completed';
+    // scanJob lookup removed - PlaylistItem handles it internally
 
     return (
       <PlaylistItem
@@ -496,13 +496,14 @@ export const PlaylistDetailScreen: React.FC = () => {
         isEditMode={isEditMode}
         onPress={handleSongPress}
         onMagicPress={handleAddToQueue}
-        isScanning={isScanning}
-        isCompleted={isCompleted}
+
+        // isScanning/isCompleted removed
         onDelete={handleDeleteSong}
         displayIndex={getIndex ? getIndex() : 0}
       />
     );
-  }, [currentSongId, isPlaying, isEditMode, handleSongPress, handleDeleteSong, scanQueue, handleAddToQueue]);
+
+  }, [currentSongId, isPlaying, isEditMode, handleSongPress, handleDeleteSong, handleAddToQueue]);
 
   // Animated Styles
   const headerStyle = useAnimatedStyle(() => {
@@ -545,101 +546,8 @@ export const PlaylistDetailScreen: React.FC = () => {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      {/* Dynamic Background: Blurred Cover Art (Matches Dynamic Island) */}
-      <Animated.View 
-        style={[StyleSheet.absoluteFill, animatedGradientStyle, { backgroundColor: '#000', height: 500 }]}
-        pointerEvents="none" 
-      >
-         {/* 1. The Blurred Image */}
-         {headerImageUri && (
-             <Image 
-                source={{ uri: headerImageUri }}
-                style={[StyleSheet.absoluteFill, { opacity: 0.6 }]}
-                blurRadius={90}
-                resizeMode="cover"
-             />
-         )}
-         
-         {/* 2. Fade to Black Overlay */}
-         <LinearGradient
-            colors={['transparent', '#000'] as const}
-            style={StyleSheet.absoluteFill}
-            locations={[0.2, 1]} 
-         />
-      </Animated.View>
-
-      {/* Sticky Header (Absolute) */}
-      <Animated.View style={[styles.stickyHeader, { height: 50 + insets.top, paddingTop: insets.top }, headerStyle]}>
-          {!isSearchActive && (
-              <Pressable style={styles.iconButton} onPress={() => navigation.goBack()}>
-                <Ionicons name="chevron-back" size={28} color="#fff" />
-              </Pressable>
-          )}
-          
-          {/* Animated Header Title (Fades in when scrolled) */}
-          {!isSearchActive && (
-              <Animated.Text style={[styles.stickyHeaderTitle, headerTitleStyle]} numberOfLines={2}>
-                  {playlistName}
-              </Animated.Text>
-          )}
-          
-          <View style={{flex: 1}} />
-
-          {/* Animated Search Bar */}
-          {isSearchActive ? (
-              <Animated.View style={[styles.searchPill, { flex: 1, marginRight: 8 }]}>
-                  <Ionicons name="search" size={20} color="#666" style={{marginLeft: 12}} />
-                  <TextInput
-                        style={styles.searchInput}
-                        placeholder="Find in playlist"
-                        placeholderTextColor="#666"
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        autoFocus
-                  />
-                  <Pressable onPress={() => { setIsSearchActive(false); setSearchQuery(''); }} style={{padding: 8}}>
-                      <Ionicons name="close-circle" size={20} color="#666" />
-                  </Pressable>
-              </Animated.View>
-          ) : (
-             <Pressable 
-                style={[styles.iconButton, { marginRight: 8 }]} 
-                onPress={() => setIsSearchActive(true)}
-             >
-                <Ionicons name="search" size={24} color="#fff" />
-             </Pressable>
-          )}
-          
-          {/* Quick Add Button */}
-           <Pressable 
-              style={[styles.iconButton, { marginRight: 8 }]} 
-              onPress={() => (navigation as any).navigate('AddToPlaylist', { playlistId })}
-           >
-              <Ionicons name="add" size={28} color="#fff" />
-           </Pressable>
-
-          <Pressable 
-             style={[styles.iconButton, isEditMode && styles.activeButton]} 
-             onPress={() => setIsEditMode(!isEditMode)}
-          >
-            <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-          </Pressable>
-      </Animated.View>
-
-      {/* Main List */}
-      <AnimatedDraggableFlatList
-        ref={flatListRef}
-        data={filteredSongs}
-        onDragEnd={handleDragEnd}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        onScroll={scrollHandler}
-        scrollEventThrottle={1} // Use 1 for maximum update frequency
-        contentContainerStyle={{ paddingBottom: 150, paddingTop: 50 + insets.top }} 
-        ListHeaderComponent={
-             <View style={styles.listHeader}>
+  const renderHeader = () => (
+          <View style={styles.listHeader}>
              {/* Dynamic Cover Art - NO ICON OVERLAY */}
              {activeIsPlaying ? (
                  <CoverFlow 
@@ -789,8 +697,124 @@ export const PlaylistDetailScreen: React.FC = () => {
                  </View>
              )}
           </View>
-        }
+  );
+
+  return (
+    <View style={styles.container}>
+      {/* Dynamic Background: Blurred Cover Art (Matches Dynamic Island) */}
+      <Animated.View 
+        style={[StyleSheet.absoluteFill, animatedGradientStyle, { backgroundColor: '#000', height: 500 }]}
+        pointerEvents="none" 
+      >
+         {/* 1. The Blurred Image */}
+         {headerImageUri && (
+             <Image 
+                source={{ uri: headerImageUri }}
+                style={[StyleSheet.absoluteFill, { opacity: 0.6 }]}
+                blurRadius={90}
+                resizeMode="cover"
+             />
+         )}
+         
+         {/* 2. Fade to Black Overlay */}
+         <LinearGradient
+            colors={['transparent', '#000'] as const}
+            style={StyleSheet.absoluteFill}
+            locations={[0.2, 1]} 
+         />
+      </Animated.View>
+
+      {/* Sticky Header (Absolute) */}
+      <Animated.View style={[styles.stickyHeader, { height: 50 + insets.top, paddingTop: insets.top }, headerStyle]}>
+          {!isSearchActive && (
+              <Pressable 
+                  style={styles.iconButton} 
+                  onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('BottomTabs' as never)}
+              >
+                <Ionicons name="chevron-back" size={28} color="#fff" />
+              </Pressable>
+          )}
+          
+          {/* Animated Header Title (Fades in when scrolled) */}
+          {!isSearchActive && (
+              <Animated.Text style={[styles.stickyHeaderTitle, headerTitleStyle]} numberOfLines={2}>
+                  {playlistName}
+              </Animated.Text>
+          )}
+          
+          <View style={{flex: 1}} />
+
+          {/* Animated Search Bar */}
+          {isSearchActive ? (
+              <Animated.View style={[styles.searchPill, { flex: 1, marginRight: 8 }]}>
+                  <Ionicons name="search" size={20} color="#666" style={{marginLeft: 12}} />
+                  <TextInput
+                        style={styles.searchInput}
+                        placeholder="Find in playlist"
+                        placeholderTextColor="#666"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        autoFocus
+                  />
+                  <Pressable onPress={() => { setIsSearchActive(false); setSearchQuery(''); }} style={{padding: 8}}>
+                      <Ionicons name="close-circle" size={20} color="#666" />
+                  </Pressable>
+              </Animated.View>
+          ) : (
+             <Pressable 
+                style={[styles.iconButton, { marginRight: 8 }]} 
+                onPress={() => setIsSearchActive(true)}
+             >
+                <Ionicons name="search" size={24} color="#fff" />
+             </Pressable>
+          )}
+          
+          {/* Quick Add Button */}
+           <Pressable 
+              style={[styles.iconButton, { marginRight: 8 }]} 
+              onPress={() => (navigation as any).navigate('AddToPlaylist', { playlistId })}
+           >
+              <Ionicons name="add" size={28} color="#fff" />
+           </Pressable>
+
+          <Pressable 
+             style={[styles.iconButton, isEditMode && styles.activeButton]} 
+             onPress={() => setIsEditMode(!isEditMode)}
+          >
+            <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+          </Pressable>
+      </Animated.View>
+
+      {/* Main List */}
+      {!isEditMode ? (
+        <AnimatedFlashList
+            ref={flatListRef}
+            data={filteredSongs}
+            estimatedItemSize={76} // Exact height of PlaylistItem
+            activationDistance={20}
+            containerStyle={{ flex: 1 }}
+            itemContainerStyle={{ height: 76 }} // Enforce height on container
+            keyExtractor={(item: { id: any; }) => item.id}
+            renderItem={({ item, index }: { item: Song, index: number }) => renderItem({ item, getIndex: () => index, drag: undefined, isActive: false } as any)}
+            onScroll={scrollHandler}
+            scrollEventThrottle={1}
+            contentContainerStyle={{ paddingBottom: 150, paddingTop: 50 + insets.top, paddingHorizontal: 16 }}
+            ListHeaderComponent={renderHeader()}
+        />
+      ) : (
+      <AnimatedDraggableFlatList
+        ref={flatListRef}
+        data={filteredSongs}
+        onDragEnd={handleDragEnd}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        onScroll={scrollHandler}
+        scrollEventThrottle={1} // Use 1 for maximum update frequency
+        contentContainerStyle={{ paddingBottom: 150, paddingTop: 50 + insets.top, paddingHorizontal: 16 }} 
+        ListHeaderComponent={renderHeader()}
       />
+      )}
+
       
       {isEditMode && (
           <BlurView intensity={20} tint="dark" style={[styles.editModeToast, { top: 60 + insets.top }]}>
@@ -1068,7 +1092,7 @@ const styles = StyleSheet.create({
   },
   scrubberContainer: {
       width: '100%',
-      paddingHorizontal: 40,
+      paddingHorizontal: 16,
       marginBottom: 20,
   },
   timerRow: {

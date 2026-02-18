@@ -11,6 +11,7 @@ import { Song } from '../types/song';
 import { StagingSong } from '../hooks/useSongStaging';
 import { lyricaService } from '../services/LyricaService';
 import { useSongsStore } from '../store/songsStore';
+import { useSettingsStore } from '../store/settingsStore';
 
 class DownloadManager {
     private activeDownloads: Map<string, FileSystem.DownloadResumable> = new Map();
@@ -20,9 +21,9 @@ class DownloadManager {
         if (download) {
             try {
                 await download.pauseAsync();
-                console.log(`[DownloadManager] Paused: ${id}`);
+                if (__DEV__) console.log(`[DownloadManager] Paused: ${id}`);
             } catch (e) {
-                console.error(`[DownloadManager] Pause failed: ${id}`, e);
+                if (__DEV__) console.error(`[DownloadManager] Pause failed: ${id}`, e);
             }
         }
     }
@@ -32,9 +33,9 @@ class DownloadManager {
         if (download) {
             try {
                 await download.resumeAsync();
-                console.log(`[DownloadManager] Resumed: ${id}`);
+                if (__DEV__) console.log(`[DownloadManager] Resumed: ${id}`);
             } catch (e) {
-                console.error(`[DownloadManager] Resume failed: ${id}`, e);
+                if (__DEV__) console.error(`[DownloadManager] Resume failed: ${id}`, e);
             }
         }
     }
@@ -75,7 +76,7 @@ class DownloadManager {
             const format = staging.selectedQuality.format || 'mp3';
             const audioFile = `${songDir}audio.${format}`;
             
-            console.log(`[DownloadManager] Downloading Audio: ${downloadUrl.substring(0, 80)}...`);
+            if (__DEV__) console.log(`[DownloadManager] Downloading Audio: ${downloadUrl.substring(0, 80)}...`);
 
             const audioDownload = FileSystem.createDownloadResumable(
                 downloadUrl,
@@ -116,7 +117,46 @@ class DownloadManager {
                 await FileSystem.writeAsStringAsync(lyricsFile, staging.selectedLyrics);
             }
 
-            // 5. Atomic Store Update
+            // 5. SAF Export (if configured)
+            // If the user has selected a download directory, we copy the audio there
+            // and point the database to THAT persistent URI.
+            let finalAudioUri = audioFile;
+            
+            try {
+                const settings = useSettingsStore.getState();
+                const safDir = settings.downloadDirectoryUri;
+
+                if (safDir) {
+                    await updateProgress(0.96); // 97% - Exporting
+                    if (__DEV__) console.log('[DownloadManager] SAF configured, exporting to:', safDir);
+                    
+                    const mimeType = format === 'm4a' ? 'audio/mp4' : 'audio/mpeg';
+                    const friendlyName = `${staging.artist} - ${staging.title}`;
+                    
+                    // 1. Create file 
+                    const safUri = await FileSystem.StorageAccessFramework.createFileAsync(safDir, friendlyName, mimeType);
+                    
+                    // 2. Copy content (Read/Write as Base64)
+                    // Note: copyAsync support for SAF is flaky, using explicit read/write
+                    const fileContent = await FileSystem.readAsStringAsync(audioFile, { encoding: FileSystem.EncodingType.Base64 });
+                    await FileSystem.writeAsStringAsync(safUri, fileContent, { encoding: FileSystem.EncodingType.Base64 });
+                    
+                    finalAudioUri = safUri;
+                    if (__DEV__) console.log(`[DownloadManager] SAF export success. URI: ${safUri.substring(0, 80)}...`);
+                    
+                    // Optional: Delete internal file to save space? 
+                    // No, let's keep it as cache/backup or delete it?
+                    // If we delete it, and SAF URI fails to play, we are out of luck.
+                    // But duplicates waste space. safely delete internal if successful.
+                    // await FileSystem.deleteAsync(audioFile); 
+                    // (Commented out for safety for now)
+                }
+            } catch (e) {
+                if (__DEV__) console.warn('[DownloadManager] SAF Export Failed (using internal storage):', e);
+                // Fallback to internal storage (audioFile)
+            }
+
+            // 6. Atomic Store Update
             // Construct the final Song object
             const newSong: Song = {
                 id: staging.id,
@@ -125,7 +165,7 @@ class DownloadManager {
                 album: staging.album, 
                 duration: staging.duration,
                 coverImageUri: coverLocalUri,
-                audioUri: audioFile,
+                audioUri: finalAudioUri,
                 playCount: 0,
                 dateCreated: new Date().toISOString(),
                 dateModified: new Date().toISOString(),

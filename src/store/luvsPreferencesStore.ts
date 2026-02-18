@@ -1,5 +1,5 @@
 /**
- * Reels Preferences Store
+ * Luvs Preferences Store
  * Tracks user behavior: likes, skips, watch time, genre/artist preferences
  * Persisted to AsyncStorage for cross-session learning
  */
@@ -7,11 +7,11 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const PREFS_KEY = '@reels_preferences';
+const PREFS_KEY = '@reels_preferences'; // Keep for data
 const MAX_HISTORY = 100;
 const MAX_SEEN = 200;
 
-export interface ReelInteraction {
+export interface LuvInteraction {
   songId: string;
   title: string;
   artist: string;
@@ -28,33 +28,37 @@ interface ArtistScore {
   interactions: number;
 }
 
-export type ReelsLanguage = 'English' | 'Hindi' | 'Tamil' | 'Telugu' | 'Punjabi' | 'Korean' | 'Kannada' | 'Malayalam' | 'Bengali' | 'Marathi';
+export type LuvLanguage = 'English' | 'Hindi' | 'Tamil' | 'Telugu' | 'Punjabi' | 'Korean' | 'Kannada' | 'Malayalam' | 'Bengali' | 'Marathi';
 
 export interface LanguagePreference {
-    language: ReelsLanguage;
+    language: LuvLanguage;
     weight: number; // 0-100 percentage
 }
 
-interface ReelsPreferencesState {
+interface LuvsPreferencesState {
   // Tracking data
-  interactions: ReelInteraction[];
+  interactions: LuvInteraction[];
   seenSongIds: string[];      // Songs already shown in feed
   skippedArtists: string[];   // Artists user skips often
   preferredLanguages: LanguagePreference[]; // User's preferred music languages with weights
+  explicitLikes: string[];    // IDs of songs where user clicked "Magic"
+  luvsLanguages: string[];   // Active languages (weight > 0)
   
   // Derived preferences
   topArtists: ArtistScore[];
   
   // Actions
-  recordInteraction: (interaction: ReelInteraction) => void;
+  recordInteraction: (interaction: LuvInteraction) => void;
   markSeen: (songId: string) => void;
   isSeen: (songId: string) => boolean;
+  addMagicLike: (songId: string) => void;
   analyzePreferences: () => void;
   getTopArtistNames: (limit?: number) => string[];
   getSkippedArtistNames: () => string[];
   
   // Language Actions
-  updateLanguageWeight: (language: ReelsLanguage, weight: number) => void;
+  updateLanguageWeight: (language: LuvLanguage, weight: number) => void;
+  setPreferredLanguages: (languages: LuvLanguage[]) => void;
   getLanguageWeights: () => LanguagePreference[];
   
   clearPreferences: () => void;
@@ -62,11 +66,13 @@ interface ReelsPreferencesState {
   saveToStorage: () => Promise<void>;
 }
 
-export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get) => ({
+export const useLuvsPreferencesStore = create<LuvsPreferencesState>((set, get) => ({
   interactions: [],
   seenSongIds: [],
   skippedArtists: [],
   topArtists: [],
+  explicitLikes: [],
+  luvsLanguages: ['English', 'Hindi'],
   // Default: mix of English and Hindi
   preferredLanguages: [
       { language: 'English', weight: 50 },
@@ -81,7 +87,7 @@ export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get)
       { language: 'Marathi', weight: 0 }
   ],
 
-  recordInteraction: (interaction: ReelInteraction) => {
+  recordInteraction: (interaction: LuvInteraction) => {
     set((state) => {
       // Add to history, cap at MAX_HISTORY
       const newInteractions = [...state.interactions, interaction].slice(-MAX_HISTORY);
@@ -108,6 +114,15 @@ export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get)
     return get().seenSongIds.includes(songId);
   },
 
+  addMagicLike: (songId: string) => {
+    set(state => {
+      if (state.explicitLikes.includes(songId)) return state;
+      const newMagic = [...state.explicitLikes, songId].slice(-30);
+      return { explicitLikes: newMagic };
+    });
+    get().saveToStorage();
+  },
+  
   analyzePreferences: () => {
     const { interactions } = get();
     if (interactions.length === 0) return;
@@ -179,17 +194,32 @@ export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get)
     return get().skippedArtists;
   },
 
-  updateLanguageWeight: (language: ReelsLanguage, weight: number) => {
-      set(state => ({
-          preferredLanguages: state.preferredLanguages.map(l => 
+  updateLanguageWeight: (language: LuvLanguage, weight: number) => {
+      set(state => {
+          const newPrefs = state.preferredLanguages.map(l => 
               l.language === language ? { ...l, weight } : l
-          )
-      }));
+          );
+          const newActive = newPrefs.filter(l => l.weight > 0).map(l => l.language.toLowerCase());
+          if (__DEV__) console.log(`[LuvsPrefs] 🔄 Weight Update: ${language} -> ${weight}% | Active:`, newActive);
+          return { preferredLanguages: newPrefs, luvsLanguages: newActive };
+      });
       get().saveToStorage();
   },
 
   getLanguageWeights: () => {
     return get().preferredLanguages;
+  },
+
+  setPreferredLanguages: (languages: LuvLanguage[]) => {
+      set(state => {
+          const newPrefs = state.preferredLanguages.map(l => ({
+              ...l,
+              weight: languages.includes(l.language) ? 50 : 0
+          }));
+          const newActive = languages.map(l => l.toLowerCase());
+          return { preferredLanguages: newPrefs, luvsLanguages: newActive };
+      });
+      get().saveToStorage();
   },
 
   clearPreferences: () => {
@@ -210,6 +240,7 @@ export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get)
           { language: 'Bengali', weight: 0 },
           { language: 'Marathi', weight: 0 }
       ],
+      explicitLikes: [],
     });
     AsyncStorage.removeItem(PREFS_KEY).catch(console.error);
   },
@@ -258,26 +289,29 @@ export const useReelsPreferencesStore = create<ReelsPreferencesState>((set, get)
           skippedArtists: parsed.skippedArtists || [],
           topArtists: parsed.topArtists || [],
           preferredLanguages: loadedLangs,
+          luvsLanguages: loadedLangs.filter((l: any) => l.weight > 0).map((l: any) => l.language.toLowerCase()),
+          explicitLikes: parsed.explicitLikes || [],
         });
-        console.log('[ReelsPrefs] Loaded preferences from storage');
+        if (__DEV__) console.log('[LuvsPrefs] Loaded preferences from storage');
       }
     } catch (error) {
-      console.error('[ReelsPrefs] Failed to load preferences:', error);
+      if (__DEV__) console.error('[ReelsPrefs] Failed to load preferences:', error);
     }
   },
 
   saveToStorage: async () => {
     try {
-      const { interactions, seenSongIds, skippedArtists, topArtists, preferredLanguages } = get();
+      const { interactions, seenSongIds, skippedArtists, topArtists, preferredLanguages, explicitLikes } = get();
       await AsyncStorage.setItem(PREFS_KEY, JSON.stringify({
         interactions,
         seenSongIds,
         skippedArtists,
         topArtists,
         preferredLanguages,
+        explicitLikes,
       }));
     } catch (error) {
-      console.error('[ReelsPrefs] Failed to save preferences:', error);
+      if (__DEV__) console.error('[ReelsPrefs] Failed to save preferences:', error);
     }
   },
 }));

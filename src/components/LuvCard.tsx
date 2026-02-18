@@ -1,10 +1,10 @@
 /**
- * Reel Card Component
+ * Luv Card Component
  * Instagram Reels-inspired layout with right-side buttons and bottom song info
  * Dynamic blurred background from cover art
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Image,
   Pressable,
   Dimensions,
+  ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,27 +21,25 @@ import Animated, {
   useAnimatedStyle, 
   interpolate, 
   Extrapolation,
-  withSpring,
-  withTiming,
-  runOnJS,
   SharedValue
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UnifiedSong } from '../types/song';
 import { analyzeImageBrightness } from '../utils/imageAnalyzer';
 
-import { reelsBufferManager } from '../services/ReelsBufferManager';
+import { luvsBufferManager } from '../services/LuvsBufferManager';
 import TimelineScrubber from './TimelineScrubber';
+import { luvsRecommendationEngine } from '../services/LuvsRecommendationEngine';
 
-// Local component to handle progress updates without re-rendering the heavy ReelCard
-const ReelsProgressController = ({ isActive }: { isActive: boolean }) => {
+// Local component to handle progress updates without re-rendering the heavy LuvCard
+const LuvsProgressController = ({ isActive }: { isActive: boolean }) => {
   const position = useSharedValue(0);
   const duration = useSharedValue(0);
 
   useEffect(() => {
     if (isActive) {
       // Subscribe to updates
-      reelsBufferManager.setStatusUpdateCallback((status) => {
+      luvsBufferManager.setStatusUpdateCallback((status) => {
         if (status.isLoaded) {
           position.value = status.positionMillis;
           duration.value = status.durationMillis || 0;
@@ -56,9 +55,9 @@ const ReelsProgressController = ({ isActive }: { isActive: boolean }) => {
         <TimelineScrubber 
             currentTime={position}
             duration={duration}
-            onSeek={(time) => reelsBufferManager.seekTo(time)}
-            onScrubStart={() => reelsBufferManager.pause()}
-            onScrubEnd={() => reelsBufferManager.resume()}
+            onSeek={(time) => luvsBufferManager.seekTo(time)}
+            onScrubStart={() => luvsBufferManager.pause()}
+            onScrubEnd={() => luvsBufferManager.resume()}
             variant="island"
         />
     </View>
@@ -67,7 +66,7 @@ const ReelsProgressController = ({ isActive }: { isActive: boolean }) => {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface ReelCardProps {
+interface LuvCardProps {
   song: UnifiedSong;
   isActive: boolean;
   isLiked: boolean;
@@ -76,13 +75,13 @@ interface ReelCardProps {
   onShare: () => void;
   onDownload: () => void;
   onPlayPause: () => void;
-  reelHeight: number;
+  luvHeight: number;
   index: number;
   currentIndex: SharedValue<number>;
+  isNearActive: boolean;
 }
 
-export const ReelCard: React.FC<ReelCardProps> = React.memo(
-  ({ 
+export const LuvCard = React.memo<LuvCardProps>(({ 
     song, 
     isActive, 
     isLiked, 
@@ -91,23 +90,24 @@ export const ReelCard: React.FC<ReelCardProps> = React.memo(
     onShare, 
     onDownload, 
     onPlayPause, 
-    reelHeight,
+    luvHeight,
     index,
-    currentIndex 
+    currentIndex,
+    isNearActive
   }) => {
     const [showPlayPause, setShowPlayPause] = useState(false);
     const [gradientOpacity, setGradientOpacity] = useState(0.85);
     const insets = useSafeAreaInsets();
-    const likeScale = useSharedValue(1);
+    const [isMagicActive, setIsMagicActive] = useState(false);
 
     useEffect(() => {
-      if (song.highResArt) {
+      if (isActive && song.highResArt) {
         analyzeImageBrightness(song.highResArt).then(result => {
            // If light, more opacity for legibility
            setGradientOpacity(result.brightness > 160 ? 0.95 : 0.85);
         });
       }
-    }, [song.highResArt]);
+    }, [song.highResArt, isActive]);
 
     const handleTap = () => {
       onPlayPause();
@@ -115,55 +115,83 @@ export const ReelCard: React.FC<ReelCardProps> = React.memo(
       setTimeout(() => setShowPlayPause(false), 800);
     };
 
-    const handleLikePress = () => {
-      'worklet';
-      likeScale.value = withSpring(1.5, { damping: 10, stiffness: 100 }, () => {
-        likeScale.value = withSpring(1);
-      });
-      runOnJS(onLike)();
-    };
+    const handleLikePress = useCallback(() => {
+      onLike();
+    }, [onLike]);
+
+    const handleMagicPress = useCallback(() => {
+      setIsMagicActive(true);
+      luvsRecommendationEngine.discoverSimilar(song.id);
+      
+      // Reset after a while
+      magicTimeoutRef.current = setTimeout(() => {
+        setIsMagicActive(false);
+      }, 3000);
+    }, [song.id]);
+
+    // Cleanup magic timeout on unmount
+    const magicTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+      return () => {
+        if (magicTimeoutRef.current) clearTimeout(magicTimeoutRef.current);
+      };
+    }, []);
 
     // Card visibility and entry/exit transformation
     const cardAnimatedStyle = useAnimatedStyle(() => {
       'worklet';
       const distance = Math.abs(currentIndex.value - index);
       
-      const opacity = interpolate(
-        distance,
-        [0, 1],
-        [1, 0.3],
-        Extrapolation.CLAMP
-      );
-      
+      // Early exit for far-away cards
+      if (distance > 1.1) {
+        return { opacity: 0, transform: [{ scale: 0.9 }, { translateY: 0 }] } as ViewStyle;
+      }
+
       const scale = interpolate(
         distance,
         [0, 1],
-        [1, 0.95],
+        [1, 0.9],
+        Extrapolation.CLAMP
+      );
+
+      const translateY = interpolate(
+        currentIndex.value - index,
+        [-1, 0, 1],
+        [40, 0, -40],
+        Extrapolation.CLAMP
+      );
+
+      const opacity = interpolate(
+        distance,
+        [0, 0.5, 1],
+        [1, 0.9, 0],
         Extrapolation.CLAMP
       );
 
       return {
         opacity,
-        transform: [{ scale }]
-      };
-    });
-
-    const likeButtonStyle = useAnimatedStyle(() => {
-      'worklet';
-      return {
-        transform: [{ scale: likeScale.value }]
-      };
+        transform: [
+          { scale },
+          { translateY }
+        ]
+      } as ViewStyle;
     });
 
     return (
-      <Animated.View style={[styles.container, { height: reelHeight }, cardAnimatedStyle]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleTap}>
-          {/* Blurred Background - Full Screen Dynamic Colors */}
+      <Animated.View 
+        style={[styles.container, { height: luvHeight }, cardAnimatedStyle]}
+        renderToHardwareTextureAndroid={true}
+      >
+        <Pressable style={[StyleSheet.absoluteFill, styles.centeredContent]} onPress={handleTap}>
+          {/* Blurred Background - Only show blur if near active */}
           {song.highResArt && (
             <Image
               source={{ uri: song.highResArt }}
-              style={[StyleSheet.absoluteFillObject, { width: SCREEN_WIDTH, height: reelHeight }]}
-              blurRadius={60}
+              style={[
+                StyleSheet.absoluteFillObject, 
+                { width: SCREEN_WIDTH, height: luvHeight, opacity: isActive ? 1 : 0.6 }
+              ]}
+              blurRadius={isActive ? 40 : 0}
               resizeMode="cover"
             />
           )}
@@ -193,66 +221,90 @@ export const ReelCard: React.FC<ReelCardProps> = React.memo(
             </View>
           )}
 
-          {/* PROGRESS SCRUBBER (Replaces Waveform) */}
-          <View style={styles.progressWrapper}>
-              <ReelsProgressController isActive={isActive} />
-          </View>
-
-          {/* Right Side Action Buttons */}
-          <View style={[styles.actionsContainer, { bottom: insets.bottom + 120 }]}>
-            {/* Like Button */}
-            <Animated.View style={likeButtonStyle}>
-              <Pressable style={styles.actionButton} onPress={handleLikePress}>
-                <Ionicons
-                  name={isLiked ? 'heart' : 'heart-outline'}
-                  size={32}
-                  color={isLiked ? '#FF2D55' : '#fff'}
-                />
-                <Text style={[styles.actionLabel, isLiked && styles.likedLabel]}>
-                  {isLiked ? 'Liked' : 'Like'}
-                </Text>
-              </Pressable>
-            </Animated.View>
-
-            {/* Share Button */}
-            <Pressable style={styles.actionButton} onPress={onShare}>
-              <Ionicons name="share-outline" size={30} color="#fff" />
-              <Text style={styles.actionLabel}>Share</Text>
-            </Pressable>
-
-            {/* Download Button */}
-            <Pressable style={styles.actionButton} onPress={onDownload}>
-              <Ionicons name="download-outline" size={30} color="#fff" />
-              <Text style={styles.actionLabel}>Save</Text>
-            </Pressable>
-          </View>
-
-          {/* Bottom Song Info Bar - Instagram-style with Gradient Blend */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0)', `rgba(0,0,0,${gradientOpacity})`]}
-            style={[styles.bottomGradient, { paddingBottom: insets.bottom + 16 }]}
+          {/* UI overlay: always mounted, visibility driven by opacity for smooth transitions */}
+          <Animated.View 
+            style={[StyleSheet.absoluteFill, isNearActive ? styles.uiVisible : styles.uiHidden]}
+            pointerEvents={isNearActive ? 'auto' : 'none'}
           >
-            <View style={styles.songInfoRow}>
-              {/* Mini Album Art */}
-              {song.highResArt ? (
-                <Image source={{ uri: song.highResArt }} style={styles.miniArt} />
-              ) : (
-                <View style={styles.placeholderArt}>
-                  <Ionicons name="musical-note" size={18} color="#fff" />
-                </View>
-              )}
-
-              {/* Song Details */}
-              <View style={styles.songDetails}>
-                <Text style={styles.songTitle} numberOfLines={1}>
-                  {song.title}
-                </Text>
-                <Text style={styles.songArtist} numberOfLines={1}>
-                  {song.artist || 'Unknown Artist'}
-                </Text>
+              {/* PROGRESS SCRUBBER */}
+              <View style={styles.progressWrapper}>
+                  <LuvsProgressController isActive={isActive} />
               </View>
-            </View>
-          </LinearGradient>
+
+              {/* Right Side Action Buttons */}
+              <View style={[styles.actionsContainer, { bottom: insets.bottom + 120 }]}>
+                {/* Luv Button */}
+                <View>
+                  <Pressable style={styles.actionButton} onPress={handleLikePress}>
+                    <Ionicons
+                      name={isLiked ? 'heart' : 'heart-outline'}
+                      size={32}
+                      color={isLiked ? '#FF2D55' : '#fff'}
+                    />
+                    <Text style={[styles.actionLabel, isLiked && styles.likedLabel]}>
+                      {isLiked ? "Luv'd" : 'Luv'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {/* Magic Button (Discover More) */}
+                <View>
+                  <Pressable 
+                    style={styles.actionButton} 
+                    onPress={handleMagicPress}
+                    disabled={isMagicActive}
+                  >
+                    <Ionicons
+                      name="sparkles"
+                      size={30}
+                      color={isMagicActive ? '#4CD964' : '#fff'}
+                    />
+                    <Text style={[styles.actionLabel, isMagicActive && styles.magicLabel]}>
+                      {isMagicActive ? 'Learning...' : 'Magic'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {/* Share Button */}
+                <Pressable style={styles.actionButton} onPress={onShare}>
+                  <Ionicons name="share-outline" size={30} color="#fff" />
+                  <Text style={styles.actionLabel}>Share</Text>
+                </Pressable>
+
+                {/* Download Button */}
+                <Pressable style={styles.actionButton} onPress={onDownload}>
+                  <Ionicons name="download-outline" size={30} color="#fff" />
+                  <Text style={styles.actionLabel}>Save</Text>
+                </Pressable>
+              </View>
+
+              {/* Bottom Song Info Bar */}
+              <LinearGradient
+                colors={['rgba(0,0,0,0)', `rgba(0,0,0,${gradientOpacity})`]}
+                style={[styles.bottomGradient, { paddingBottom: insets.bottom + 16 }]}
+              >
+                <View style={styles.songInfoRow}>
+                  {/* Mini Album Art */}
+                  {song.highResArt ? (
+                    <Image source={{ uri: song.highResArt }} style={styles.miniArt} />
+                  ) : (
+                    <View style={styles.placeholderArt}>
+                      <Ionicons name="musical-note" size={18} color="#fff" />
+                    </View>
+                  )}
+
+                  {/* Song Details */}
+                  <View style={styles.songDetails}>
+                    <Text style={styles.songTitle} numberOfLines={1}>
+                      {song.title}
+                    </Text>
+                    <Text style={styles.songArtist} numberOfLines={1}>
+                      {song.artist || 'Unknown Artist'}
+                    </Text>
+                  </View>
+                </View>
+              </LinearGradient>
+          </Animated.View>
         </Pressable>
       </Animated.View>
     );
@@ -260,6 +312,7 @@ export const ReelCard: React.FC<ReelCardProps> = React.memo(
   (prevProps, nextProps) => {
     return (
       prevProps.isActive === nextProps.isActive &&
+      prevProps.isNearActive === nextProps.isNearActive &&
       prevProps.isLiked === nextProps.isLiked &&
       prevProps.isPlaying === nextProps.isPlaying &&
       prevProps.song.id === nextProps.song.id
@@ -274,14 +327,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#000',
   },
+  uiVisible: {
+    opacity: 1,
+  },
+  uiHidden: {
+    opacity: 0,
+  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  centeredContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   coverArt: {
     width: SCREEN_WIDTH * 0.7,
     height: SCREEN_WIDTH * 0.7,
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    marginTop: -80, // Moved it "lil top"
+    marginLeft: -30, // "slightly left side"
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.6,
@@ -338,6 +405,9 @@ const styles = StyleSheet.create({
   },
   likedLabel: {
     color: '#FF2D55',
+  },
+  magicLabel: {
+    color: '#4CD964',
   },
   bottomGradient: {
     position: 'absolute',

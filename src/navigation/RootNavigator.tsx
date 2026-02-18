@@ -18,7 +18,7 @@ import SearchScreen from '../screens/SearchScreen';
 import PlaylistDetailScreen from '../screens/PlaylistDetailScreen';
 import { AudioDownloaderScreen } from '../screens/AudioDownloaderScreen';
 import { YoutubeBrowserScreen } from '../screens/YoutubeBrowserScreen';
-import { MiniPlayer } from '../components';
+import { MiniPlayer } from '../components/MiniPlayer';
 import { BackgroundDownloader } from '../components/BackgroundDownloader';
 import { CreatePlaylistModal } from '../components/CreatePlaylistModal';
 import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
@@ -95,8 +95,8 @@ export const RootNavigator: React.FC = () => {
           />
         </Stack.Navigator>
         
-        {/* Hide MiniPlayer on Reels tab */}
-        {currentRoute !== 'Reels' && <MiniPlayer />}
+        {/* Hide MiniPlayer on Luvs tab */}
+        {currentRoute !== 'Luvs' && <MiniPlayer />}
         <BackgroundDownloader />
       </View>
     </NavigationContainer>

@@ -40,8 +40,12 @@ export const AddToPlaylistModal = () => {
   const targetSongId = params.songId;
 
   // Stores
-  const { playlists, fetchPlaylists, addSongToPlaylist, addSongsToPlaylist } = usePlaylistStore();
-  const { songs, fetchSongs } = useSongsStore();
+  const playlists = usePlaylistStore(state => state.playlists);
+  const fetchPlaylists = usePlaylistStore(state => state.fetchPlaylists);
+  const addSongToPlaylist = usePlaylistStore(state => state.addSongToPlaylist);
+  const addSongsToPlaylist = usePlaylistStore(state => state.addSongsToPlaylist);
+  const songs = useSongsStore(state => state.songs);
+  const fetchSongs = useSongsStore(state => state.fetchSongs);
 
   // State
   const [loading, setLoading] = useState(true);
@@ -459,3 +463,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+export default AddToPlaylistModal;

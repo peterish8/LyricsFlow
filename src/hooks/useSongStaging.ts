@@ -40,7 +40,8 @@ export const useSongStaging = () => {
   const [staging, setStaging] = useState<StagingSong | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const { addSong, fetchSongs } = useSongsStore(); 
+  const addSong = useSongsStore(state => state.addSong);
+  const fetchSongs = useSongsStore(state => state.fetchSongs);
   
   // Cleanup sound
   useEffect(() => {

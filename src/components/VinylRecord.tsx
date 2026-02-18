@@ -15,7 +15,7 @@ interface VinylRecordProps {
   size?: number;
 }
 
-const VinylRecord: React.FC<VinylRecordProps> = memo(({ imageUri, size = 300 }) => {
+export const VinylRecord: React.FC<VinylRecordProps> = memo(({ imageUri, size = 300 }) => {
   // Calculate relative sizes based on the main size
   const labelSize = size * 0.6; // Label is 60% of total diameter (bigger cover art)
   const holeSize = size * 0.03; // Center hole smaller

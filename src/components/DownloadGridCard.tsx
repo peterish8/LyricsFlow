@@ -102,6 +102,7 @@ export const DownloadGridCard = memo(({
                 styles.providerBadge,
                 { backgroundColor: 
                     song.source === 'Saavn' ? '#2ecc71' : // Green
+                    song.source === 'Gaana' ? '#e74c3c' : // Red
                     song.source === 'Wynk' ? '#e74c3c' : // Red
                     song.source === 'NetEase' ? '#e60026' : // NetEase Red
                     '#f39c12' // Orange/Yellow

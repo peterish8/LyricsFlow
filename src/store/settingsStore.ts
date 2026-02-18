@@ -29,7 +29,7 @@ interface SettingsState {
   miniPlayerStyle: 'bar' | 'island'; // New setting
   navBarStyle: 'classic' | 'modern-pill'; // NEW: Navbar style
   autoHideControls: boolean; // Toggle for hiding controls after 3.5s
-  libraryBackgroundMode: 'daily' | 'aurora' | 'current'; // New setting for dynamic background
+  libraryBackgroundMode: 'daily' | 'aurora' | 'current' | 'black' | 'grey'; // New setting for dynamic background
   animateBackground: boolean; // Toggle for background movement
   libraryFocusMode: boolean; // Toggle for "Focus Mode" (Black Background)
   showPerformanceHUD: boolean; // Toggle for FPS counter
@@ -41,6 +41,9 @@ interface SettingsState {
   
   // Persistence
   playlistHistory: Record<string, string>; // playlistId -> lastSongId
+  
+  // Downloads
+  downloadDirectoryUri: string | null;
 
   // Actions
   setTheme: (theme: Theme) => void;
@@ -55,7 +58,7 @@ interface SettingsState {
   setMiniPlayerStyle: (style: 'bar' | 'island') => void; // New action
   setNavBarStyle: (style: 'classic' | 'modern-pill') => void; // NEW: Navbar action
   setAutoHideControls: (enabled: boolean) => void;
-  setLibraryBackgroundMode: (mode: 'daily' | 'aurora' | 'current') => void;
+  setLibraryBackgroundMode: (mode: 'daily' | 'aurora' | 'current' | 'black' | 'grey') => void;
   setAnimateBackground: (enabled: boolean) => void;
   setLibraryFocusMode: (enabled: boolean) => void;
   setShowPerformanceHUD: (enabled: boolean) => void;
@@ -65,6 +68,7 @@ interface SettingsState {
   
   // History Actions
   updatePlaylistHistory: (playlistId: string, songId: string) => void;
+  setDownloadDirectory: (uri: string | null) => void;
 
   resetToDefaults: () => void;
 }
@@ -89,6 +93,7 @@ const DEFAULT_SETTINGS = {
   defaultSort: 'recent' as SortOption,
   showThumbnails: true,
   showPerformanceHUD: false, // Default disabled
+  downloadDirectoryUri: null,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -131,6 +136,8 @@ export const useSettingsStore = create<SettingsState>()(
           }
       })),
       
+      setDownloadDirectory: (downloadDirectoryUri) => set({ downloadDirectoryUri }),
+
       // Reset
       resetToDefaults: () => set(DEFAULT_SETTINGS),
     }),

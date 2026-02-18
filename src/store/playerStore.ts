@@ -93,6 +93,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         // Update UI & Audio immediately with cached data
         // Reset loadedAudioId to null to force MiniPlayer to sync new audio
         set({ currentSongId: songId, currentSong: cachedSong, loadedAudioId: null });
+        
+        // Update history in songsStore (triggers lastPlayed update)
+        useSongsStore.getState().setCurrentSong(cachedSong);
     }
 
     // 2. Background Fetch: Get full lyrics from DB

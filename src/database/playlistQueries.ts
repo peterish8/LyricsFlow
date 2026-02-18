@@ -151,13 +151,24 @@ export const addSongToPlaylist = async (
   playlistId: string,
   songId: string
 ): Promise<void> => {
+  return addSongToPlaylistWithOrder(playlistId, songId, 0);
+};
+
+/**
+ * Add a song to a playlist with a specific sort order
+ */
+export const addSongToPlaylistWithOrder = async (
+  playlistId: string,
+  songId: string,
+  sortOrder: number
+): Promise<void> => {
   return withDbWrite(async (db) => {
     const now = new Date().toISOString();
 
     await db.runAsync(
       `INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, added_at, sort_order)
-       VALUES (?, ?, ?, 0)`,
-      [playlistId, songId, now]
+       VALUES (?, ?, ?, ?)`,
+      [playlistId, songId, now, sortOrder]
     );
 
     // Update playlist modified date
@@ -166,7 +177,7 @@ export const addSongToPlaylist = async (
       [now, playlistId]
     );
 
-    log(`Added song ${songId} to playlist ${playlistId}`);
+    log(`Added song ${songId} to playlist ${playlistId} at order ${sortOrder}`);
   });
 };
 

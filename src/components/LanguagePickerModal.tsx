@@ -1,5 +1,5 @@
 /**
- * Language Preference Modal for Reels
+ * Language Preference Modal for Luvs
  */
 
 import React, { useState } from 'react';
@@ -12,10 +12,10 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useReelsPreferencesStore, ReelsLanguage } from '../store/reelsPreferencesStore';
+import { useLuvsPreferencesStore, LuvLanguage } from '../store/luvsPreferencesStore';
 import { Colors } from '../constants/colors';
 
-const AVAILABLE_LANGUAGES: ReelsLanguage[] = [
+const AVAILABLE_LANGUAGES: LuvLanguage[] = [
   'English',
   'Hindi',
   'Tamil',
@@ -34,10 +34,12 @@ interface LanguagePickerModalProps {
 }
 
 export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({ visible, onClose }) => {
-  const { preferredLanguages, setPreferredLanguages } = useReelsPreferencesStore();
-  const [selectedLanguages, setSelectedLanguages] = useState<ReelsLanguage[]>(preferredLanguages);
+  const { preferredLanguages, setPreferredLanguages } = useLuvsPreferencesStore();
+  const [selectedLanguages, setSelectedLanguages] = useState<LuvLanguage[]>(() => 
+      preferredLanguages.filter(l => l.weight > 0).map(l => l.language)
+  );
 
-  const toggleLanguage = (language: ReelsLanguage) => {
+  const toggleLanguage = (language: LuvLanguage) => {
     if (selectedLanguages.includes(language)) {
       // Prevent deselecting if it's the last language
       if (selectedLanguages.length === 1) return;
@@ -63,8 +65,8 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({ visibl
         <View style={styles.modalContent}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Reels Language Preferences</Text>
-            <Text style={styles.subtitle}>Select languages for your Reels feed</Text>
+            <Text style={styles.title}>Luvs Language Preferences</Text>
+            <Text style={styles.subtitle}>Select languages for your Luvs feed</Text>
           </View>
 
           {/* Language Options */}

@@ -15,10 +15,9 @@ import {
   LayoutAnimation,
   UIManager,
   Keyboard,
-  Animated,
-  FlatList,
+  InteractionManager,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TabScreenProps } from '../types/navigation';
 import { useSongsStore } from '../store/songsStore';
@@ -26,29 +25,33 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useArtHistoryStore } from '../store/artHistoryStore';
 import { useDailyStatsStore } from '../store/dailyStatsStore';
-import { 
-  AuroraHeader, SongCard, CustomMenu, Toast, DownloadQueueModal, ModernDeleteModal 
-} from '../components';
+import { AuroraHeader } from '../components/AuroraHeader';
+import { CustomMenu } from '../components/CustomMenu';
+import { Toast } from '../components/Toast';
+import { DownloadQueueModal } from '../components/DownloadQueueModal';
+import { ModernDeleteModal } from '../components/ModernDeleteModal';
+import { SongListItem } from '../components/SongListItem';
+import { PerformanceHUD } from '../components/PerformanceHUD';
 import { useDownloadQueueStore } from '../store/downloadQueueStore';
+import { RecentlyPlayedGrid } from '../components/RecentlyPlayedGrid';
 import { CoverArtSearchScreen } from './CoverArtSearchScreen';
+import { SongVersionSearchModal } from '../components/SongVersionSearchModal';
 import { Colors } from '../constants/colors';
 import { getGradientColors } from '../constants/gradients';
 import { Song } from '../types/song';
-import { PerformanceHUD } from '../components/PerformanceHUD';
 import * as ImagePicker from 'expo-image-picker';
-import { Swipeable } from 'react-native-gesture-handler';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useLyricsScanQueueStore } from '../store/lyricsScanQueueStore';
-import AnimatedReanimated, { 
-  FadeInLeft, 
+import { FlashList, FlashListRef } from '@shopify/flash-list';
+import Animated, { 
   useSharedValue, 
   useAnimatedScrollHandler, 
   runOnJS,
-  withSpring,
   useAnimatedStyle
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 
-const AnimatedFlatList = AnimatedReanimated.createAnimatedComponent(FlatList);
+
 
 // ============================================
 // ADAPTIVE PERFORMANCE DETECTION
@@ -63,122 +66,10 @@ const IS_HIGH_REFRESH = DEVICE_REFRESH_RATE >= 90;
 
 type Props = TabScreenProps<'Library'>;
 
-const SongListItem = React.memo(({ 
-  song, 
-  onPress, 
-  onLongPress, 
-  scanQueue, 
-  addToScanQueue 
-}: { 
-  song: Song, 
-  onPress: (song: Song) => void, 
-  onLongPress: (song: Song) => void,
-  scanQueue: any[],
-  addToScanQueue: (song: Song) => void
-}) => {
-    const scanJob = scanQueue.find(j => j.songId === song.id);
-    const isScanning = scanJob?.status === 'scanning' || scanJob?.status === 'pending';
-    const isCompleted = scanJob?.status === 'completed';
-    const scale = useSharedValue(1);
 
-    const handlePressIn = () => {
-        scale.value = withSpring(0.96, { damping: 20, stiffness: 150 });
-    };
-
-    const handlePressOut = () => {
-        scale.value = withSpring(1, { damping: 20, stiffness: 150 });
-    };
-
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }]
-    }));
-
-    const renderRightActions = (_progress: any, dragX: any) => {
-        const swipeScale = dragX.interpolate({
-            inputRange: [-60, 0],
-            outputRange: [1, 0],
-            extrapolate: 'clamp',
-        });
-        
-        return (
-            <Pressable 
-                style={[styles.swipeAction]} 
-                onPress={() => addToScanQueue(song)}
-            >
-                <Animated.View style={[
-                    StyleSheet.absoluteFill, 
-                    { 
-                        transform: [{ scale: swipeScale }],
-                        borderRadius: 12, 
-                        overflow: 'hidden',
-                        backgroundColor: '#222'
-                    }
-                ]}>
-                    <LinearGradient
-                      colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.02)']}
-                      style={StyleSheet.absoluteFill}
-                    />
-                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                        <Ionicons name="sparkles" size={26} color={Colors.primary} />
-                    </View>
-                </Animated.View>
-            </Pressable>
-        );
-    };
-
-    return (
-        <Swipeable 
-            renderRightActions={renderRightActions}
-            containerStyle={{ marginBottom: 8 }}
-            overshootRight={false}
-            friction={2}
-            rightThreshold={40}
-        >
-            <Pressable
-              onPress={() => onPress(song)}
-              onLongPress={() => onLongPress(song)}
-              onPressIn={handlePressIn}
-              onPressOut={handlePressOut}
-            >
-                <AnimatedReanimated.View style={[styles.listItem, animatedStyle]}>
-                  <View style={styles.listItemThumbnail}>
-                    {song.coverImageUri ? (
-                      <Image source={{ uri: song.coverImageUri }} style={styles.listItemImage} />
-                    ) : (
-                      <View style={styles.defaultListThumbnail}>
-                        <Ionicons name="disc" size={24} color="rgba(255,255,255,0.3)" />
-                      </View>
-                    )}
-                    {isScanning && (
-                        <View style={styles.scanningOverlay}>
-                            <Ionicons name="sync" size={16} color="#FFF" />
-                        </View>
-                    )}
-                  </View>
-                  <View style={styles.listItemContent}>
-                    <Text style={styles.listItemTitle} numberOfLines={1}>{song.title}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={styles.listItemArtist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
-                        {(song.lyrics && song.lyrics.length > 0) || isCompleted ? (
-                            <Ionicons name="checkmark-circle" size={12} color={Colors.primary} style={{ marginLeft: 4 }} />
-                        ) : scanJob?.status === 'failed' ? (
-                            <Ionicons name="alert-circle" size={12} color={Colors.error} style={{ marginLeft: 4 }} />
-                        ) : null}
-                    </View>
-                  </View>
-                  <View style={{ alignItems: 'flex-end', marginRight: 8 }}>
-                      <Text style={styles.listItemDuration}>
-                        {Math.floor(song.duration / 60)}:{String(Math.floor(song.duration % 60)).padStart(2, '0')}
-                      </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-                </AnimatedReanimated.View>
-            </Pressable>
-        </Swipeable>
-    );
-});
 
 const LibraryScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const songs = useSongsStore(state => state.songs);
   const fetchSongs = useSongsStore(state => state.fetchSongs);
   const setCurrentSong = useSongsStore(state => state.setCurrentSong);
@@ -188,7 +79,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const toggleLike = useSongsStore(state => state.toggleLike);
   const hideSong = useSongsStore(state => state.hideSong);
   
-  const playerCurrentSong = usePlayerStore(state => state.currentSong);
+  // Sliced selectors — only re-render when specific fields change, not on every position tick
+  const playerCurrentSongId = usePlayerStore(state => state.currentSong?.id);
+  const playerCurrentCover = usePlayerStore(state => state.currentSong?.coverImageUri);
+  const playerCurrentGradient = usePlayerStore(state => state.currentSong?.gradientId);
   const { recentArts, addRecentArt } = useArtHistoryStore();
   const libraryBackgroundMode = useSettingsStore(state => state.libraryBackgroundMode);
   const playInMiniPlayerOnly = useSettingsStore(state => state.playInMiniPlayerOnly);
@@ -208,6 +102,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedSongForArt, setSelectedSongForArt] = useState<Song | null>(null);
   const [recentArtVisible, setRecentArtVisible] = useState(false);
   const [showCoverSearch, setShowCoverSearch] = useState(false);
+  const [showVersionSearchModal, setShowVersionSearchModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [showQueueModal, setShowQueueModal] = useState(false);
@@ -219,14 +114,27 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   
   const scrollY = useSharedValue(0);
   const lastSentFocusMode = useSharedValue(false);
-  const headerAnimatedStyle = useAnimatedStyle(() => ({ opacity: scrollY.value < 50 ? 1 : 0 }));
+  const flatListRef = React.useRef<FlashListRef<Song>>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+     if (libraryBackgroundMode === 'black' || libraryBackgroundMode === 'grey') return { transform: [{ translateY: 0 }] };
+     // Move the header up as we scroll down
+     return { 
+        transform: [{ translateY: -scrollY.value }] 
+     };
+  });
 
   const updateFocusMode = useCallback((shouldFocus: boolean) => {
+    // Disable focus mode behavior (hiding header) for solid backgrounds
+    if (libraryBackgroundMode === 'black' || libraryBackgroundMode === 'grey') {
+        shouldFocus = false;
+    }
+    
     if (shouldFocus !== libraryFocusMode) {
       setLibraryFocusMode(shouldFocus);
       setLibraryFocusModeStore(shouldFocus);
     }
-  }, [libraryFocusMode, setLibraryFocusModeStore]);
+  }, [libraryFocusMode, setLibraryFocusModeStore, libraryBackgroundMode]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -246,18 +154,15 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     updateFocusMode(y > 150);
   }, [updateFocusMode]);
 
-  const getItemLayout = useCallback((_: any, index: number) => ({ length: 74, offset: 74 * index, index }), []);
 
-  const recentlyPlayed = useMemo(() => {
-    return songs
-      .filter(song => song.lastPlayed)
-      .sort((a, b) => (new Date(b.lastPlayed || 0).getTime() - new Date(a.lastPlayed || 0).getTime()))
-      .slice(0, 16);
-  }, [songs]);
+
+  // recentlyPlayed logic moved to RecentlyPlayedGrid.tsx for performance optimization
   
   const activeDownloadsCount = useDownloadQueueStore(state => state.queue.filter(i => i.status === 'downloading' || i.status === 'pending' || i.status === 'staging').length);
   const scanQueue = useLyricsScanQueueStore(state => state.queue);
   const addToScanQueue = useLyricsScanQueueStore(state => state.addToQueue);
+
+  // getScanStatus callback removed - SongListItem subscribes internally
 
   const filteredSongs = useMemo(() => {
      if (!searchQuery.trim()) return songs;
@@ -270,7 +175,7 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   }, [songs, searchQuery]);
 
   const handleAddToQueue = useCallback((song: Song) => {
-      const existing = scanQueue.find(j => j.songId === song.id);
+      const existing = scanQueue[song.id];
       const isPlainResult = existing?.status === 'completed' && existing?.resultType === 'plain';
       if (existing) {
          if (existing.status === 'failed' || isPlainResult) {
@@ -290,6 +195,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   const handleSearchFocus = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setIsSearchFocused(true);
+    // Scroll to hide the top part
+    if (headerHeight > 0) {
+        flatListRef.current?.scrollToOffset({ offset: headerHeight, animated: true });
+    }
   };
 
   const handleSearchCancel = () => {
@@ -297,33 +206,57 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     setIsSearchFocused(false);
     setSearchQuery('');
     Keyboard.dismiss();
+    // Scroll back to top
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   };
 
   const handleSongPress = useCallback((song: Song) => {
-    const currentId = usePlayerStore.getState().currentSongId;
-    const isCurrentlyPlaying = currentId === song.id;
-    setTimeout(() => {
+    const playerState = usePlayerStore.getState();
+    const currentId = playerState.currentSongId;
+    const loadedId = playerState.loadedAudioId;
+    
+    // Check if same song (ID match) OR if the audio engine has it loaded
+    const isCurrentlyPlaying = currentId === song.id || loadedId === song.id;
+    
+    // Use InteractionManager instead of setTimeout(75) for zero artificial delay
+    InteractionManager.runAfterInteractions(() => {
+        // Find index in current filtered list
+        const index = filteredSongs.findIndex(s => s.id === song.id);
+        
         if (playInMiniPlayerOnly) {
           if (isCurrentlyPlaying) {
               setMiniPlayerHidden(true);
               navigation.navigate('NowPlaying', { songId: song.id });
           } else {
-              setCurrentSong(song);
-              usePlayerStore.getState().setInitialSong(song);
-              usePlayerStore.getState().loadSong(song.id);
+              if (index !== -1) {
+                  // Set queue and play
+                  usePlayerStore.getState().setPlaylistQueue('library', filteredSongs, index);
+                  setCurrentSong(song); 
+              } else {
+                  // Fallback: Just play this song (e.g. from Recently Played but not in current filter)
+                  setCurrentSong(song);
+                  usePlayerStore.getState().setInitialSong(song);
+                  usePlayerStore.getState().loadSong(song.id);
+              }
           }
         } else {
           setMiniPlayerHidden(true);
           if (isCurrentlyPlaying) {
                navigation.navigate('NowPlaying', { songId: song.id });
           } else {
-               usePlayerStore.getState().setInitialSong(song);
-               usePlayerStore.getState().loadSong(song.id);
+               if (index !== -1) {
+                   // Set queue and play
+                   usePlayerStore.getState().setPlaylistQueue('library', filteredSongs, index);
+               } else {
+                   // Fallback
+                   usePlayerStore.getState().setInitialSong(song);
+                   usePlayerStore.getState().loadSong(song.id);
+               }
                navigation.navigate('NowPlaying', { songId: song.id });
           }
         }
-    }, 75);
-  }, [navigation, setCurrentSong, playInMiniPlayerOnly, setMiniPlayerHidden]);
+    });
+  }, [navigation, setCurrentSong, playInMiniPlayerOnly, setMiniPlayerHidden, filteredSongs]);
 
   const handleSongLongPress = useCallback((song: Song) => {
     setSelectedSongForArt(song);
@@ -332,24 +265,19 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleAddPress = () => navigation.navigate('AddEditLyrics', {});
 
-  const renderHeader = () => (
+  // Memoized header — prevents recreation on every parent render
+  const memoizedHeader = useMemo(() => (
     <View>
       {filteredSongs.length > 0 ? (
         <>
-          {!isSearchFocused && (
-            <>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll} decelerationRate="fast" snapToInterval={172}>
-                {recentlyPlayed.map((song) => (
-                  <AnimatedReanimated.View key={song.id} style={styles.horizontalCard} entering={FadeInLeft.duration(300)}>
-                    <SongCard
-                      id={song.id} title={song.title} artist={song.artist} album={song.album} gradientId={song.gradientId}
-                      coverImageUri={song.coverImageUri} duration={song.duration} isLiked={song.isLiked}
-                      onPress={() => handleSongPress(song)} onLongPress={() => handleSongLongPress(song)}
-                      onLikePress={() => toggleLike(song.id)} onMagicPress={() => handleAddToQueue(song)}
-                    />
-                  </AnimatedReanimated.View>
-                ))}
-              </ScrollView>
+          <View onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
+            <RecentlyPlayedGrid 
+              onSongPress={handleSongPress}
+              onSongLongPress={handleSongLongPress}
+              onLikePress={toggleLike}
+              onMagicPress={handleAddToQueue}
+              style={styles.recentlyPlayedGrid}
+            />
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>All Songs</Text>
                 <View style={styles.headerActions}>
@@ -365,11 +293,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                   </Pressable>
                 </View>
               </View>
-            </>
-          )}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 20 }}>
-              <View style={[styles.searchBarContainer, { flex: 1, marginHorizontal: 0, marginBottom: 0, backgroundColor: isSearchFocused ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.1)' }]}>
-                 <Ionicons name="search" size={20} color="#FFF" style={{marginLeft: 12}} />
+            </View>
+          <View style={styles.searchRow}>
+              <View style={[styles.searchBarContainer, styles.searchBarFlex, isSearchFocused ? styles.searchBarFocused : styles.searchBarDefault]}>
+                 <Ionicons name="search" size={20} color="#FFF" style={styles.searchIcon} />
                  <TextInput
                     style={styles.searchInput} placeholder="Filter local library..." placeholderTextColor="#FFF"
                     value={searchQuery} onFocus={handleSearchFocus} returnKeyType="search"
@@ -381,19 +308,18 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                         }
                     }}
                  />
-                 {searchQuery ? (<Pressable onPress={() => setSearchQuery('')} style={{padding: 8}}><Ionicons name="close-circle" size={18} color="#666" /></Pressable>) : null}
+                 {searchQuery ? (<Pressable onPress={() => setSearchQuery('')} style={styles.clearButton}><Ionicons name="close-circle" size={18} color="#666" /></Pressable>) : null}
               </View>
-              {isSearchFocused && (<Pressable onPress={handleSearchCancel} style={{marginLeft: 12}}><Text style={{color: Colors.primary, fontSize: 16, fontWeight: '600'}}>Cancel</Text></Pressable>)}
+              {isSearchFocused && (<Pressable onPress={handleSearchCancel} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>)}
           </View>
         </>
       ) : null}
     </View>
-  );
+  ), [filteredSongs.length, handleSongPress, handleSongLongPress, toggleLike, handleAddToQueue, activeDownloadsCount, navigation, handleAddPress, isSearchFocused, searchQuery, handleSearchFocus, handleSearchCancel]);
 
   useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
+    // LayoutAnimation setup removed to avoid 'no-op' warning in New Architecture.
+    // LayoutAnimation.configureNext still works within specific handlers.
   }, []);
 
   useEffect(() => {
@@ -401,10 +327,10 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
       let colors: string[] | undefined;
       let image: string | null = null;
       if (libraryBackgroundMode === 'current') {
-         if (playerCurrentSong) {
-             image = playerCurrentSong.coverImageUri || null;
-             if (!image && playerCurrentSong.gradientId) {
-                colors = playerCurrentSong.gradientId === 'dynamic' ? ['#f7971e', '#ffd200', '#ff6b35'] : getGradientColors(playerCurrentSong.gradientId);
+         if (playerCurrentSongId) {
+             image = playerCurrentCover || null;
+             if (!image && playerCurrentGradient) {
+                colors = playerCurrentGradient === 'dynamic' ? ['#f7971e', '#ffd200', '#ff6b35'] : getGradientColors(playerCurrentGradient);
              }
          }
       } else if (libraryBackgroundMode === 'daily') {
@@ -418,11 +344,19 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                  }
             }
          }
+      } else if (libraryBackgroundMode === 'black') {
+          // Pure Black: Use black colors which AuroraHeader will render on black bg
+          colors = ['#000000', '#000000', '#000000'];
+          image = null;
+      } else if (libraryBackgroundMode === 'grey') {
+          // Spotify-ish Grey: Subtle dark grey gradient
+          colors = ['#121212', '#282828', '#121212'];
+          image = null;
       }
       setActiveThemeColors(colors); setActiveImageUri(image);
     };
     updateTheme();
-  }, [libraryBackgroundMode, playerCurrentSong?.id, playerCurrentSong?.coverImageUri, songs.length, getSong]);
+  }, [libraryBackgroundMode, playerCurrentSongId, playerCurrentCover, playerCurrentGradient, songs.length, getSong]);
   
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', fetchSongs);
@@ -479,9 +413,57 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
       }
   };
 
+  const handleShareSong = async () => {
+    if (!selectedSongForArt) return;
+    
+    // Check if audio file exists
+    if (!selectedSongForArt.audioUri) {
+        setToast({ visible: true, message: 'No audio file found to share', type: 'error' });
+        return;
+    }
+
+    try {
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (!isAvailable) {
+            setToast({ visible: true, message: 'Sharing is not available on this device', type: 'error' });
+            return;
+        }
+
+        setShowBottomSheet(false);
+
+        let uriToShare = selectedSongForArt.audioUri;
+
+        // Fix for SAF content:// URIs (Android)
+        if (uriToShare.startsWith('content://')) {
+            const extension = uriToShare.includes('m4a') ? 'm4a' : 'mp3';
+            const tempFile = `${FileSystem.cacheDirectory}share_temp_${Date.now()}.${extension}`;
+            try {
+                await FileSystem.copyAsync({
+                    from: uriToShare,
+                    to: tempFile
+                });
+                uriToShare = tempFile;
+            } catch (copyError) {
+                console.error('Failed to copy content URI for sharing:', copyError);
+                // Continue with original URI as fallback
+            }
+        }
+
+        await Sharing.shareAsync(uriToShare, {
+            dialogTitle: `Share "${selectedSongForArt.title}"`,
+            mimeType: 'audio/mpeg', // Best guess for MP3/M4A compatibility
+            UTI: 'public.audio' // iOS compatibility
+        });
+    } catch (error) {
+        console.error('Share error:', error);
+        setToast({ visible: true, message: 'Failed to share song', type: 'error' });
+    }
+  };
+
   const artOptions = [
     { label: 'Choose from Gallery', icon: 'image-outline' as const, onPress: pickImage },
-    { label: 'Search Web', icon: 'globe-outline' as const, onPress: () => { setArtMenuVisible(false); setShowCoverSearch(true); } },
+    { label: 'Search Web (Cover)', icon: 'globe-outline' as const, onPress: () => { setArtMenuVisible(false); setShowCoverSearch(true); } },
+    { label: 'Change Language / Version', icon: 'language-outline' as const, onPress: () => { setArtMenuVisible(false); setShowVersionSearchModal(true); } },
     ...(recentArts.length > 0 ? [{ label: 'Recent Art', icon: 'time-outline' as const, onPress: () => { setArtMenuVisible(false); setTimeout(() => setRecentArtVisible(true), 100); } }] : []),
     { label: 'Delete Song', icon: 'trash-outline' as const, onPress: () => { setArtMenuVisible(false); if (selectedSongForArt) setShowDeleteConfirm(true); } },
   ];
@@ -497,39 +479,72 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     </View>
   );
 
-  const renderItem = useCallback(({ item }: any) => (
-    <SongListItem song={item} onPress={handleSongPress} onLongPress={handleSongLongPress} scanQueue={scanQueue} addToScanQueue={handleAddToQueue} />
-  ), [handleSongPress, handleSongLongPress, scanQueue, handleAddToQueue]);
+  const renderItem = useCallback(({ item }: { item: Song }) => {
+    return (
+      <SongListItem 
+        song={item} 
+        onPress={handleSongPress} 
+        onLongPress={handleSongLongPress} 
+        addToScanQueue={handleAddToQueue} 
+      />
+    );
+  }, [handleSongPress, handleSongLongPress, handleAddToQueue]);
 
   return (
     <View style={styles.container}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-      <View style={[StyleSheet.absoluteFill, IS_HIGH_REFRESH ? headerAnimatedStyle : { opacity: libraryFocusMode ? 0 : 1 }]}>
+      <View style={[StyleSheet.absoluteFill, IS_HIGH_REFRESH ? headerAnimatedStyle : (libraryFocusMode ? styles.hidden : styles.visible)]}>
         <AuroraHeader palette="library" colors={activeThemeColors} imageUri={activeImageUri} />
       </View>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {!isSearchFocused && (<View style={styles.brandHeader}><Text style={styles.brandName}>LuvLyrics</Text></View>)}
         {IS_HIGH_REFRESH ? (
-          <AnimatedFlatList
-            key="library-list-120" data={filteredSongs} keyExtractor={(item: any) => item.id}
-            renderItem={renderItem} ListHeaderComponent={renderHeader}
-            contentContainerStyle={[styles.listContent, { paddingTop: isIsland ? 20 : 25 }]}
-            ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
-            ListFooterComponent={<View style={{ height: 100 }} />}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.textSecondary} progressViewOffset={isIsland ? 160 : 0} />}
-            onScroll={scrollHandler} scrollEventThrottle={1} getItemLayout={getItemLayout}
-            initialNumToRender={10} maxToRenderPerBatch={5} windowSize={5} removeClippedSubviews={Platform.OS === 'android'} updateCellsBatchingPeriod={30}
+          <FlashList
+            ref={flatListRef}
+            data={filteredSongs}
+            renderItem={renderItem}
+            // @ts-ignore
+            estimatedItemSize={80}  
+            drawDistance={2400}     // 3-4 screens buffer for faster scroll
+            overrideItemLayout={(layout, item, index, maxColumns, extraData) => {
+              // @ts-ignore
+              layout.size = 80;     // 72px item + 8px margin
+              layout.span = 1;      // Full width
+            }}
+            getItemType={(item) => 'song'} // Force efficient recycling key
+            contentContainerStyle={{ 
+                paddingBottom: 150 + insets.bottom,
+                paddingTop: 180 + insets.top, // Consistent spacing
+            }}
+            extraData={[isSearchFocused]}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+            }
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
+            ListEmptyComponent={renderEmpty}
+            keyboardShouldPersistTaps="handled" 
+            keyboardDismissMode="on-drag"
           />
         ) : (
-          <FlatList
-            key="library-list-60" data={filteredSongs} keyExtractor={(item: any) => item.id}
-            renderItem={renderItem} ListHeaderComponent={renderHeader}
-            contentContainerStyle={[styles.listContent, { paddingTop: isIsland ? 20 : 25 }]}
+          <FlashList
+             ref={flatListRef}
+            key="library-list-60" data={filteredSongs} keyExtractor={(item: Song) => item.id}
+            renderItem={renderItem} ListHeaderComponent={memoizedHeader}
+            contentContainerStyle={isIsland ? styles.listPaddingIsland : styles.listPaddingDefault}
             ListEmptyComponent={songs.length === 0 ? renderEmpty : null}
-            ListFooterComponent={<View style={{ height: 100 }} />}
+            ListFooterComponent={<View style={isSearchFocused ? styles.footerSearching : styles.footerDefault} />}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.textSecondary} progressViewOffset={isIsland ? 160 : 0} />}
-            onScroll={handleSimpleScroll} scrollEventThrottle={16} getItemLayout={getItemLayout}
-            initialNumToRender={15} maxToRenderPerBatch={10} windowSize={7} removeClippedSubviews={true}
+            onScroll={handleSimpleScroll} scrollEventThrottle={16}
+            drawDistance={2400}     // 3-4 screens buffer
+            // @ts-ignore
+            estimatedItemSize={80} // Exact height (72px + 8px margin)
+            overrideItemLayout={(layout, item, index, maxColumns, extraData) => {
+              // @ts-ignore
+              layout.size = 80;
+              layout.span = 1;
+            }}
+            getItemType={(item) => 'song'}
           />
         )}
       </SafeAreaView>
@@ -555,6 +570,14 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         <Pressable style={styles.bottomSheetOverlay} onPress={() => setShowBottomSheet(false)}>
           <Pressable style={styles.bottomSheetContainer} onPress={(e) => e.stopPropagation()}>
             <View style={styles.bottomSheetHandle} /><Text style={styles.bottomSheetTitle}>{selectedSongForArt?.title}</Text><Text style={styles.bottomSheetSubtitle}>{selectedSongForArt?.artist}</Text>
+            <Pressable style={styles.bottomSheetOption} onPress={handleShareSong}>
+              <Ionicons name="share-social-outline" size={24} color={Colors.primary} />
+              <Text style={styles.bottomSheetOptionText}>Share Audio</Text>
+            </Pressable>
+            <Pressable style={styles.bottomSheetOption} onPress={() => { setShowBottomSheet(false); setTimeout(() => setShowVersionSearchModal(true), 300); }}>
+              <Ionicons name="language-outline" size={24} color={Colors.primary} />
+              <Text style={styles.bottomSheetOptionText}>Change Language / Version</Text>
+            </Pressable>
             <Pressable style={styles.bottomSheetOption} onPress={pickImage}><Ionicons name="image-outline" size={24} color={Colors.primary} /><Text style={styles.bottomSheetOptionText}>Choose from Gallery</Text></Pressable>
             <Pressable style={styles.bottomSheetOption} onPress={() => { setShowBottomSheet(false); setShowCoverSearch(true); }}><Ionicons name="globe-outline" size={24} color={Colors.primary} /><Text style={styles.bottomSheetOptionText}>Search Web</Text></Pressable>
             {recentArts.length > 0 && (
@@ -582,6 +605,15 @@ const LibraryScreen: React.FC<Props> = ({ navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
+      <SongVersionSearchModal 
+        visible={showVersionSearchModal} 
+        targetSong={selectedSongForArt} 
+        onClose={() => setShowVersionSearchModal(false)}
+        onSuccess={() => {
+            fetchSongs();
+            setToast({ visible: true, message: 'Song updated successfully!', type: 'success' });
+        }}
+      />
       <CoverArtSearchScreen visible={showCoverSearch} initialQuery={selectedSongForArt ? `${selectedSongForArt.title} ${selectedSongForArt.artist}` : ''} onClose={() => setShowCoverSearch(false)} onSelect={async (uri) => { setShowCoverSearch(false); if (selectedSongForArt) { try { await updateSong({ ...selectedSongForArt, coverImageUri: uri, dateModified: new Date().toISOString() }); await fetchSongs(); setToast({ visible: true, message: 'Cover art updated!', type: 'success' }); setSelectedSongForArt(null); } catch { setToast({ visible: true, message: 'Failed to save cover', type: 'error' }); } } }} />
       {toast && (<Toast visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />)}
       <DownloadQueueModal visible={showQueueModal} onClose={() => setShowQueueModal(false)} />
@@ -619,7 +651,22 @@ const styles = StyleSheet.create({
   row: { gap: 16, marginBottom: 24 },
   cardWrapper: { flex: 1 },
   cardLeft: { marginRight: 0 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 8 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, marginTop: 8, paddingHorizontal: 20 },
+  recentlyPlayedGrid: { marginBottom: 8 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 20 },
+  searchBarFlex: { flex: 1, marginHorizontal: 0, marginBottom: 0 },
+  searchBarFocused: { backgroundColor: 'rgba(255,255,255,0.15)' },
+  searchBarDefault: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  searchIcon: { marginLeft: 12 },
+  clearButton: { padding: 8 },
+  cancelButton: { marginLeft: 12 },
+  cancelText: { color: Colors.primary, fontSize: 16, fontWeight: '600' },
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 },
+  listPaddingIsland: { paddingTop: 20, paddingHorizontal: 16 },
+  listPaddingDefault: { paddingTop: 25, paddingHorizontal: 16 },
+  footerSearching: { height: 500 },
+  footerDefault: { height: 100 },
   searchBarContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, height: 48, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   searchInput: { flex: 1, color: '#fff', fontSize: 16, height: '100%', paddingHorizontal: 12 },
   sectionTitle: { fontSize: 24, fontWeight: '700', color: Colors.textPrimary, letterSpacing: -0.5 },

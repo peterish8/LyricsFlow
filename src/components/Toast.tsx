@@ -20,7 +20,7 @@ export const Toast: React.FC<ToastProps> = ({
   duration = 3000 
 }) => {
   const insets = useSafeAreaInsets();
-  const { miniPlayerStyle } = useSettingsStore();
+  const miniPlayerStyle = useSettingsStore(state => state.miniPlayerStyle);
   const isIsland = miniPlayerStyle === 'island';
 
   // Animation Values

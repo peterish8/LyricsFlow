@@ -10,9 +10,10 @@ import {
   withDbSafe,
   esc
 } from './db';
+import * as SQLite from 'expo-sqlite';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Song, LyricLine } from '../types/song';
 import { normalizeLyrics } from '../utils/timestampParser';
-import * as FileSystem from 'expo-file-system/legacy';
 
 const LOG_PREFIX = '[QUERIES]';
 
